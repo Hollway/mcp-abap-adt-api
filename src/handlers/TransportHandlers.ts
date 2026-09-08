@@ -160,6 +160,32 @@ export class TransportHandlers extends BaseHandler {
                 }
             },
             {
+                name: 'transportDetails',
+                description: 'What is inside one transport request: its own header (owner, description, status), its tasks and the objects recorded in it. This is the answer to "what does this request change" - the alternative was a SELECT on E071 through runQuery. Objects are returned as a flat list; pass raw=true for the ADT structure.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        transportNumber: {
+                            type: 'string',
+                            description: 'Request number, e.g. EUDK9A3OK4. The request itself, not a developer task - a task number answers with its own single entry.'
+                        },
+                        includeObjects: {
+                            type: 'boolean',
+                            description: 'List the objects of the request and of its tasks (default true).'
+                        },
+                        includeTasks: {
+                            type: 'boolean',
+                            description: 'List the tasks of the request (default true).'
+                        },
+                        raw: {
+                            type: 'boolean',
+                            description: 'Return the unfiltered ADT structure instead of the flat summary.'
+                        }
+                    },
+                    required: ['transportNumber']
+                }
+            },
+            {
                 name: 'transportsByConfig',
                 description: 'Retrieves transports by configuration.',
                 inputSchema: {
@@ -304,6 +330,8 @@ export class TransportHandlers extends BaseHandler {
                 return this.handleCreateTransportsConfig(args);
             case 'userTransports':
                 return this.handleUserTransports(args);
+            case 'transportDetails':
+                return this.handleTransportDetails(args);
             case 'transportsByConfig':
                 return this.handleTransportsByConfig(args);
             case 'transportDelete':
@@ -346,6 +374,76 @@ export class TransportHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get transport info');
+        }
+    }
+
+    /**
+     * The contents of one request.
+     *
+     * ADT nests the objects under the request and under each of its tasks, and
+     * the field names carry their XML prefixes ("tm:name"), which makes the
+     * raw answer awkward to read and easy to mistake for empty. Flattened
+     * here: one list of objects, each saying which task recorded it.
+     */
+    async handleTransportDetails(args: any): Promise<any> {
+        const startTime = performance.now();
+        try {
+            const details: any = await this.readClient.transportDetails(args.transportNumber);
+            this.trackRequest(startTime, true);
+
+            if (args?.raw === true) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ status: 'success', details }) }]
+                };
+            }
+
+            const tasks = (details?.tasks || []).map((t: any) => ({
+                number: t?.['tm:number'],
+                owner: t?.['tm:owner'],
+                description: t?.['tm:desc'],
+                status: t?.['tm:status'],
+                objects: (t?.objects || []).length
+            }));
+
+            const objectsOf = (holder: any, task?: string) =>
+                (holder?.objects || []).map((o: any) => ({
+                    pgmid: o?.['tm:pgmid'],
+                    type: o?.['tm:type'],
+                    name: o?.['tm:name'],
+                    description: o?.['tm:obj_info'],
+                    ...(task ? { task } : {})
+                }));
+
+            const objects = [
+                ...objectsOf(details),
+                ...(details?.tasks || []).reduce(
+                    (acc: any[], t: any) => acc.concat(objectsOf(t, t?.['tm:number'])),
+                    []
+                )
+            ];
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        number: details?.['tm:number'] || args.transportNumber,
+                        owner: details?.['tm:owner'],
+                        description: details?.['tm:desc'],
+                        transportStatus: details?.['tm:status'],
+                        statusMeaning: details?.['tm:status'] === 'R' ? 'released'
+                            : details?.['tm:status'] === 'D' ? 'modifiable'
+                            : undefined,
+                        taskCount: tasks.length,
+                        objectCount: objects.length,
+                        ...(args?.includeTasks === false ? {} : { tasks }),
+                        ...(args?.includeObjects === false ? {} : { objects })
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            throw wrapAdtError(error, `Failed to read transport ${args?.transportNumber}`);
         }
     }
 
