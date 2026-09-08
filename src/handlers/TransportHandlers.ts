@@ -3,6 +3,7 @@ import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
+import type { TransportsOfUser, TransportTarget, TransportRequest } from "abap-adt-api";
 
 export class TransportHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -117,7 +118,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'userTransports',
-                description: 'Retrieves transports for a user.',
+                description: 'List a user\'s transport requests. Returns a flat, filterable list of requests (number, description, owner, status D=modifiable/R=released, target); pass raw=true for the full ADT payload, which with targets=true can exceed 400k characters. Note that targets=false makes the backend answer with empty lists on some systems, so leave it on unless you know otherwise.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -127,7 +128,32 @@ export class TransportHandlers extends BaseHandler {
                         },
                         targets: {
                             type: 'boolean',
-                            description: 'Whether to include target systems.'
+                            description: 'Whether to include target systems. Defaults to true, because false has been seen to return empty lists for users whose requests demonstrably exist.'
+                        },
+                        status: {
+                            type: 'string',
+                            description: 'Keep only requests with this status: "D" (modifiable), "R" (released) or "all" (default).',
+                            enum: ['D', 'R', 'all']
+                        },
+                        owner: {
+                            type: 'string',
+                            description: 'Keep only requests owned by this user (case-insensitive).'
+                        },
+                        numberLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose number contains this text, e.g. "EUDK9A3".'
+                        },
+                        descriptionLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose description contains this text (case-insensitive).'
+                        },
+                        includeTasks: {
+                            type: 'boolean',
+                            description: 'Include the tasks inside each request (Development/Correction entries). Off by default - they triple the output and are rarely what you are looking for.'
+                        },
+                        raw: {
+                            type: 'boolean',
+                            description: 'Return the unfiltered ADT structure instead of the flat list.'
                         }
                     },
                     required: ['user']
@@ -461,18 +487,96 @@ export class TransportHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Flatten the nested target/modifiable/released structure into one list of
+     * requests, applying the filters.
+     *
+     * The raw answer is unusable in a conversation: with targets=true it has
+     * run past 400k characters, most of it task entries nobody asked for.
+     */
+    private flattenTransports(transports: TransportsOfUser, args: any) {
+        const status = (args?.status || 'all').toUpperCase();
+        const owner = args?.owner ? String(args.owner).toUpperCase() : undefined;
+        const numberLike = args?.numberLike ? String(args.numberLike).toUpperCase() : undefined;
+        const descLike = args?.descriptionLike ? String(args.descriptionLike).toLowerCase() : undefined;
+        const includeTasks = args?.includeTasks === true;
+
+        const rows: Record<string, unknown>[] = [];
+        const categories: [string, TransportTarget[]][] = [
+            ['workbench', transports?.workbench || []],
+            ['customizing', transports?.customizing || []]
+        ];
+
+        for (const [category, targets] of categories) {
+            for (const target of targets) {
+                const buckets: [string, TransportRequest[]][] = [
+                    ['modifiable', target.modifiable || []],
+                    ['released', target.released || []]
+                ];
+                for (const [bucket, requests] of buckets) {
+                    for (const request of requests) {
+                        const number = request['tm:number'] || '';
+                        const requestOwner = (request['tm:owner'] || '').toUpperCase();
+                        const desc = request['tm:desc'] || '';
+                        const requestStatus = (request['tm:status'] || '').toUpperCase();
+
+                        if (status !== 'ALL' && requestStatus !== status) continue;
+                        if (owner && requestOwner !== owner) continue;
+                        if (numberLike && !number.toUpperCase().includes(numberLike)) continue;
+                        if (descLike && !desc.toLowerCase().includes(descLike)) continue;
+
+                        rows.push({
+                            number,
+                            description: desc,
+                            owner: request['tm:owner'],
+                            status: requestStatus,
+                            state: bucket,
+                            category,
+                            target: target['tm:name'],
+                            ...(includeTasks
+                                ? {
+                                    tasks: (request.tasks || []).map(t => ({
+                                        number: t['tm:number'],
+                                        owner: t['tm:owner'],
+                                        description: t['tm:desc'],
+                                        status: (t['tm:status'] || '').toUpperCase()
+                                    }))
+                                }
+                                : {})
+                        });
+                    }
+                }
+            }
+        }
+        return rows;
+    }
+
     async handleUserTransports(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const transports = await this.adtclient.userTransports(args.user, args.targets);
+            // targets defaults to true: with false, some systems answer with
+            // empty workbench/customizing lists even for users whose requests
+            // demonstrably exist, which reads as "no transports".
+            const targets = args?.targets === undefined ? true : args.targets;
+            const transports = await this.adtclient.userTransports(args.user, targets);
             this.trackRequest(startTime, true);
+
+            if (args?.raw === true) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ status: 'success', transports }) }]
+                };
+            }
+
+            const requests = this.flattenTransports(transports, args);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            transports
+                            user: args.user,
+                            count: requests.length,
+                            requests
                         })
                     }
                 ]

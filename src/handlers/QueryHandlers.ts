@@ -24,6 +24,10 @@ export class QueryHandlers extends BaseHandler {
                             type: 'boolean',
                             description: 'Whether to decode the data.'
                         },
+                        offset: {
+                            type: 'number',
+                            description: 'Skip this many leading rows. ADT has no offset, so the server fetches offset+rowNumber rows and returns the tail - add an ORDER BY to make the window stable.'
+                        },
                         sqlQuery: {
                             type: 'string',
                             description: 'An optional SQL query to filter the data.'
@@ -49,6 +53,10 @@ export class QueryHandlers extends BaseHandler {
                         decode: {
                             type: 'boolean',
                             description: 'Whether to decode the data.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Skip this many leading rows. ADT has no offset, so the server fetches offset+rowNumber rows and returns the tail - add an ORDER BY to make the window stable.'
                         }
                     },
                     required: ['sqlQuery']
@@ -68,15 +76,42 @@ export class QueryHandlers extends BaseHandler {
         }
     }
 
+
+    /**
+     * ADT exposes no offset, only a row limit, so a window into a result set
+     * is fetched as offset+rowNumber rows and sliced here. Without an ORDER BY
+     * the row order is not guaranteed, so the window is only meaningful for an
+     * ordered query - which the parameter description says.
+     */
+    private window(result: any, args: any) {
+        const offset = Number(args?.offset) || 0;
+        if (offset <= 0 || !result || !Array.isArray(result.values)) return { result };
+        const total = result.values.length;
+        const rowNumber = Number(args?.rowNumber);
+        const end = Number.isFinite(rowNumber) && rowNumber > 0 ? offset + rowNumber : total;
+        return {
+            result: { ...result, values: result.values.slice(offset, end) },
+            window: { offset, returned: Math.max(0, Math.min(end, total) - offset), fetched: total }
+        };
+    }
+
+    /** Rows to ask the backend for, so an offset window can be sliced out. */
+    private fetchCount(args: any) {
+        const rowNumber = Number(args?.rowNumber);
+        const offset = Number(args?.offset) || 0;
+        if (!Number.isFinite(rowNumber) || rowNumber <= 0) return args?.rowNumber;
+        return rowNumber + Math.max(0, offset);
+    }
     async handleTableContents(args: any): Promise<any> {
         const startTime = performance.now();
         try {
             const result = await this.adtclient.tableContents(
                 args.ddicEntityName,
-                args.rowNumber,
+                this.fetchCount(args),
                 args.decode,
                 args.sqlQuery
             );
+            const windowed = this.window(result, args);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -84,7 +119,7 @@ export class QueryHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            ...windowed
                         })
                     }
                 ]
@@ -100,9 +135,10 @@ export class QueryHandlers extends BaseHandler {
         try {
             const result = await this.adtclient.runQuery(
                 args.sqlQuery,
-                args.rowNumber,
+                this.fetchCount(args),
                 args.decode
             );
+            const windowed = this.window(result, args);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -110,7 +146,7 @@ export class QueryHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            ...windowed
                         })
                     }
                 ]

@@ -38,7 +38,7 @@ import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isDestructiveTool, isReplayable } from './lib/toolClasses';
-import { isReadOnly, excludedTokens } from './lib/serverConfig';
+import { isReadOnly, excludedTokens, maxResponseChars } from './lib/serverConfig';
 import { metrics } from './lib/metrics';
 import { lockRegistry } from './lib/lockRegistry';
 import type { ToolDefinition } from './types/tools.js';
@@ -151,22 +151,49 @@ export class AbapAdtServer extends Server {
       // responses such as object source (issue #4). Pass those through as-is and
       // only wrap raw values (e.g. the healthcheck object).
       if (result && Array.isArray(result.content)) {
-        return result;
+        return this.capSize(result);
       }
-      return {
+      return this.capSize({
         content: [{
           type: 'text',
           text: JSON.stringify(result, (key, value) =>
             typeof value === 'bigint' ? value.toString() : value
           )
         }]
-      };
+      });
     } catch (error) {
       return this.handleError(new McpError(
         ErrorCode.InternalError,
         'Failed to serialize result'
       ));
     }
+  }
+
+  /**
+   * Refuse to hand back an answer that would swamp the caller.
+   *
+   * Some ADT answers are enormous - userTransports with targets has run
+   * past 400k characters - and an oversized payload costs the caller its
+   * context before it can even look at what came back. The reply is
+   * replaced by a still-parseable envelope carrying the size, the limit and
+   * a truncated preview, so it is obvious what happened and how to narrow
+   * the request. Raise the ceiling with SAP_MAX_RESPONSE_CHARS.
+   */
+  private capSize(result: any) {
+    const item = result?.content?.[0];
+    if (item?.type !== 'text' || typeof item.text !== 'string') return result;
+    const max = maxResponseChars();
+    if (item.text.length <= max) return result;
+
+    const chars = item.text.length;
+    item.text = JSON.stringify({
+      status: 'truncated',
+      chars,
+      maxChars: max,
+      hint: 'The answer was too large to return. Narrow it: startLine/maxLines for source, rowNumber for queries, the filters on userTransports, or raise SAP_MAX_RESPONSE_CHARS.',
+      preview: item.text.slice(0, Math.floor(max * 0.9))
+    });
+    return result;
   }
 
   private handleError(error: unknown, extra?: Record<string, unknown>) {
@@ -253,6 +280,8 @@ export class AbapAdtServer extends Server {
                 break;
             case 'lock':
             case 'unLock':
+            case 'listLocks':
+            case 'unlockAll':
                 result = await this.objectLockHandlers.handle(toolName, args);
                 break;
             case 'objectStructure':
