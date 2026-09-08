@@ -327,7 +327,10 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     const validateStart = performance.now();
     let validation: any;
     try {
-      validation = await this.readClient.validateNewObject(
+      // Deliberately the stateful client: this read belongs to the write
+      // sequence, and every call of that sequence stays in the session that
+      // will hold the lock.
+      validation = await this.adtclient.validateNewObject(
         objtype === 'FUGR/FF' || objtype === 'FUGR/I'
           ? { objtype: objtype as any, objname: name, fugrname: parentName, description: String(args.description) }
           : { objtype: objtype as any, objname: name, packagename: packageName, description: String(args.description) }

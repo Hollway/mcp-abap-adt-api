@@ -442,7 +442,9 @@ export class DdicPropertyHandlers extends BaseHandler {
     }
     const startTime = performance.now();
     try {
-      const current = await this.readClient.getDomainProperties(url);
+      // The stateful client on purpose: the definition being merged onto
+      // has to be the one the locking session sees.
+      const current = await this.adtclient.getDomainProperties(url);
       this.trackRequest(startTime, true);
       return mergeDomain(current, this.domainPatch(args));
     } catch (error: any) {
@@ -474,7 +476,8 @@ export class DdicPropertyHandlers extends BaseHandler {
 
     const startTime = performance.now();
     try {
-      const current = await this.readClient.getDataElementProperties(url);
+      // The stateful client on purpose, as for a domain.
+      const current = await this.adtclient.getDataElementProperties(url);
       this.trackRequest(startTime, true);
       return mergeDataElement(current, patch);
     } catch (error: any) {
@@ -615,7 +618,9 @@ export class DdicPropertyHandlers extends BaseHandler {
     const validateStart = performance.now();
     let validation: any;
     try {
-      validation = await this.readClient.validateNewObject({
+      // Part of the write sequence, so it stays on the stateful client -
+      // the same session that takes the lock a moment later.
+      validation = await this.adtclient.validateNewObject({
         objtype: objtype as any,
         objname: name,
         packagename: packageName,
