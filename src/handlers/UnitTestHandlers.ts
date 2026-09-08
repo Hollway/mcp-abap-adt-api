@@ -3,6 +3,14 @@ import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, UnitTestRunFlags, UnitTestClass } from 'abap-adt-api';
+import { activateAndVerify } from '../lib/activation';
+import { describeAdtError } from '../lib/adtError';
+
+/** Object URL of a class, from its name. */
+const classUrl = (name: string): string => {
+    const lower = name.trim().toLowerCase();
+    return `/sap/bc/adt/oo/classes/${lower.includes('/') ? encodeURIComponent(lower) : lower}`;
+};
 
 export class UnitTestHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -31,6 +39,43 @@ export class UnitTestHandlers extends BaseHandler {
                         }
                     },
                     required: ['url']
+                }
+            },
+            {
+                name: 'runTests',
+                description: 'Run the ABAP Unit tests of a class and report what happened, activating it first if it has inactive parts. This is what unitTestRun should feel like: tests do not run at all against an inactive object, so a bare run answers with an empty list that reads like success. Returns a summary - how many methods ran, which failed, and each failure with its message - with the full ADT result available on request.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        className: {
+                            type: 'string',
+                            description: 'Class to test, e.g. ZCL_MM_PCK_PLAN. Its own test include is what runs.'
+                        },
+                        url: {
+                            type: 'string',
+                            description: 'Object URL instead of the class name.'
+                        },
+                        activate: {
+                            type: 'boolean',
+                            description: 'Activate inactive parts of the object before running (default true). Without this an inactive class silently runs no tests.'
+                        },
+                        flags: {
+                            type: 'object',
+                            description: 'Which test risk levels and durations to run. Six booleans; a JSON string is accepted too. Omit for the ADT defaults.',
+                            properties: {
+                                harmless: { type: 'boolean' },
+                                dangerous: { type: 'boolean' },
+                                critical: { type: 'boolean' },
+                                short: { type: 'boolean' },
+                                medium: { type: 'boolean' },
+                                long: { type: 'boolean' }
+                            }
+                        },
+                        raw: {
+                            type: 'boolean',
+                            description: 'Include the full ADT result alongside the summary.'
+                        }
+                    }
                 }
             },
             {
@@ -106,6 +151,8 @@ export class UnitTestHandlers extends BaseHandler {
         switch (toolName) {
             case 'unitTestRun':
                 return this.handleUnitTestRun(args);
+            case 'runTests':
+                return this.handleRunTests(args);
             case 'unitTestEvaluation':
                 return this.handleUnitTestEvaluation(args);
             case 'unitTestOccurrenceMarkers':
@@ -181,6 +228,142 @@ export class UnitTestHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to run unit test');
+        }
+    }
+
+    /**
+     * Run the tests of one object and say what happened.
+     *
+     * Two things make a bare unitTestRun misleading. Tests do not run against
+     * an inactive object at all - the test include was never compiled against
+     * it - and the answer to that is an empty list, which looks exactly like
+     * "everything passed". And the full ADT result is a deep structure whose
+     * failures are buried in nested alerts, so the one question worth asking
+     * (did anything fail, and why) takes work to answer.
+     *
+     * So: activate first when something is inactive, then run, then summarise.
+     */
+    async handleRunTests(args: any): Promise<any> {
+        const url = typeof args?.url === 'string' && args.url.trim()
+            ? args.url.trim()
+            : typeof args?.className === 'string' && args.className.trim()
+                ? classUrl(args.className)
+                : '';
+        if (!url) {
+            throw new McpError(ErrorCode.InvalidParams, 'Which object? Pass className, or url.');
+        }
+
+        const steps: Record<string, unknown>[] = [];
+
+        if (args?.activate !== false) {
+            const activateStart = performance.now();
+            try {
+                const outcome = await activateAndVerify(this.adtclient, { objectUrl: url });
+                this.trackRequest(activateStart, true);
+                steps.push({ step: 'activate', ...outcome });
+                if (!outcome.success) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                status: 'error',
+                                ran: false,
+                                objectUrl: url,
+                                steps,
+                                hint: 'The object could not be activated, so no test would have run. The activation messages are in the activate step - fix those first.'
+                            })
+                        }]
+                    };
+                }
+            } catch (error: any) {
+                this.trackRequest(activateStart, false);
+                steps.push({ step: 'activate', error: describeAdtError(error).error });
+            }
+        }
+
+        const runStart = performance.now();
+        try {
+            const result = await this.adtclient.unitTestRun(
+                url,
+                this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
+            );
+            this.trackRequest(runStart, true);
+
+            const classes = Array.isArray(result) ? result : [];
+            if (classes.length === 0) {
+                const diagnosis = await this.diagnoseEmptyRun(url);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'success',
+                            ran: false,
+                            objectUrl: url,
+                            methods: 0,
+                            failures: 0,
+                            steps,
+                            ...diagnosis,
+                            ...(args?.raw === true ? { result } : {})
+                        })
+                    }]
+                };
+            }
+
+            const failures: Record<string, unknown>[] = [];
+            let methods = 0;
+            for (const clas of classes) {
+                for (const alert of (clas as any)?.alerts || []) {
+                    failures.push({
+                        class: (clas as any)?.['adtcore:name'],
+                        method: undefined,
+                        kind: alert?.kind,
+                        severity: alert?.severity,
+                        title: alert?.title,
+                        details: alert?.details
+                    });
+                }
+                for (const test of (clas as any)?.testmethods || []) {
+                    methods += 1;
+                    for (const alert of test?.alerts || []) {
+                        failures.push({
+                            class: (clas as any)?.['adtcore:name'],
+                            method: test?.['adtcore:name'],
+                            kind: alert?.kind,
+                            severity: alert?.severity,
+                            title: alert?.title,
+                            details: alert?.details
+                        });
+                    }
+                }
+            }
+
+            const passed = methods - new Set(
+                failures.filter(f => f.method).map(f => `${f.class}.${f.method}`)
+            ).size;
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        ran: true,
+                        objectUrl: url,
+                        testClasses: classes.map((c: any) => c?.['adtcore:name']),
+                        methods,
+                        passed,
+                        failures: failures.length,
+                        failureDetails: failures,
+                        steps,
+                        ...(args?.raw === true ? { result } : {}),
+                        hint: failures.length === 0
+                            ? `${methods} test method(s) ran and none raised an alert.`
+                            : 'Failures are listed with the method they came from; each carries the ABAP Unit message.'
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(runStart, false);
+            throw wrapAdtError(error, `Failed to run the tests of ${url}`);
         }
     }
 

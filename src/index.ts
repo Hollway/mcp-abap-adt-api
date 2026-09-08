@@ -425,6 +425,7 @@ export class AbapAdtServer extends Server {
                 result = await this.discoveryHandlers.handle(toolName, args);
                 break;
             case 'unitTestRun':
+            case 'runTests':
             case 'unitTestEvaluation':
             case 'unitTestOccurrenceMarkers':
             case 'createTestInclude':
