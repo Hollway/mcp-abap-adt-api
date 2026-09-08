@@ -228,6 +228,10 @@ export class DdicPropertyHandlers extends BaseHandler {
               description: 'Transport request number - the request itself, not a developer task. Not needed in $TMP.'
             },
             responsible: { type: 'string', description: 'Responsible user; defaults to the logon user.' },
+            language: {
+              type: 'string',
+              description: 'Language the texts are stored in, and the master language of the object. Defaults to the logon language - not EN, which is what the underlying library would use and which makes the texts invisible to a developer logged on in another language.'
+            },
             activate: { type: 'boolean', description: 'Activate at the end (default true).' },
             dryRun: { type: 'boolean', description: 'Validate the name and show the document that would be written, creating nothing.' }
           },
@@ -264,6 +268,10 @@ export class DdicPropertyHandlers extends BaseHandler {
               description: 'Transport request number - the request itself, not a developer task. Not needed in $TMP.'
             },
             responsible: { type: 'string', description: 'Responsible user; defaults to the logon user.' },
+            language: {
+              type: 'string',
+              description: 'Language the labels are stored in, and the master language of the object. Defaults to the logon language - not EN, which is what the underlying library would use and which makes the labels invisible to a developer logged on in another language.'
+            },
             activate: { type: 'boolean', description: 'Activate at the end (default true).' },
             dryRun: { type: 'boolean', description: 'Validate the name and show what would be written, creating nothing.' }
           },
@@ -610,6 +618,13 @@ export class DdicPropertyHandlers extends BaseHandler {
     }
 
     const parentPath = `/sap/bc/adt/packages/${encodeURIComponent(packageName.toLowerCase())}`;
+    // The language matters more than it looks. abap-adt-api defaults the
+    // creation document to EN and makes that the master language, and SAP then
+    // stores every text of the object under that language - so a developer
+    // logged on in another one reads the object back with empty description
+    // and empty labels, which is exactly how this looked when it was first
+    // tried live. The logon language is the sane default.
+    const language = String(args?.language || this.adtclient.language || 'EN').toUpperCase();
     const steps: Record<string, unknown>[] = [];
 
     // Validation is cheap and its message is far better than the backend's
@@ -651,6 +666,7 @@ export class DdicPropertyHandlers extends BaseHandler {
         objectUrl: url,
         name,
         packageName,
+        language,
         steps,
         note: `The name is free and the package accepts it. The definition itself can only be built from the created object's metadata, so a dry run stops here.`
       });
@@ -658,15 +674,17 @@ export class DdicPropertyHandlers extends BaseHandler {
 
     const createStart = performance.now();
     try {
-      await this.adtclient.createObject(
-        objtype as any,
+      await this.adtclient.createObject({
+        objtype: objtype as any,
         name,
-        packageName,
-        String(args.description),
+        parentName: packageName,
+        description: String(args.description),
         parentPath,
-        args?.responsible,
-        args?.transport
-      );
+        responsible: args?.responsible,
+        transport: args?.transport,
+        language,
+        masterLanguage: language
+      });
       this.trackRequest(createStart, true);
     } catch (error: any) {
       this.trackRequest(createStart, false);
@@ -702,6 +720,13 @@ export class DdicPropertyHandlers extends BaseHandler {
     try {
       const { payload, extra: documentExtra } = await spec.document(url);
       extra = documentExtra;
+      // The metadata just read back carries the language ADT answered in,
+      // which is not necessarily the one the object was created with. Writing
+      // the texts under anything but the object's master language files them
+      // where nobody will look for them.
+      const meta = (payload as { metaData: Record<string, unknown> }).metaData;
+      meta.language = language;
+      meta.masterLanguage = language;
       await spec.write(url, payload, lockHandle);
       this.trackRequest(writeStart, true);
       steps.push({ step: 'write', ...(payload as Record<string, unknown>) });

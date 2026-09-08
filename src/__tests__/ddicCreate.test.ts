@@ -55,12 +55,14 @@ const EMPTY_ELEMENT = {
 
 const handler = (over: Record<string, unknown> = {}) => {
   const calls: string[] = [];
+  const created: any[] = [];
   const written: any[] = [];
   let activations = 0;
   const client = {
     stateful: 'stateless',
+    language: 'RU',
     validateNewObject: async () => { calls.push('validate'); return { success: true }; },
-    createObject: async () => { calls.push('create'); },
+    createObject: async (options: any) => { calls.push('create'); created.push(options); },
     lock: async () => { calls.push('lock'); return { LOCK_HANDLE: 'HANDLE' }; },
     unLock: async () => { calls.push('unlock'); },
     getDomainProperties: async () => { calls.push('read'); return EMPTY_DOMAIN; },
@@ -95,7 +97,7 @@ const handler = (over: Record<string, unknown> = {}) => {
     },
     ...over
   };
-  return { handlers: new DdicPropertyHandlers(client as any), calls, written };
+  return { handlers: new DdicPropertyHandlers(client as any), calls, created, written };
 };
 
 const answer = (result: any) => JSON.parse(result.content[0].text);
@@ -128,9 +130,21 @@ describe('createDomain', () => {
       name: 'ZMM_TEST'
     });
     expect(written[0].properties.typeInformation).toEqual({ datatype: 'CHAR', length: 4, decimals: 0 });
-    // The metadata written back is the system's own, not one made up here.
-    expect(written[0].metaData).toEqual(META);
+    // The metadata written back is the system's own, apart from the language:
+    // the library would create the object as EN and file its texts there,
+    // where a developer logged on in another language never sees them.
+    expect(written[0].metaData).toEqual({ ...META, language: 'RU', masterLanguage: 'RU' });
     expect(lockRegistry.count()).toBe(0);
+  });
+
+  it('creates in the logon language, not the library default of EN', async () => {
+    const { handlers, created } = handler();
+    await handlers.handleCreateDomain(DOMAIN_ARGS);
+    expect(created[0]).toMatchObject({ language: 'RU', masterLanguage: 'RU', parentName: '$TMP' });
+
+    const explicit = handler();
+    await explicit.handlers.handleCreateDomain({ ...DOMAIN_ARGS, language: 'en' });
+    expect(explicit.created[0]).toMatchObject({ language: 'EN', masterLanguage: 'EN' });
   });
 
   it('refuses a package other than $TMP without a transport, before creating anything', async () => {

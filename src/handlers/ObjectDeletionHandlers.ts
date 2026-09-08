@@ -20,14 +20,14 @@ export class ObjectDeletionHandlers extends BaseHandler {
             },
             lockHandle: { 
               type: 'string',
-              description: 'Lock handle for the object'
+              description: 'Lock handle for the object; omit to use the one this server recorded for it (see listLocks)'
             },
             transport: { 
               type: 'string',
               description: 'Transport request number'
             }
           },
-          required: ['objectUrl', 'lockHandle']
+          required: ['objectUrl']
         }
       }
     ];
@@ -43,13 +43,26 @@ export class ObjectDeletionHandlers extends BaseHandler {
   }
 
   async handleDeleteObject(args: any): Promise<any> {
+    // A lock this process already took is the one to delete with: asking for
+    // the handle again when the server is holding it is friction, and the
+    // backend's answer to a missing handle - "user is already processing this
+    // object" - reads like somebody else has it open.
+    const held = lockRegistry.get(args?.objectUrl);
+    const lockHandle = args?.lockHandle || held?.lockHandle;
+    if (!lockHandle) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `No lockHandle given and none recorded for ${args?.objectUrl}. Call lock on that URL first.`
+      );
+    }
+
     const startTime = performance.now();
     try {
       // dropSession/logout reset the client to stateless; deletion requires a stateful session
       this.adtclient.stateful = session_types.stateful;
       const result = await this.adtclient.deleteObject(
         args.objectUrl,
-        args.lockHandle,
+        lockHandle,
         args.transport
       );
       // Deleting an object does not release its lock: the lock survives, and
@@ -59,7 +72,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
       let lockReleased = false;
       let lockError: string | undefined;
       try {
-        await this.adtclient.unLock(args.objectUrl, args.lockHandle);
+        await this.adtclient.unLock(args.objectUrl, lockHandle);
         lockReleased = true;
       } catch (unlockError: any) {
         lockError = describeAdtError(unlockError).error;

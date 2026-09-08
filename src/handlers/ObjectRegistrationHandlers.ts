@@ -157,6 +157,10 @@ export class ObjectRegistrationHandlers extends BaseHandler {
               type: 'string',
               description: 'Responsible user; defaults to the logon user.'
             },
+            language: {
+              type: 'string',
+              description: 'Language of the description, and the master language of the object. Defaults to the logon language - the underlying library would use EN, which files the texts under a language the developer may never read.'
+            },
             activate: {
               type: 'boolean',
               description: 'Activate at the end (default true).'
@@ -322,6 +326,10 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     const sourceUrl = buildSourceUrl(encodedName(name), encodedName(parentName));
     const objectUrl = sourceUrl.replace(/\/source\/main$/, '');
     const parentPath = `/sap/bc/adt/packages/${encodeURIComponent(packageName.toLowerCase())}`;
+    // abap-adt-api defaults the creation document to EN and makes that the
+    // master language; SAP files the object's texts under it. The logon
+    // language is what the developer will actually read.
+    const language = String(args?.language || this.adtclient.language || 'EN').toUpperCase();
     const steps: Record<string, unknown>[] = [];
 
     const validateStart = performance.now();
@@ -378,25 +386,28 @@ export class ObjectRegistrationHandlers extends BaseHandler {
           packageName,
           mainProgram: parentName,
           transport: args?.transport,
-          responsible: args?.responsible
+          responsible: args?.responsible,
+          masterLanguage: language
         });
       } else {
-        await this.adtclient.createObject(
-          objtype as any,
+        await this.adtclient.createObject({
+          objtype: objtype as any,
           name,
           parentName,
-          String(args.description),
+          description: String(args.description),
           parentPath,
-          args?.responsible,
-          args?.transport
-        );
+          responsible: args?.responsible,
+          transport: args?.transport,
+          language,
+          masterLanguage: language
+        });
       }
       this.trackRequest(createStart, true);
     } catch (error: any) {
       this.trackRequest(createStart, false);
       throw wrapAdtError(error, `Failed to create ${name}`);
     }
-    steps.push({ step: 'create', objectUrl, sourceUrl, packageName });
+    steps.push({ step: 'create', objectUrl, sourceUrl, packageName, language });
 
     let lockHandle: string;
     try {

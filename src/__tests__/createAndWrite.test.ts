@@ -29,7 +29,7 @@ const handler = (over: Record<string, unknown> = {}) => {
     username: 'TESTER',
     language: 'EN',
     validateNewObject: async () => { calls.push('validate'); return { success: true }; },
-    createObject: async (...a: any[]) => { calls.push('create'); created.push(a); },
+    createObject: async (options: any) => { calls.push('create'); created.push(options); },
     lock: async () => { calls.push('lock'); return { LOCK_HANDLE: 'HANDLE' }; },
     setObjectSource: async (url: string, source: string) => {
       calls.push('write');
@@ -92,6 +92,17 @@ describe('createAndWrite', () => {
     expect(writes[0].url).toBe('/sap/bc/adt/oo/classes/zcl_mcp_test/source/main');
     expect(writes[0].source).toBe(CLASS_SOURCE);
     expect(lockRegistry.count()).toBe(0);
+  });
+
+  it('creates in the logon language rather than the library default of EN', async () => {
+    const { handlers, created } = handler({ language: 'RU' });
+    await handlers.handleCreateAndWrite(CLASS_ARGS);
+    expect(created[0]).toMatchObject({
+      objtype: 'CLAS/OC',
+      name: 'ZCL_MCP_TEST',
+      language: 'RU',
+      masterLanguage: 'RU'
+    });
   });
 
   it('derives the source URL per object type', async () => {
