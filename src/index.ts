@@ -18,6 +18,7 @@ import { ClassHandlers } from './handlers/ClassHandlers.js';
 import { CodeAnalysisHandlers } from './handlers/CodeAnalysisHandlers.js';
 import { ObjectLockHandlers } from './handlers/ObjectLockHandlers.js';
 import { ObjectSourceHandlers } from './handlers/ObjectSourceHandlers.js';
+import { SourceSearchHandlers } from './handlers/SourceSearchHandlers.js';
 import { ObjectDeletionHandlers } from './handlers/ObjectDeletionHandlers.js';
 import { ObjectManagementHandlers } from './handlers/ObjectManagementHandlers.js';
 import { ObjectRegistrationHandlers } from './handlers/ObjectRegistrationHandlers.js';
@@ -81,6 +82,7 @@ export class AbapAdtServer extends Server {
   private codeAnalysisHandlers: CodeAnalysisHandlers;
   private objectLockHandlers: ObjectLockHandlers;
   private objectSourceHandlers: ObjectSourceHandlers;
+  private sourceSearchHandlers: SourceSearchHandlers;
   private objectDeletionHandlers: ObjectDeletionHandlers;
   private objectManagementHandlers: ObjectManagementHandlers;
   private objectRegistrationHandlers: ObjectRegistrationHandlers;
@@ -140,6 +142,7 @@ export class AbapAdtServer extends Server {
     this.codeAnalysisHandlers = new CodeAnalysisHandlers(this.adtClient);
     this.objectLockHandlers = new ObjectLockHandlers(this.adtClient);
     this.objectSourceHandlers = new ObjectSourceHandlers(this.adtClient);
+    this.sourceSearchHandlers = new SourceSearchHandlers(this.adtClient);
     this.objectDeletionHandlers = new ObjectDeletionHandlers(this.adtClient);
     this.objectManagementHandlers = new ObjectManagementHandlers(this.adtClient);
     this.objectRegistrationHandlers = new ObjectRegistrationHandlers(this.adtClient);
@@ -372,6 +375,10 @@ export class AbapAdtServer extends Server {
             case 'patchObjectSource':
                 result = await this.objectSourceHandlers.handle(toolName, args);
                 break;
+            case 'findInSource':
+            case 'sourceOutline':
+                result = await this.sourceSearchHandlers.handle(toolName, args);
+                break;
             case 'deleteObject':
                 result = await this.objectDeletionHandlers.handle(toolName, args);
                 break;
@@ -516,6 +523,7 @@ export class AbapAdtServer extends Server {
       { group: 'codeAnalysis', tools: this.codeAnalysisHandlers.getTools() },
       { group: 'lock', tools: this.objectLockHandlers.getTools() },
       { group: 'source', tools: this.objectSourceHandlers.getTools() },
+      { group: 'source', tools: this.sourceSearchHandlers.getTools() },
       { group: 'deletion', tools: this.objectDeletionHandlers.getTools() },
       { group: 'activation', tools: this.objectManagementHandlers.getTools() },
       { group: 'registration', tools: this.objectRegistrationHandlers.getTools() },
