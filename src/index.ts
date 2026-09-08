@@ -37,13 +37,25 @@ import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { AdtToolError, errorPayload, isSessionFailure } from './lib/adtError';
-import { isMutatingTool, isReplayable } from './lib/toolClasses';
+import { isMutatingTool, isDestructiveTool, isReplayable } from './lib/toolClasses';
+import { isReadOnly, excludedTokens } from './lib/serverConfig';
+import type { ToolDefinition } from './types/tools.js';
 
 config({ path: path.resolve(__dirname, '../.env') });
+
+const HEALTHCHECK_TOOL: ToolDefinition = {
+  name: 'healthcheck',
+  description: 'Check ADT connectivity. Calls the backend and reports which SAP system this server talks to (url, client, language, user), the session state, the active tool profile and the round-trip latency; on failure it reports whether the session is dead.',
+  inputSchema: {
+    type: 'object',
+    properties: {}
+  }
+};
 
 export class AbapAdtServer extends Server {
   private adtClient: ADTClient;
   private reloginPromise?: Promise<void>;
+  private toolGroupIndex?: Map<string, string>;
   private authHandlers: AuthHandlers;
   private transportHandlers: TransportHandlers;
   private objectHandlers: ObjectHandlers;
@@ -196,43 +208,7 @@ export class AbapAdtServer extends Server {
 
   private setupToolHandlers() {
     this.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: [
-          ...this.authHandlers.getTools(),
-          ...this.transportHandlers.getTools(),
-          ...this.objectHandlers.getTools(),
-          ...this.classHandlers.getTools(),
-          ...this.codeAnalysisHandlers.getTools(),
-          ...this.objectLockHandlers.getTools(),
-          ...this.objectSourceHandlers.getTools(),
-          ...this.objectDeletionHandlers.getTools(),
-          ...this.objectManagementHandlers.getTools(),
-          ...this.objectRegistrationHandlers.getTools(),
-            ...this.nodeHandlers.getTools(),
-            ...this.discoveryHandlers.getTools(),
-            ...this.unitTestHandlers.getTools(),
-            ...this.prettyPrinterHandlers.getTools(),
-            ...this.gitHandlers.getTools(),
-            ...this.ddicHandlers.getTools(),
-            ...this.serviceBindingHandlers.getTools(),
-            ...this.queryHandlers.getTools(),
-            ...this.feedHandlers.getTools(),
-            ...this.debugHandlers.getTools(),
-            ...this.renameHandlers.getTools(),
-            ...this.atcHandlers.getTools(),
-            ...this.traceHandlers.getTools(),
-            ...this.refactorHandlers.getTools(),
-            ...this.revisionHandlers.getTools(),
-            {
-            name: 'healthcheck',
-            description: 'Check ADT connectivity. Calls the backend and reports which SAP system this server talks to (url, client, language, user), the session state and the round-trip latency; on failure it reports whether the session is dead.',
-            inputSchema: {
-              type: 'object',
-              properties: {}
-            }
-          }
-        ]
-      };
+      return { tools: this.exposedTools() };
     });
 
     this.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -248,6 +224,7 @@ export class AbapAdtServer extends Server {
 
   /** Route one tool call to its handler. */
   private async dispatch(toolName: string, args: any): Promise<any> {
+    this.assertAllowed(toolName);
     let result: any;
     switch (toolName) {
             case 'login':
@@ -437,6 +414,96 @@ export class AbapAdtServer extends Server {
   }
 
   /**
+   * Every tool this server can serve, tagged with the group that owns it.
+   * The group names are what SAP_TOOLS_EXCLUDE accepts.
+   */
+  private toolGroups(): { group: string; tools: ToolDefinition[] }[] {
+    return [
+      { group: 'auth', tools: this.authHandlers.getTools() },
+      { group: 'transport', tools: this.transportHandlers.getTools() },
+      { group: 'object', tools: this.objectHandlers.getTools() },
+      { group: 'class', tools: this.classHandlers.getTools() },
+      { group: 'codeAnalysis', tools: this.codeAnalysisHandlers.getTools() },
+      { group: 'lock', tools: this.objectLockHandlers.getTools() },
+      { group: 'source', tools: this.objectSourceHandlers.getTools() },
+      { group: 'deletion', tools: this.objectDeletionHandlers.getTools() },
+      { group: 'activation', tools: this.objectManagementHandlers.getTools() },
+      { group: 'registration', tools: this.objectRegistrationHandlers.getTools() },
+      { group: 'node', tools: this.nodeHandlers.getTools() },
+      { group: 'discovery', tools: this.discoveryHandlers.getTools() },
+      { group: 'unitTest', tools: this.unitTestHandlers.getTools() },
+      { group: 'prettyPrinter', tools: this.prettyPrinterHandlers.getTools() },
+      { group: 'git', tools: this.gitHandlers.getTools() },
+      { group: 'ddic', tools: this.ddicHandlers.getTools() },
+      { group: 'serviceBinding', tools: this.serviceBindingHandlers.getTools() },
+      { group: 'query', tools: this.queryHandlers.getTools() },
+      { group: 'feed', tools: this.feedHandlers.getTools() },
+      { group: 'debugger', tools: this.debugHandlers.getTools() },
+      { group: 'rename', tools: this.renameHandlers.getTools() },
+      { group: 'atc', tools: this.atcHandlers.getTools() },
+      { group: 'traces', tools: this.traceHandlers.getTools() },
+      { group: 'refactor', tools: this.refactorHandlers.getTools() },
+      { group: 'revision', tools: this.revisionHandlers.getTools() },
+      { group: 'health', tools: [HEALTHCHECK_TOOL] }
+    ];
+  }
+
+  /**
+   * The tools actually offered to the client: everything minus what a
+   * read-only system forbids and what SAP_TOOLS_EXCLUDE hides, each carrying
+   * the annotations a client needs to judge how risky a call is.
+   */
+  private exposedTools(): ToolDefinition[] {
+    const excluded = excludedTokens();
+    const readOnly = isReadOnly();
+    return this.toolGroups()
+      .filter(g => !excluded.has(g.group))
+      .reduce<ToolDefinition[]>((acc, g) => acc.concat(g.tools), [])
+      .filter(t => !excluded.has(t.name))
+      .filter(t => !(readOnly && isMutatingTool(t.name)))
+      .map(t => ({
+        ...t,
+        annotations: {
+          ...t.annotations,
+          readOnlyHint: !isMutatingTool(t.name),
+          destructiveHint: isDestructiveTool(t.name)
+        }
+      }));
+  }
+
+  /**
+   * Second line of defence: a hidden tool must also be refused when called
+   * directly, because a client may still hold an older tool list.
+   */
+  private assertAllowed(toolName: string): void {
+    if (isReadOnly() && isMutatingTool(toolName)) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `${toolName} changes the system, and this server runs with SAP_READONLY set for ${this.adtClient.baseUrl}. Nothing was sent to SAP.`
+      );
+    }
+    const excluded = excludedTokens();
+    const group = this.groupOf(toolName);
+    if (excluded.has(toolName) || (group && excluded.has(group))) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `${toolName}${group ? ` (group ${group})` : ''} is disabled by SAP_TOOLS_EXCLUDE on this server.`
+      );
+    }
+  }
+
+  /** Which group serves a tool; built once from the registry. */
+  private groupOf(toolName: string): string | undefined {
+    if (!this.toolGroupIndex) {
+      this.toolGroupIndex = new Map();
+      for (const g of this.toolGroups()) {
+        for (const t of g.tools) this.toolGroupIndex.set(t.name, g.group);
+      }
+    }
+    return this.toolGroupIndex.get(toolName);
+  }
+
+  /**
    * Report what this server is actually connected to and whether ADT answers.
    *
    * The old implementation returned a constant 'healthy', so it kept claiming
@@ -450,6 +517,12 @@ export class AbapAdtServer extends Server {
       client: this.adtClient.client || undefined,
       language: this.adtClient.language || undefined,
       user: this.adtClient.username
+    };
+    const excluded = [...excludedTokens()];
+    const profile = {
+      readOnly: isReadOnly(),
+      excluded: excluded.length ? excluded : undefined,
+      toolsExposed: this.exposedTools().length
     };
     const session = {
       loggedin: this.adtClient.loggedin,
@@ -465,6 +538,7 @@ export class AbapAdtServer extends Server {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         system,
+        profile,
         session: { ...session, loggedin: this.adtClient.loggedin },
         adt: {
           reachable: true,
@@ -477,6 +551,7 @@ export class AbapAdtServer extends Server {
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
         system,
+        profile,
         session,
         adt: {
           reachable: false,

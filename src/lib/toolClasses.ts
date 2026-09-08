@@ -67,6 +67,22 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'debuggerSetVariableValue'
 ]);
 
+/**
+ * Tools whose effect cannot be taken back from inside the system: they remove
+ * objects, requests, repositories or breakpoints rather than changing them.
+ */
+export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'deleteObject',
+  'transportDelete',
+  'transportRelease',
+  'gitUnlinkRepo',
+  'unPublishServiceBinding',
+  'tracesDelete',
+  'tracesDeleteConfiguration',
+  'debuggerDeleteBreakpoints',
+  'debuggerDeleteListener'
+]);
+
 /** Tools that manage the connection itself rather than repository content. */
 export const SESSION_TOOLS: ReadonlySet<string> = new Set([
   'login',
@@ -75,6 +91,8 @@ export const SESSION_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 export const isMutatingTool = (name: string): boolean => MUTATING_TOOLS.has(name);
+
+export const isDestructiveTool = (name: string): boolean => DESTRUCTIVE_TOOLS.has(name);
 
 /**
  * A failed call that must not be replayed automatically: either it may have
