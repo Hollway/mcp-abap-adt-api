@@ -5,6 +5,23 @@ import type { ToolDefinition } from '../types/tools';
 import { session_types, textElementsUrl } from 'abap-adt-api';
 import type { TextElement, TextElementCategory } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
+import { describeAdtError } from '../lib/adtError';
+
+/**
+ * Not every release serves text elements over REST.
+ *
+ * On the ERP system these tools were written against, /sap/bc/adt/textelements
+ * does not exist at all: objectStructure offers text elements only as a SAPGUI
+ * link. A bare 404 there reads like a wrong object name, which is the wrong
+ * thing to go and check.
+ */
+const missingEndpointHint = (error: unknown): string | undefined => {
+  const info = describeAdtError(error);
+  if (info.status !== 404) return undefined;
+  return 'This release does not serve text elements over ADT: /sap/bc/adt/textelements is not there at all, ' +
+    'and ADT itself offers them only through the SAPGUI bridge (transaction SE38 -> Goto -> Text elements). ' +
+    'Nothing is wrong with the object name.';
+};
 
 const CATEGORIES: TextElementCategory[] = ['symbols', 'selections', 'headings'];
 
@@ -177,7 +194,13 @@ export class TextElementHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to read the ${category} of ${url}`);
+      const missing = missingEndpointHint(error);
+      throw wrapAdtError(
+        error,
+        missing
+          ? `Failed to read the ${category} of ${url}. ${missing}`
+          : `Failed to read the ${category} of ${url}`
+      );
     }
   }
 
@@ -190,7 +213,7 @@ export class TextElementHandlers extends BaseHandler {
     }
 
     const objectUrl = this.objectUrl(args, objectType);
-    const held = lockRegistry.get(objectUrl);
+    const held = lockRegistry.forUrl(objectUrl);
     const lockHandle = args?.lockHandle || held?.lockHandle;
     if (!lockHandle) {
       throw new McpError(
@@ -216,7 +239,13 @@ export class TextElementHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to write the ${category} of ${url}`);
+      const missing = missingEndpointHint(error);
+      throw wrapAdtError(
+        error,
+        missing
+          ? `Failed to write the ${category} of ${url}. ${missing}`
+          : `Failed to write the ${category} of ${url}`
+      );
     }
   }
 }

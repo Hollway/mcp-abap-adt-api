@@ -3,7 +3,9 @@ import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, UnitTestRunFlags, UnitTestClass } from 'abap-adt-api';
+import { session_types } from 'abap-adt-api';
 import { activateAndVerify } from '../lib/activation';
+import { lockRegistry } from '../lib/lockRegistry';
 import { describeAdtError } from '../lib/adtError';
 
 /** Object URL of a class, from its name. */
@@ -134,14 +136,14 @@ export class UnitTestHandlers extends BaseHandler {
                         },
                         lockHandle: {
                             type: 'string',
-                            description: 'The lock handle.'
+                            description: 'Lock handle for the class; omit to use the one this server recorded for it (see listLocks).'
                         },
                         transport: {
                             type: 'string',
                             description: 'The transport.'
                         }
                     },
-                    required: ['clas', 'lockHandle']
+                    required: ['clas']
                 }
             }
         ];
@@ -415,9 +417,22 @@ export class UnitTestHandlers extends BaseHandler {
     }
 
     async handleCreateTestInclude(args: any): Promise<any> {
+        // The class has to be locked for this, and when this server took that
+        // lock it already knows the handle.
+        const classObjectUrl = classUrl(String(args?.clas || ''));
+        const held = lockRegistry.forUrl(classObjectUrl);
+        const lockHandle = args?.lockHandle || held?.lockHandle;
+        if (!lockHandle) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `No lockHandle given and none recorded for ${classObjectUrl}. Call lock on that URL first.`
+            );
+        }
+
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.createTestInclude(args.clas, args.lockHandle, args.transport);
+            this.adtclient.stateful = session_types.stateful;
+            const result = await this.adtclient.createTestInclude(args.clas, lockHandle, args.transport);
             this.trackRequest(startTime, true);
             return {
                 content: [

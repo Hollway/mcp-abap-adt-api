@@ -1,4 +1,5 @@
 import { resolveEdits, applyEdits, buildDiff, newlineOf } from '../lib/sourcePatch';
+import { lockRegistry } from '../lib/lockRegistry';
 
 const CRLF = [
   'CLASS zcl_demo DEFINITION PUBLIC FINAL CREATE PUBLIC.',
@@ -227,5 +228,30 @@ describe('buildDiff', () => {
     expect(diff).toContain('+    WRITE 42.');
     expect(diff).toContain('  METHOD one.');
     expect(diff).toMatch(/^@@ -9,1 \+9,1 @@/m);
+  });
+});
+
+describe('lock lookup by url', () => {
+  it('answers with the class lock for a class include, and invents nothing', () => {
+    lockRegistry.clear();
+    lockRegistry.remember('/sap/bc/adt/oo/classes/zcl_x', 'CLASSHANDLE');
+    expect(lockRegistry.forUrl('/sap/bc/adt/oo/classes/zcl_x/includes/testclasses')?.lockHandle)
+      .toBe('CLASSHANDLE');
+    expect(lockRegistry.forUrl('/sap/bc/adt/oo/classes/zcl_x')?.lockHandle).toBe('CLASSHANDLE');
+    expect(lockRegistry.forUrl('/sap/bc/adt/oo/classes/zcl_other')).toBeUndefined();
+    // Not a path boundary: a longer name that merely starts the same way.
+    expect(lockRegistry.forUrl('/sap/bc/adt/oo/classes/zcl_x2')).toBeUndefined();
+    lockRegistry.clear();
+  });
+
+  it('prefers the most specific lock it holds', () => {
+    lockRegistry.clear();
+    lockRegistry.remember('/sap/bc/adt/functions/groups/zfg', 'GROUP');
+    lockRegistry.remember('/sap/bc/adt/functions/groups/zfg/fmodules/z_fm', 'MODULE');
+    expect(lockRegistry.forUrl('/sap/bc/adt/functions/groups/zfg/fmodules/z_fm/source/main')?.lockHandle)
+      .toBe('MODULE');
+    expect(lockRegistry.forUrl('/sap/bc/adt/functions/groups/zfg/includes/lzfgtop')?.lockHandle)
+      .toBe('GROUP');
+    lockRegistry.clear();
   });
 });

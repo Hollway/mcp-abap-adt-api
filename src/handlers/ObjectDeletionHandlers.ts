@@ -47,7 +47,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
     // the handle again when the server is holding it is friction, and the
     // backend's answer to a missing handle - "user is already processing this
     // object" - reads like somebody else has it open.
-    const held = lockRegistry.get(args?.objectUrl);
+    const held = lockRegistry.forUrl(args?.objectUrl);
     const lockHandle = args?.lockHandle || held?.lockHandle;
     if (!lockHandle) {
       throw new McpError(

@@ -36,6 +36,29 @@ export const lockRegistry = {
     return locks.get(objectUrl);
   },
 
+  /**
+   * The lock covering this URL, which is not always the lock ON this URL.
+   *
+   * A class include - the test classes, the local definitions - is written
+   * through its own URL, but the lock belongs to the class: ADT locks the
+   * object, not its parts. Rather than encoding which URL shapes nest inside
+   * which, the registry answers with the longest lock it holds whose URL is a
+   * prefix of the one asked about. It cannot invent a lock that was never
+   * taken, and it stops a write from being refused for a lock this process is
+   * demonstrably holding.
+   */
+  forUrl(objectUrl: string): HeldLock | undefined {
+    if (!objectUrl) return undefined;
+    const exact = locks.get(objectUrl);
+    if (exact) return exact;
+    let best: HeldLock | undefined;
+    for (const lock of locks.values()) {
+      if (!objectUrl.startsWith(`${lock.objectUrl}/`)) continue;
+      if (!best || lock.objectUrl.length > best.objectUrl.length) best = lock;
+    }
+    return best;
+  },
+
   all(): HeldLock[] {
     return [...locks.values()];
   },

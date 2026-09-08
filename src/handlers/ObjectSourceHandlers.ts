@@ -255,9 +255,17 @@ export class ObjectSourceHandlers extends BaseHandler {
   /**
    * The object URL behind a source URL: /oo/classes/zcl_x/source/main -> the
    * class itself, which is what lock works on and what the registry keys on.
+   *
+   * A class include (test classes, local definitions, macros) has its own
+   * source URL, but the lock still belongs to the class - so that part comes
+   * off too.
    */
   private objectUrlOf(sourceUrl: string): string {
-    return sourceUrl.split('#')[0].replace(/\/source\/main$/, '').replace(/\/source$/, '');
+    return sourceUrl
+      .split('#')[0]
+      .replace(/\/source\/main$/, '')
+      .replace(/\/source$/, '')
+      .replace(/^(\/sap\/bc\/adt\/oo\/(?:classes|interfaces)\/[^/]+)\/includes\/[^/]+$/, '$1');
   }
 
   /**
@@ -283,7 +291,7 @@ export class ObjectSourceHandlers extends BaseHandler {
     }
 
     const objectUrl = this.objectUrlOf(args.objectSourceUrl);
-    const held = lockRegistry.get(objectUrl);
+    const held = lockRegistry.forUrl(objectUrl);
     const lockHandle = args?.lockHandle || held?.lockHandle;
     const dryRun = args?.dryRun === true;
     if (!lockHandle && !dryRun) {
@@ -497,6 +505,19 @@ export class ObjectSourceHandlers extends BaseHandler {
   }
 
   async handleSetObjectSource(args: any): Promise<any> {
+    // As for patchObjectSource: a lock this process already holds is the one
+    // to write with, and asking the caller to carry the handle between calls
+    // is friction with no upside.
+    const objectUrl = this.objectUrlOf(args?.objectSourceUrl || '');
+    const held = lockRegistry.forUrl(objectUrl);
+    const lockHandle = args?.lockHandle || held?.lockHandle;
+    if (!lockHandle) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `No lockHandle given and none recorded for ${objectUrl}. Call lock on that URL first.`
+      );
+    }
+
     const startTime = performance.now();
     try {
       // dropSession/logout reset the client to stateless; writing source requires a stateful session
@@ -504,7 +525,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       await this.adtclient.setObjectSource(
         args.objectSourceUrl,
         args.source,
-        args.lockHandle,
+        lockHandle,
         args.transport
       );
       // Cache the just-written source so a follow-up syntaxCheckCode can reuse it

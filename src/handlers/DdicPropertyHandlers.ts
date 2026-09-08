@@ -27,6 +27,23 @@ import type {
 const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
 
 /**
+ * Not every release serves domains over REST.
+ *
+ * On the ERP system these tools were written against, every domain path -
+ * /sap/bc/adt/ddic/domains/<name> and even its validation resource - answers
+ * 404, and a search for a domain returns only a SAPGUI URI. Data elements are
+ * served normally on the same system, which makes a bare 404 on a domain look
+ * like a typo in the name.
+ */
+const domainEndpointHint = (error: unknown): string | undefined => {
+  const info = describeAdtError(error);
+  if (info.status !== 404) return undefined;
+  return 'This release does not serve DDIC domains over ADT: /sap/bc/adt/ddic/domains answers 404 for every name, ' +
+    'including its validation resource, and a domain search returns only a SAPGUI URI. ' +
+    'Data elements are served normally on the same system. Maintain the domain in SE11.';
+};
+
+/**
  * The contents of DDIC domains and data elements.
  *
  * createObject can make either of them, but only as an empty shell: what makes
@@ -330,7 +347,7 @@ export class DdicPropertyHandlers extends BaseHandler {
     if (typeof args?.lockHandle === 'string' && args.lockHandle.trim()) {
       return { lockHandle: args.lockHandle.trim(), from: 'argument' };
     }
-    const held = lockRegistry.get(objectUrl);
+    const held = lockRegistry.forUrl(objectUrl);
     if (held) return { lockHandle: held.lockHandle, from: 'lockRegistry' };
     throw new McpError(
       ErrorCode.InvalidParams,
@@ -352,7 +369,13 @@ export class DdicPropertyHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to read the properties of domain ${ddicNameOf(url)}`);
+      const missing = domainEndpointHint(error);
+      throw wrapAdtError(
+        error,
+        missing
+          ? `Failed to read the properties of domain ${ddicNameOf(url)}. ${missing}`
+          : `Failed to read the properties of domain ${ddicNameOf(url)}`
+      );
     }
   }
 
@@ -401,7 +424,13 @@ export class DdicPropertyHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to write the properties of domain ${ddicNameOf(url)}`);
+      const missing = domainEndpointHint(error);
+      throw wrapAdtError(
+        error,
+        missing
+          ? `Failed to write the properties of domain ${ddicNameOf(url)}. ${missing}`
+          : `Failed to write the properties of domain ${ddicNameOf(url)}`
+      );
     }
   }
 
@@ -644,7 +673,13 @@ export class DdicPropertyHandlers extends BaseHandler {
       this.trackRequest(validateStart, true);
     } catch (error: any) {
       this.trackRequest(validateStart, false);
-      throw wrapAdtError(error, `Failed to validate the new ${what} ${name}`);
+      const missing = what === 'domain' ? domainEndpointHint(error) : undefined;
+      throw wrapAdtError(
+        error,
+        missing
+          ? `Failed to validate the new ${what} ${name}. ${missing} Nothing was created`
+          : `Failed to validate the new ${what} ${name}`
+      );
     }
     steps.push({ step: 'validate', ...validation });
     if (validation && validation.success === false) {

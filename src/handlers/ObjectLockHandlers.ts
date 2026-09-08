@@ -34,12 +34,12 @@ export class ObjectLockHandlers extends BaseHandler {
             type: 'string',
             description: 'URL of the object to unlock'
           },
-          lockHandle: { 
+          lockHandle: {
             type: 'string',
-            description: 'Lock handle obtained from previous lock operation'
+            description: 'Lock handle obtained from previous lock operation; omit to use the one this server recorded for the object (see listLocks)'
           }
         },
-        required: ['objectUrl', 'lockHandle']
+        required: ['objectUrl']
       }
     }, {
       name: 'listLocks',
@@ -158,11 +158,20 @@ export class ObjectLockHandlers extends BaseHandler {
   }
 
   async handleUnlock(args: any): Promise<any> {
+    const held = lockRegistry.forUrl(args?.objectUrl);
+    const lockHandle = args?.lockHandle || held?.lockHandle;
+    if (!lockHandle) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `No lockHandle given and none recorded for ${args?.objectUrl}. listLocks shows what this server holds.`
+      );
+    }
+
     const startTime = performance.now();
     try {
       // dropSession/logout reset the client to stateless; locks require a stateful session
       this.adtclient.stateful = session_types.stateful;
-      await this.adtclient.unLock(args.objectUrl, args.lockHandle);
+      await this.adtclient.unLock(args.objectUrl, lockHandle);
       lockRegistry.forget(args.objectUrl);
       this.trackRequest(startTime, true);
       return {
