@@ -33,7 +33,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       },
       {
         name: 'createObject',
-        description: 'Create a new ABAP object',
+        description: 'Create a new ABAP object. Report includes (PROG/I) are the one type this cannot create - it refuses them and points at createInclude.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -217,6 +217,19 @@ export class ObjectRegistrationHandlers extends BaseHandler {
   async handleCreateObject(args: any): Promise<any> {    
     const startTime = performance.now();
     try {
+      // PROG/I never succeeds here: the library builds the creation document
+      // without the reference to the main program, so the backend answers 400
+      // or 500 whatever is passed. Failing on the spot with the way out beats
+      // a backend error that reads like a wrong package or a name collision.
+      if (String(args?.objtype || '').trim().toUpperCase() === 'PROG/I') {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          'createObject cannot create a report include (PROG/I): the creation document it builds carries no reference to the main program, ' +
+          'so the backend rejects it. Use createInclude instead - {name, description, packageName, mainProgram, transport}, ' +
+          `where mainProgram is the program the include belongs to${args?.parentName ? ` (probably ${String(args.parentName).toUpperCase()})` : ''}.`
+        );
+      }
+
       const result = await this.adtclient.createObject(
         args.objtype,
         args.name,
@@ -238,6 +251,9 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
+      if (error instanceof McpError) {
+        throw error;
+      }
       throw wrapAdtError(error, 'Failed to create object');
     }
   }
