@@ -87,6 +87,20 @@ export class AtcHandlers extends BaseHandler {
                 }
             },
             {
+                name: 'atcDocumentation',
+                description: 'The documentation of one ATC finding: what the check means and what it wants instead. Takes the documentation URI that atcWorklists reports for a finding. Returns the document as it comes from the backend, which is HTML.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        docUri: {
+                            type: 'string',
+                            description: 'Documentation URI of the finding, from the atcWorklists answer.'
+                        }
+                    },
+                    required: ['docUri']
+                }
+            },
+            {
                 name: 'atcExemptProposal',
                 description: 'Retrieves an ATC exemption proposal.',
                 inputSchema: {
@@ -175,6 +189,8 @@ export class AtcHandlers extends BaseHandler {
                 return this.handleAtcWorklists(args);
             case 'atcUsers':
                 return this.handleAtcUsers(args);
+            case 'atcDocumentation':
+                return this.handleAtcDocumentation(args);
             case 'atcExemptProposal':
                 return this.handleAtcExemptProposal(args);
             case 'atcRequestExemption':
@@ -297,6 +313,30 @@ export class AtcHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get ATC users');
+        }
+    }
+
+    async handleAtcDocumentation(args: any): Promise<any> {
+        const startTime = performance.now();
+        try {
+            // The library hands back the whole HTTP response here, not a
+            // parsed document - only the body is of any use to a caller.
+            const response: any = await this.readClient.atcDocumentation(args.docUri);
+            this.trackRequest(startTime, true);
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        docUri: args.docUri,
+                        contentType: response?.headers?.['content-type'],
+                        documentation: response?.body
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            throw wrapAdtError(error, 'Failed to read the ATC documentation');
         }
     }
 

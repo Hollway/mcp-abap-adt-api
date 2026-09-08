@@ -506,6 +506,7 @@ export class AbapAdtServer extends Server {
             case 'createAtcRun':
             case 'atcWorklists':
             case 'atcUsers':
+            case 'atcDocumentation':
             case 'atcExemptProposal':
             case 'atcRequestExemption':
             case 'isProposalMessage':
@@ -524,6 +525,7 @@ export class AbapAdtServer extends Server {
             case 'tracesDelete':
                 result = await this.traceHandlers.handle(toolName, args);
                 break;
+            case 'changePackagePreview':
             case 'extractMethodEvaluate':
             case 'extractMethodPreview':
             case 'extractMethodExecute':
