@@ -1,12 +1,13 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, describeAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from "abap-adt-api";
 import type { ObjectSourceOptions, ObjectVersion } from "abap-adt-api";
 import { sourceCache, sourceCacheKey } from '../lib/sourceCache';
 import { lockRegistry } from '../lib/lockRegistry';
 import { resolveEdits, applyEdits, buildDiff, newlineOf, PatchError } from '../lib/sourcePatch';
+import { activateAndVerify } from '../lib/activation';
 import type { SourceEdit } from '../lib/sourcePatch';
 
 const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
@@ -84,6 +85,56 @@ export class ObjectSourceHandlers extends BaseHandler {
         }
       },
       {
+        name: 'editObject',
+        description: 'The whole edit in one call: lock, patch, unlock, activate and verify. This is the sequence a change to an ABAP object needs, and each step has a way to go wrong on its own - the lock must be released BEFORE activating, or activation fails with "user is already processing", and an activation is only believable once the inactive list comes back empty. Nothing is rolled back if a step fails: the source stays written to the inactive version, which is not what the system executes, and the answer says exactly how far it got. Pass dryRun to see the diff without locking anything.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            objectSourceUrl: {
+              type: 'string',
+              description: 'Source URL, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main'
+            },
+            edits: {
+              type: 'array',
+              description: 'Edits to apply, exactly as patchObjectSource takes them: {startLine, endLine?, replacement}, {anchor, replacement, occurrence?} or {insertAfterLine, insertion}.',
+              items: {
+                type: 'object',
+                properties: {
+                  startLine: { type: 'number' },
+                  endLine: { type: 'number' },
+                  replacement: { type: 'string' },
+                  anchor: { type: 'string' },
+                  occurrence: { type: 'number' },
+                  insertAfterLine: { type: 'number' },
+                  insertion: { type: 'string' }
+                }
+              }
+            },
+            transport: {
+              type: 'string',
+              description: 'Transport request. Pass the number of the REQUEST, not of a task inside it - a task number is refused with "not a change request".'
+            },
+            parentUri: {
+              type: 'string',
+              description: 'Package URI (/sap/bc/adt/packages/<package>), used when the inactive list leaves adtcore:parentUri empty.'
+            },
+            activate: {
+              type: 'boolean',
+              description: 'Activate after writing (default true). Set false to leave the change in the inactive version.'
+            },
+            accessMode: {
+              type: 'string',
+              description: 'Access mode for the lock.'
+            },
+            dryRun: {
+              type: 'boolean',
+              description: 'Compute the diff and return it without locking, writing or activating.'
+            }
+          },
+          required: ['objectSourceUrl', 'edits']
+        }
+      },
+      {
         name: 'setObjectSource',
         description: 'Replace the whole source of an ABAP object. For a small change prefer patchObjectSource, which reads, edits and writes without sending the entire object.',
         inputSchema: {
@@ -108,6 +159,8 @@ export class ObjectSourceHandlers extends BaseHandler {
         return this.handleSetObjectSource(args);
       case 'patchObjectSource':
         return this.handlePatchObjectSource(args);
+      case 'editObject':
+        return this.handleEditObject(args);
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown object source tool: ${toolName}`);
     }
@@ -215,6 +268,14 @@ export class ObjectSourceHandlers extends BaseHandler {
    * caller sends only the edits and gets back a diff of what actually changed.
    */
   async handlePatchObjectSource(args: any): Promise<any> {
+    return this.answer(await this.patchSource(args));
+  }
+
+  /**
+   * The patch itself, as a payload rather than a tool answer, so editObject
+   * can run it as one step of a longer chain.
+   */
+  private async patchSource(args: any): Promise<Record<string, unknown>> {
     const edits = this.parseObjectArg<SourceEdit[]>(args?.edits, 'edits');
     if (!Array.isArray(edits) || edits.length === 0) {
       throw new McpError(ErrorCode.InvalidParams, 'edits must be a non-empty array.');
@@ -255,18 +316,18 @@ export class ObjectSourceHandlers extends BaseHandler {
 
       if (patched === current) {
         this.trackRequest(startTime, true);
-        return this.answer({
+        return {
           status: 'success',
           written: false,
           note: 'The edits produce exactly the current source; nothing was written.',
           linesBefore,
           linesAfter
-        });
+        };
       }
 
       if (dryRun) {
         this.trackRequest(startTime, true);
-        return this.answer({
+        return {
           status: 'success',
           written: false,
           dryRun: true,
@@ -274,7 +335,7 @@ export class ObjectSourceHandlers extends BaseHandler {
           linesBefore,
           linesAfter,
           diff
-        });
+        };
       }
 
       // dropSession/logout reset the client to stateless; writing needs stateful
@@ -288,7 +349,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       sourceCache.set(args.objectSourceUrl, patched);
       this.trackRequest(startTime, true);
 
-      return this.answer({
+      return {
         status: 'success',
         written: true,
         edits: resolved.length,
@@ -297,10 +358,137 @@ export class ObjectSourceHandlers extends BaseHandler {
         lockHandleFrom: args?.lockHandle ? 'argument' : 'lockRegistry',
         diff,
         hint: 'Written to the inactive version. Activate with activateSafe, then verify with getObjectSource version="active".'
-      });
+      };
     } catch (error: any) {
       this.trackRequest(startTime, false);
       throw wrapAdtError(error, 'Failed to patch object source');
+    }
+  }
+
+  /**
+   * Lock, patch, unlock, activate - the sequence, run once.
+   *
+   * Done by hand it is four calls whose order matters and whose failures do
+   * not announce themselves: the lock has to be released before activation
+   * (ADT refuses to activate an object its own session holds, unlike the GUI
+   * editor), and activation has to be verified against the inactive list.
+   *
+   * Nothing is rolled back. A failed activation leaves the new source in the
+   * inactive version, which the system does not execute, so the state after a
+   * failure is "the edit is saved but not live" - the same place a developer
+   * ends up in ADT, and the fix is to correct the source and activate again.
+   * What this does clean up is the lock it took itself: a lock left behind is
+   * invisible and blocks the next attempt.
+   */
+  async handleEditObject(args: any): Promise<any> {
+    const objectUrl = this.objectUrlOf(args.objectSourceUrl);
+    const steps: Record<string, unknown>[] = [];
+
+    if (args?.dryRun === true) {
+      const patch = await this.patchSource({ ...args, dryRun: true });
+      return this.answer({ status: 'success', dryRun: true, objectUrl, patch });
+    }
+
+    // A lock this process already holds is reused rather than doubled, and
+    // released at the end either way: the activation needs it gone.
+    const held = lockRegistry.get(objectUrl);
+    let lockHandle = held?.lockHandle;
+    if (!lockHandle) {
+      const startTime = performance.now();
+      try {
+        this.adtclient.stateful = session_types.stateful;
+        const lockResult = await this.adtclient.lock(objectUrl, args?.accessMode);
+        lockHandle = lockResult.LOCK_HANDLE;
+        lockRegistry.remember(objectUrl, lockHandle, args?.accessMode);
+        this.trackRequest(startTime, true);
+      } catch (error: any) {
+        this.trackRequest(startTime, false);
+        throw wrapAdtError(error, 'Failed to lock the object for editing');
+      }
+    }
+    steps.push({ step: 'lock', lockHandle, taken: !held });
+
+    let patch: Record<string, unknown>;
+    try {
+      patch = await this.patchSource({ ...args, lockHandle });
+    } catch (error: any) {
+      // Release what we took; the caller gets the patch error, not a lock left
+      // on an object nobody is editing any more.
+      if (!held) await this.releaseLock(objectUrl, lockHandle);
+      throw error;
+    }
+    steps.push({ step: 'patch', ...patch });
+
+    const unlock = await this.releaseLock(objectUrl, lockHandle);
+    steps.push({ step: 'unlock', ...unlock });
+
+    if (args?.activate === false) {
+      return this.answer({
+        status: 'success',
+        objectUrl,
+        activated: false,
+        steps,
+        hint: 'Written to the inactive version and not activated, so the system still runs the old code.'
+      });
+    }
+
+    if (!unlock.released) {
+      // Activating with the lock still held fails with "user is already
+      // processing this object" - say that instead of producing it.
+      return this.answer({
+        status: 'error',
+        objectUrl,
+        activated: false,
+        steps,
+        hint: 'The lock could not be released, and activation would fail while it is held. Release it (unlockAll) and activate with activateSafe.'
+      });
+    }
+
+    const startTime = performance.now();
+    try {
+      const outcome = await activateAndVerify(this.adtclient, {
+        objectUrl,
+        parentUri: args?.parentUri
+      });
+      this.trackRequest(startTime, true);
+      steps.push({ step: 'activate', ...outcome });
+      return this.answer({
+        status: outcome.success ? 'success' : 'error',
+        objectUrl,
+        activated: outcome.success,
+        steps,
+        hint: outcome.success
+          ? 'Active. Read it back with getObjectSource version="active" if you want the proof in hand.'
+          : 'The source is written but not active, so the system still runs the old code. Fix it and activate again - nothing was rolled back.'
+      });
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      steps.push({ step: 'activate', error: describeAdtError(error).error });
+      return this.answer({
+        status: 'error',
+        objectUrl,
+        activated: false,
+        steps,
+        hint: 'The source is written but not active. Nothing was rolled back; correct it and run activateSafe.'
+      });
+    }
+  }
+
+  /** Release a lock and forget it, reporting rather than throwing. */
+  private async releaseLock(
+    objectUrl: string,
+    lockHandle: string
+  ): Promise<{ released: boolean; error?: string }> {
+    const startTime = performance.now();
+    try {
+      this.adtclient.stateful = session_types.stateful;
+      await this.adtclient.unLock(objectUrl, lockHandle);
+      lockRegistry.forget(objectUrl);
+      this.trackRequest(startTime, true);
+      return { released: true };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      return { released: false, error: describeAdtError(error).error };
     }
   }
 

@@ -16,6 +16,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'unlockAll',
   'setObjectSource',
   'patchObjectSource',
+  'editObject',
   'deleteObject',
   'createObject',
   'createInclude',

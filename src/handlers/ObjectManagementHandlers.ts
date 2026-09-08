@@ -1,39 +1,14 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
 import { wrapAdtError } from '../lib/adtError';
+import { activateAndVerify, selectInactive } from '../lib/activation';
+import type {
+  ActivationResult,
+  InactiveObject,
+  InactiveObjectRecord,
+  ObjectRef
+} from '../lib/activation';
 import type { ToolDefinition } from '../types/tools';
-
-interface InactiveObject {
-  "adtcore:uri": string;
-  "adtcore:type": string;
-  "adtcore:name": string;
-  "adtcore:parentUri": string;
-}
-
-interface ActivationResultMessage {
-  objDescr: string;
-  type: string;
-  line: number;
-  href: string;
-  forceSupported: boolean;
-  shortText: string;
-}
-
-interface ActivationResult {
-  success: boolean;
-  messages: ActivationResultMessage[];
-  inactive: InactiveObjectRecord[];
-}
-
-interface InactiveObjectElement extends InactiveObject {
-  user: string;
-  deleted: boolean;
-}
-
-interface InactiveObjectRecord {
-  object?: InactiveObjectElement;
-  transport?: InactiveObjectElement;
-}
 
 export class ObjectManagementHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
@@ -149,28 +124,6 @@ export class ObjectManagementHandlers extends BaseHandler {
     }
   }
 
-  /** Rows of the inactive list that belong to one object. */
-  private selectInactive(
-    records: InactiveObjectRecord[],
-    objectName?: string,
-    objectUrl?: string
-  ): InactiveObjectElement[] {
-    const elements = records
-      .map(r => r.object)
-      .filter((e): e is InactiveObjectElement => !!e && !!e['adtcore:uri']);
-    if (!objectName && !objectUrl) return elements;
-
-    const name = objectName?.toUpperCase();
-    const url = objectUrl?.toLowerCase();
-    return elements.filter(e => {
-      // Fragments are named "<OBJECT>  <METHOD>" and their URIs extend the
-      // object URI with a #type=... suffix, so both matches are prefix-based.
-      const byName = name ? (e['adtcore:name'] || '').toUpperCase().startsWith(name) : false;
-      const byUrl = url ? (e['adtcore:uri'] || '').toLowerCase().startsWith(url) : false;
-      return byName || byUrl;
-    });
-  }
-
   /**
    * Activate and then verify, because neither answer alone can be trusted:
    * activateByName has been seen to return success:true for a class that stayed
@@ -182,64 +135,19 @@ export class ObjectManagementHandlers extends BaseHandler {
   private async handleActivateSafe(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      const before: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
-      const explicit = args?.objects
-        ? this.parseObjectArg<InactiveObject[]>(args.objects, 'objects')
-        : undefined;
-
-      const selected = explicit
-        ? explicit
-        : this.selectInactive(before, args?.objectName, args?.objectUrl);
-
-      if (selected.length === 0) {
-        this.trackRequest(startTime, true);
-        return this.answer({
-          status: 'success',
-          success: true,
-          activated: [],
-          note: args?.objectName || args?.objectUrl
-            ? 'Nothing inactive matches that object - it is already active, or the edit never reached the system.'
-            : 'Nothing is inactive; there was nothing to activate.'
-        });
-      }
-
-      const parentUri = args?.parentUri;
-      const objects: InactiveObject[] = selected.map(e => ({
-        'adtcore:uri': e['adtcore:uri'],
-        'adtcore:type': e['adtcore:type'],
-        'adtcore:name': e['adtcore:name'],
-        'adtcore:parentUri': e['adtcore:parentUri'] || parentUri || ''
-      }));
-
-      const missingParent = objects.filter(o => !o['adtcore:parentUri']);
-      if (missingParent.length > 0) {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Activation needs a non-empty adtcore:parentUri, and the inactive list left it empty for: ${
-            missingParent.map(o => o['adtcore:name']).join(', ')
-          }. Pass parentUri=/sap/bc/adt/packages/<package>.`
-        );
-      }
-
-      const result: ActivationResult = await this.adtclient.activate(objects, args?.preauditRequested);
-
-      const after: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
-      const stillInactive = this.selectInactive(after, args?.objectName, args?.objectUrl)
-        .map(e => ({ name: e['adtcore:name'], type: e['adtcore:type'] }));
-
-      const success = result.success && stillInactive.length === 0;
+      const outcome = await activateAndVerify(this.adtclient, {
+        objectName: args?.objectName,
+        objectUrl: args?.objectUrl,
+        parentUri: args?.parentUri,
+        objects: args?.objects
+          ? this.parseObjectArg<InactiveObject[]>(args.objects, 'objects')
+          : undefined,
+        preauditRequested: args?.preauditRequested
+      });
       this.trackRequest(startTime, true);
       return this.answer({
-        status: success ? 'success' : 'error',
-        success,
-        activated: objects.map(o => ({ name: o['adtcore:name'], type: o['adtcore:type'] })),
-        messages: result.messages,
-        stillInactive,
-        hint: success
-          ? undefined
-          : stillInactive.length > 0
-            ? 'Some parts are still inactive - read the messages, fix the source and run activateSafe again.'
-            : 'The backend reported a failure; the messages carry the syntax or activation errors.'
+        status: outcome.success ? 'success' : 'error',
+        ...outcome
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
@@ -311,10 +219,10 @@ export class ObjectManagementHandlers extends BaseHandler {
   private async verifyActivation(
     objectName?: string,
     objectUrl?: string
-  ): Promise<{ name: string; type: string }[] | undefined> {
+  ): Promise<ObjectRef[] | undefined> {
     try {
       const after: InactiveObjectRecord[] = await this.readClient.inactiveObjects();
-      return this.selectInactive(after, objectName, objectUrl)
+      return selectInactive(after, objectName, objectUrl)
         .map(e => ({ name: e['adtcore:name'], type: e['adtcore:type'] }));
     } catch (error: any) {
       this.logger.warn('Could not read the inactive list to verify the activation', {

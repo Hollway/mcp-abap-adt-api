@@ -373,6 +373,7 @@ export class AbapAdtServer extends Server {
             case 'getObjectSource':
             case 'setObjectSource':
             case 'patchObjectSource':
+            case 'editObject':
                 result = await this.objectSourceHandlers.handle(toolName, args);
                 break;
             case 'findInSource':

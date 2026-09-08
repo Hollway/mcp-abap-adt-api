@@ -31,12 +31,22 @@ interface Block {
 const blocks: Block[] = [];
 for (const file of handlerFiles) {
   const source = fs.readFileSync(path.join(handlerDir, file), 'utf8');
+  // Every method is a boundary, not just the handle* ones: a private helper
+  // sitting between two handlers would otherwise be read as part of the one
+  // above it, and its reads blamed on a tool that never makes them.
+  const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'do', 'else']);
   const starts: { method: string; at: number }[] = [];
-  const re = /async (handle[A-Za-z0-9_]+)\s*\(/g;
+  // Files in here are indented with two or four spaces, so the indent is only
+  // used to tell a member from a nested statement; keywords are filtered out.
+  const re = /^ {2,4}(?:private |protected |public )?(?:async )?([A-Za-z0-9_]+)\s*\(/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) starts.push({ method: m[1], at: m.index });
+  while ((m = re.exec(source)) !== null) {
+    if (KEYWORDS.has(m[1])) continue;
+    starts.push({ method: m[1], at: m.index });
+  }
 
   starts.forEach((start, i) => {
+    if (!start.method.startsWith('handle') || start.method === 'handle') return;
     const end = i + 1 < starts.length ? starts[i + 1].at : source.length;
     const bare = start.method.replace(/^handle/, '');
     blocks.push({
