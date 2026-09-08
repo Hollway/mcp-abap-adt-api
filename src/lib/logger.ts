@@ -1,4 +1,8 @@
+import { logLevel } from './serverConfig';
+
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+
+const RANK: Record<LogLevel, number> = { error: 0, warn: 1, info: 2, debug: 3 };
 
 export function createLogger(name: string) {
   return {
@@ -14,6 +18,10 @@ export function createLogger(name: string) {
 }
 
 function log(level: LogLevel, name: string, message: string, meta?: Record<string, unknown>) {
+  // Default is warn: the per-request info line used to be written for every
+  // single call, which buried anything that mattered. Raise it with LOG_LEVEL.
+  if (RANK[level] > RANK[logLevel()]) return;
+
   const timestamp = new Date().toISOString();
   const logEntry = {
     timestamp,

@@ -39,6 +39,7 @@ import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { AdtToolError, errorPayload, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isDestructiveTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens } from './lib/serverConfig';
+import { metrics } from './lib/metrics';
 import type { ToolDefinition } from './types/tools.js';
 
 config({ path: path.resolve(__dirname, '../.env') });
@@ -539,6 +540,7 @@ export class AbapAdtServer extends Server {
         timestamp: new Date().toISOString(),
         system,
         profile,
+        metrics: metrics.snapshot(),
         session: { ...session, loggedin: this.adtClient.loggedin },
         adt: {
           reachable: true,
@@ -552,6 +554,7 @@ export class AbapAdtServer extends Server {
         timestamp: new Date().toISOString(),
         system,
         profile,
+        metrics: metrics.snapshot(),
         session,
         adt: {
           reachable: false,
