@@ -68,7 +68,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       },
       {
         name: 'activateByName',
-        description: 'Activate an ABAP object using name and URL',
+        description: 'Activate an ABAP object by name and URL, then check the inactive list to see whether it really happened. The backend call behind this answers success:true for objects that stay inactive - notably a freshly created class - so the answer carries verified/stillInactive as well, and success is lowered to false when anything is left inactive. activateSafe is still the better tool: it activates exactly the rows inactiveObjects reports, including method fragments.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -301,6 +301,29 @@ export class ObjectManagementHandlers extends BaseHandler {
     }
   }
 
+  /**
+   * What is still inactive for this object after an activation attempt.
+   *
+   * A failure to read the list must not turn a successful activation into an
+   * error, so an unreachable inactive list is reported as "not verified"
+   * rather than thrown.
+   */
+  private async verifyActivation(
+    objectName?: string,
+    objectUrl?: string
+  ): Promise<{ name: string; type: string }[] | undefined> {
+    try {
+      const after: InactiveObjectRecord[] = await this.readClient.inactiveObjects();
+      return this.selectInactive(after, objectName, objectUrl)
+        .map(e => ({ name: e['adtcore:name'], type: e['adtcore:type'] }));
+    } catch (error: any) {
+      this.logger.warn('Could not read the inactive list to verify the activation', {
+        error: error?.message
+      });
+      return undefined;
+    }
+  }
+
   async handleActivateByName(args: any): Promise<any> {
     const startTime = performance.now();
     try {
@@ -308,17 +331,36 @@ export class ObjectManagementHandlers extends BaseHandler {
         throw new McpError(ErrorCode.InvalidParams, "objectName and objectUrl parameters are required");
       }
 
-      const result = await this.adtclient.activate(
+      const result: ActivationResult = await this.adtclient.activate(
         args.objectName,
         args.objectUrl,
         args.mainInclude,
         args.preauditRequested
       );
+
+      // The library's answer alone is not evidence: activateByName has been
+      // seen returning success:true, inactive:[] for a class that was still
+      // inactive afterwards, so the old code kept running while the caller was
+      // told the activation had worked. The inactive list is the only proof.
+      const stillInactive = await this.verifyActivation(args.objectName, args.objectUrl);
+      const verified = stillInactive ? stillInactive.length === 0 : undefined;
+
       this.trackRequest(startTime, true);
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(result)
+          text: JSON.stringify({
+            ...result,
+            success: verified === false ? false : result.success,
+            reportedSuccess: result.success,
+            verified,
+            stillInactive,
+            hint: verified === true
+              ? undefined
+              : verified === false
+                ? 'Still inactive after the call. activateByName does not activate every object; use activateSafe, which passes the rows from inactiveObjects.'
+                : 'The inactive list could not be read, so this answer is unverified - and this call is known to report success without activating anything.'
+          })
         }]
       };
     } catch (error: any) {
