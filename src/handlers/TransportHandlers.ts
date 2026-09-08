@@ -167,7 +167,11 @@ export class TransportHandlers extends BaseHandler {
                     properties: {
                         transportNumber: {
                             type: 'string',
-                            description: 'Request number, e.g. EUDK9A3OK4. The request itself, not a developer task - a task number answers with its own single entry.'
+                            description: 'Request number, e.g. EUDK9A3OK4. A task number works too - it is looked up the same way.'
+                        },
+                        owner: {
+                            type: 'string',
+                            description: 'Owner of the request, when it is not the logon user. Some systems only answer the per-request endpoint with the caller own transport list, and this says whose list to look in.'
                         },
                         includeObjects: {
                             type: 'boolean',
@@ -378,17 +382,81 @@ export class TransportHandlers extends BaseHandler {
     }
 
     /**
+     * Find one request in a transport list payload, by number, request or task.
+     *
+     * The per-request endpoint on this system answers with the caller's whole
+     * transport list rather than the one request asked for - so the request
+     * has to be picked out of it, and a task number has to match a task as
+     * well as a request.
+     */
+    private findRequest(transports: any, number: string): { request: any; via: 'request' | 'task' } | undefined {
+        const wanted = number.toUpperCase();
+        const targets = [
+            ...((transports?.workbench || []) as any[]),
+            ...((transports?.customizing || []) as any[])
+        ];
+        for (const target of targets) {
+            for (const request of [...(target?.modifiable || []), ...(target?.released || [])]) {
+                if (`${request?.['tm:number'] || ''}`.toUpperCase() === wanted) {
+                    return { request, via: 'request' };
+                }
+                for (const task of request?.tasks || []) {
+                    if (`${task?.['tm:number'] || ''}`.toUpperCase() === wanted) {
+                        return { request, via: 'task' };
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    /**
      * The contents of one request.
      *
      * ADT nests the objects under the request and under each of its tasks, and
      * the field names carry their XML prefixes ("tm:name"), which makes the
      * raw answer awkward to read and easy to mistake for empty. Flattened
      * here: one list of objects, each saying which task recorded it.
+     *
+     * The library's own call asks /cts/transportrequests/<number> and reads a
+     * single request out of the answer. On this system that endpoint ignores
+     * the number and returns the caller's whole transport list, so the parse
+     * finds nothing and the request looks empty - which it is not. When that
+     * happens the request is looked up in the transport list instead, which
+     * carries the same objects and tasks.
      */
     async handleTransportDetails(args: any): Promise<any> {
         const startTime = performance.now();
+        const number = String(args?.transportNumber || '').toUpperCase();
         try {
-            const details: any = await this.readClient.transportDetails(args.transportNumber);
+            let details: any = await this.readClient.transportDetails(number);
+            let via = 'transportDetails';
+
+            const parsedNumber = `${details?.['tm:number'] || ''}`.toUpperCase();
+            if (parsedNumber !== number) {
+                const owner = String(args?.owner || this.adtclient.username || '').toUpperCase();
+                const transports = await this.readClient.userTransports(owner, true);
+                const found = this.findRequest(transports, number);
+                if (!found) {
+                    this.trackRequest(startTime, true);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                status: 'success',
+                                number,
+                                found: false,
+                                searchedOwner: owner,
+                                hint: `This system answers the per-request endpoint with the caller's own transport list, and ${number} is not in ${owner}'s. Pass owner with the user who owns it, or read its objects with runQuery on E071.`
+                            })
+                        }]
+                    };
+                }
+                details = found.request;
+                via = found.via === 'task'
+                    ? `transport list of ${owner} (${number} is a task of ${details?.['tm:number']})`
+                    : `transport list of ${owner}`;
+            }
             this.trackRequest(startTime, true);
 
             if (args?.raw === true) {
@@ -427,7 +495,9 @@ export class TransportHandlers extends BaseHandler {
                     type: 'text',
                     text: JSON.stringify({
                         status: 'success',
-                        number: details?.['tm:number'] || args.transportNumber,
+                        found: true,
+                        via,
+                        number: details?.['tm:number'] || number,
                         owner: details?.['tm:owner'],
                         description: details?.['tm:desc'],
                         transportStatus: details?.['tm:status'],
