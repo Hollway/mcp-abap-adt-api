@@ -1,0 +1,235 @@
+import { DdicPropertyHandlers } from '../handlers/DdicPropertyHandlers';
+import { lockRegistry } from '../lib/lockRegistry';
+
+/**
+ * createDomain and createDataElement are the sequence a DDIC object needs to
+ * end up usable: create, lock, write the definition, unlock, activate. What
+ * these tests hold in place is that order, the refusal to create outside $TMP
+ * without a transport, and the promise that a failure half-way says exactly
+ * where it stopped instead of rolling anything back.
+ */
+const DOMAIN_URL = '/sap/bc/adt/ddic/domains/zmm_test';
+const ELEMENT_URL = '/sap/bc/adt/ddic/dataelements/zmm_test';
+
+const META = {
+  name: 'ZMM_TEST',
+  description: 'Test',
+  language: 'EN',
+  masterLanguage: 'EN',
+  masterSystem: 'EUD',
+  responsible: 'VKRIVOROT',
+  packageName: '$TMP'
+};
+
+const EMPTY_DOMAIN = {
+  metaData: META,
+  properties: {
+    typeInformation: { datatype: '', length: 0, decimals: 0 },
+    outputInformation: { length: 0, signExists: false, lowercase: false, ampmFormat: false }
+  }
+};
+
+const EMPTY_ELEMENT = {
+  metaData: META,
+  properties: {
+    typeName: '',
+    dataType: '',
+    dataTypeLength: 0,
+    dataTypeDecimals: 0,
+    fieldLabels: {
+      shortFieldLabel: '',
+      mediumFieldLabel: '',
+      longFieldLabel: '',
+      headingFieldLabel: ''
+    },
+    searchHelp: '',
+    searchHelpParameter: '',
+    setGetParameter: '',
+    defaultComponentName: '',
+    deactivateInputHistory: false,
+    changeDocument: false,
+    leftToRightDirection: false,
+    deactivateBIDIFiltering: false
+  }
+};
+
+const handler = (over: Record<string, unknown> = {}) => {
+  const calls: string[] = [];
+  const written: any[] = [];
+  let activations = 0;
+  const client = {
+    stateful: 'stateless',
+    validateNewObject: async () => { calls.push('validate'); return { success: true }; },
+    createObject: async () => { calls.push('create'); },
+    lock: async () => { calls.push('lock'); return { LOCK_HANDLE: 'HANDLE' }; },
+    unLock: async () => { calls.push('unlock'); },
+    getDomainProperties: async () => { calls.push('read'); return EMPTY_DOMAIN; },
+    getDataElementProperties: async () => { calls.push('read'); return EMPTY_ELEMENT; },
+    setDomainProperties: async (_url: string, properties: any, metaData: any) => {
+      calls.push('write');
+      written.push({ properties, metaData });
+    },
+    setDataElementProperties: async (_url: string, properties: any, metaData: any) => {
+      calls.push('write');
+      written.push({ properties, metaData });
+    },
+    inactiveObjects: async () => {
+      calls.push('inactiveObjects');
+      return activations === 0
+        ? [{
+          object: {
+            'adtcore:uri': DOMAIN_URL,
+            'adtcore:type': 'DOMA/DD',
+            'adtcore:name': 'ZMM_TEST',
+            'adtcore:parentUri': '/sap/bc/adt/packages/%24tmp',
+            user: 'TESTER',
+            deleted: false
+          }
+        }]
+        : [];
+    },
+    activate: async () => {
+      calls.push('activate');
+      activations += 1;
+      return { success: true, messages: [], inactive: [] };
+    },
+    ...over
+  };
+  return { handlers: new DdicPropertyHandlers(client as any), calls, written };
+};
+
+const answer = (result: any) => JSON.parse(result.content[0].text);
+
+const DOMAIN_ARGS = {
+  name: 'ZMM_TEST',
+  description: 'Test',
+  packageName: '$TMP',
+  datatype: 'CHAR',
+  length: 4
+};
+
+beforeEach(() => lockRegistry.clear());
+
+describe('createDomain', () => {
+  it('validates, creates, locks, writes, unlocks and only then activates', async () => {
+    const { handlers, calls, written } = handler();
+    const result = answer(await handlers.handleCreateDomain(DOMAIN_ARGS));
+
+    expect(calls).toEqual([
+      'validate', 'create', 'lock', 'read', 'write', 'unlock',
+      'inactiveObjects', 'activate', 'inactiveObjects'
+    ]);
+    expect(result).toMatchObject({
+      status: 'success',
+      created: true,
+      written: true,
+      activated: true,
+      objectUrl: DOMAIN_URL,
+      name: 'ZMM_TEST'
+    });
+    expect(written[0].properties.typeInformation).toEqual({ datatype: 'CHAR', length: 4, decimals: 0 });
+    // The metadata written back is the system's own, not one made up here.
+    expect(written[0].metaData).toEqual(META);
+    expect(lockRegistry.count()).toBe(0);
+  });
+
+  it('refuses a package other than $TMP without a transport, before creating anything', async () => {
+    const { handlers, calls } = handler();
+    await expect(handlers.handleCreateDomain({ ...DOMAIN_ARGS, packageName: 'ZMM_BASE' }))
+      .rejects.toThrow(/needs a transport request/);
+    expect(calls).toEqual([]);
+  });
+
+  it('stops at a name the system refuses, and creates nothing', async () => {
+    const { handlers, calls } = handler({
+      validateNewObject: async () => ({ success: false, SEVERITY: 'E', SHORT_TEXT: 'Name is already used' })
+    });
+    const result = answer(await handlers.handleCreateDomain(DOMAIN_ARGS));
+    expect(result).toMatchObject({ status: 'error', created: false });
+    expect(result.hint).toContain('Name is already used');
+    expect(calls).toEqual([]);
+  });
+
+  it('a dry run validates and stops', async () => {
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleCreateDomain({ ...DOMAIN_ARGS, dryRun: true }));
+    expect(result).toMatchObject({ status: 'success', dryRun: true, created: false });
+    expect(calls).toEqual(['validate']);
+  });
+
+  it('reports where it stopped when the definition cannot be written, and keeps no lock', async () => {
+    const { handlers, calls } = handler({
+      setDomainProperties: async () => { throw new Error('type not allowed'); }
+    });
+    const result = answer(await handlers.handleCreateDomain(DOMAIN_ARGS));
+    expect(result).toMatchObject({ status: 'error', created: true, written: false });
+    expect(result.hint).toContain('cannot be activated');
+    expect(calls).toEqual(['validate', 'create', 'lock', 'read', 'unlock']);
+    expect(lockRegistry.count()).toBe(0);
+  });
+
+  it('leaves the object inactive when asked not to activate', async () => {
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleCreateDomain({ ...DOMAIN_ARGS, activate: false }));
+    expect(result).toMatchObject({ status: 'success', written: true, activated: false });
+    expect(calls).not.toContain('activate');
+  });
+});
+
+describe('createDataElement', () => {
+  it('writes a domain-based element and activates it', async () => {
+    const { handlers, calls, written } = handler();
+    const result = answer(await handlers.handleCreateDataElement({
+      name: 'ZMM_TEST',
+      description: 'Test',
+      packageName: '$TMP',
+      domain: 'zmm_test',
+      label: 'Test status'
+    }));
+
+    expect(calls).toEqual([
+      'validate', 'create', 'lock', 'read', 'write', 'unlock',
+      'inactiveObjects', 'activate', 'inactiveObjects'
+    ]);
+    expect(result).toMatchObject({
+      status: 'success',
+      activated: true,
+      objectUrl: ELEMENT_URL,
+      typeKind: 'domain'
+    });
+    expect(written[0].properties.typeName).toBe('ZMM_TEST');
+    expect(written[0].properties.fieldLabels.shortFieldLabel).toBe('Test statu');
+    expect(result.truncatedLabels).toEqual([{ label: 'short', limit: 10, written: 'Test statu' }]);
+  });
+
+  it('writes a built-in type element', async () => {
+    const { handlers, written } = handler();
+    const result = answer(await handlers.handleCreateDataElement({
+      name: 'ZMM_TEST',
+      description: 'Test',
+      packageName: '$TMP',
+      dataType: 'dec',
+      length: 13,
+      decimals: 2,
+      label: 'Amount'
+    }));
+    expect(result).toMatchObject({ status: 'success', typeKind: 'predefinedAbapType' });
+    expect(written[0].properties).toMatchObject({
+      typeName: '',
+      dataType: 'DEC',
+      dataTypeLength: 13,
+      dataTypeDecimals: 2
+    });
+  });
+
+  it('refuses a type given twice and a type given not at all', async () => {
+    const { handlers, calls } = handler();
+    await expect(handlers.handleCreateDataElement({
+      name: 'ZMM_TEST', description: 'Test', packageName: '$TMP', domain: 'ZD', dataType: 'CHAR'
+    })).rejects.toThrow(/either from a domain/);
+    await expect(handlers.handleCreateDataElement({
+      name: 'ZMM_TEST', description: 'Test', packageName: '$TMP'
+    })).rejects.toThrow(/needs a type/);
+    expect(calls).toEqual([]);
+  });
+});

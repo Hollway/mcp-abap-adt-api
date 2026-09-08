@@ -5,6 +5,8 @@ import type { ToolDefinition } from '../types/tools';
 import { session_types } from 'abap-adt-api';
 import type { ObjectVersion } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
+import { activateAndVerify } from '../lib/activation';
+import { describeAdtError } from '../lib/adtError';
 import {
   dataElementUrl,
   domainUrl,
@@ -187,12 +189,95 @@ export class DdicPropertyHandlers extends BaseHandler {
             }
           }
         }
+      },
+      {
+        name: 'createDomain',
+        description: 'Create a DDIC domain and give it its definition, in one call: validate the name, create the object, lock it, write the type and output format (and value table or fixed values), unlock, activate. createObject alone leaves a domain with no definition, which cannot be activated. Nothing is rolled back if a step fails - the answer reports each step, and a domain that was created but not written is still there to correct or delete.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Domain name, e.g. ZMM_STATUS.' },
+            description: { type: 'string', description: 'Short description.' },
+            packageName: { type: 'string', description: 'Development package. $TMP needs no transport.' },
+            datatype: { type: 'string', description: 'DDIC data type, e.g. CHAR, NUMC, DEC, DATS.' },
+            length: { type: 'number', description: 'Field length.' },
+            decimals: { type: 'number', description: 'Decimal places (default 0).' },
+            outputLength: { type: 'number', description: 'Output length; defaults to the field length.' },
+            conversionExit: { type: 'string', description: 'Conversion exit, e.g. ALPHA.' },
+            signExists: { type: 'boolean', description: 'Value can be negative.' },
+            lowercase: { type: 'boolean', description: 'Lower case allowed.' },
+            ampmFormat: { type: 'boolean', description: 'AM/PM time format.' },
+            style: { type: 'string', description: 'Output style.' },
+            valueTable: { type: 'string', description: 'Value table for the check.' },
+            fixValues: {
+              type: 'array',
+              description: 'Fixed values: [{low, high, text}].',
+              items: {
+                type: 'object',
+                properties: {
+                  low: { type: 'string' },
+                  high: { type: 'string' },
+                  text: { type: 'string' }
+                },
+                required: ['low']
+              }
+            },
+            transport: {
+              type: 'string',
+              description: 'Transport request number - the request itself, not a developer task. Not needed in $TMP.'
+            },
+            responsible: { type: 'string', description: 'Responsible user; defaults to the logon user.' },
+            activate: { type: 'boolean', description: 'Activate at the end (default true).' },
+            dryRun: { type: 'boolean', description: 'Validate the name and show the document that would be written, creating nothing.' }
+          },
+          required: ['name', 'description', 'packageName', 'datatype', 'length']
+        }
+      },
+      {
+        name: 'createDataElement',
+        description: 'Create a DDIC data element and give it its definition, in one call: validate, create, lock, write the type and the four field labels, unlock, activate. The type is either a domain or a built-in ABAP type, not both. createObject alone leaves an element with no type, which cannot be activated. Nothing is rolled back if a step fails - the answer reports each step.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Data element name, e.g. ZMM_STATUS.' },
+            description: { type: 'string', description: 'Short description.' },
+            packageName: { type: 'string', description: 'Development package. $TMP needs no transport.' },
+            domain: { type: 'string', description: 'Domain the element takes its type from. Alternative to dataType.' },
+            dataType: { type: 'string', description: 'Built-in ABAP type, e.g. CHAR, NUMC, DEC. Alternative to domain.' },
+            length: { type: 'number', description: 'Length, for a built-in type.' },
+            decimals: { type: 'number', description: 'Decimal places, for a built-in type.' },
+            label: {
+              type: 'string',
+              description: 'Fills all four field labels at once, each cut to the length SAP allows (10/20/40/55); the answer says which were cut.'
+            },
+            shortLabel: { type: 'string', description: 'Short label, up to 10 characters.' },
+            mediumLabel: { type: 'string', description: 'Medium label, up to 20 characters.' },
+            longLabel: { type: 'string', description: 'Long label, up to 40 characters.' },
+            headingLabel: { type: 'string', description: 'Heading, up to 55 characters.' },
+            searchHelp: { type: 'string', description: 'Search help name.' },
+            searchHelpParameter: { type: 'string', description: 'Search help parameter.' },
+            setGetParameter: { type: 'string', description: 'SET/GET parameter id.' },
+            changeDocument: { type: 'boolean', description: 'Log changes in change documents.' },
+            transport: {
+              type: 'string',
+              description: 'Transport request number - the request itself, not a developer task. Not needed in $TMP.'
+            },
+            responsible: { type: 'string', description: 'Responsible user; defaults to the logon user.' },
+            activate: { type: 'boolean', description: 'Activate at the end (default true).' },
+            dryRun: { type: 'boolean', description: 'Validate the name and show what would be written, creating nothing.' }
+          },
+          required: ['name', 'description', 'packageName']
+        }
       }
     ];
   }
 
   async handle(toolName: string, args: any): Promise<any> {
     switch (toolName) {
+      case 'createDomain':
+        return this.handleCreateDomain(args);
+      case 'createDataElement':
+        return this.handleCreateDataElement(args);
       case 'getDomainProperties':
         return this.handleGetDomainProperties(args);
       case 'setDomainProperties':
@@ -417,6 +502,305 @@ export class DdicPropertyHandlers extends BaseHandler {
         ? undefined
         : this.parseObjectArg(args.fixValues, 'fixValues')
     };
+  }
+
+  /**
+   * Create a domain, then define it.
+   *
+   * Two calls that only make sense together: an object created and never
+   * written is a DDIC entry with no type, which cannot be activated and shows
+   * up as an error the next time anything touches the package. Whether a
+   * caller can be expected to remember the second half is exactly the kind of
+   * thing a composite tool should take off their hands.
+   */
+  async handleCreateDomain(args: any): Promise<any> {
+    return this.createDdicObject({
+      args,
+      objtype: 'DOMA/DD',
+      what: 'domain',
+      url: domainUrl(String(args?.name || '')),
+      document: async url => {
+        const state = await this.domainDocument(url, args);
+        return { payload: state, extra: {} };
+      },
+      write: async (url, payload, lockHandle) => {
+        await this.adtclient.setDomainProperties(
+          url,
+          (payload as DomainState).properties,
+          (payload as DomainState).metaData,
+          lockHandle,
+          args?.transport
+        );
+      }
+    });
+  }
+
+  /** Create a data element, then define it. Same reasoning as createDomain. */
+  async handleCreateDataElement(args: any): Promise<any> {
+    const conflict = typeChoiceError(this.dataElementPatch(args));
+    if (conflict) throw new McpError(ErrorCode.InvalidParams, conflict);
+    if (args?.domain === undefined && args?.dataType === undefined) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'A data element needs a type: pass domain, or dataType with length (and decimals). Without one it cannot be activated.'
+      );
+    }
+
+    return this.createDdicObject({
+      args,
+      objtype: 'DTEL/DE',
+      what: 'data element',
+      url: dataElementUrl(String(args?.name || '')),
+      document: async url => {
+        const { state, truncated } = await this.dataElementDocument(url, args);
+        return {
+          payload: state,
+          extra: {
+            typeKind: state.properties.typeName ? 'domain' : 'predefinedAbapType',
+            ...(truncated.length ? { truncatedLabels: truncated } : {})
+          }
+        };
+      },
+      write: async (url, payload, lockHandle) => {
+        await this.adtclient.setDataElementProperties(
+          url,
+          (payload as DataElementState).properties,
+          (payload as DataElementState).metaData,
+          lockHandle,
+          args?.transport
+        );
+      }
+    });
+  }
+
+  /**
+   * validate, create, lock, read, write, unlock, activate.
+   *
+   * The order is not negotiable: the definition can only be written once the
+   * object exists and is locked, the metadata in the document has to be the
+   * system's own (master language and system, responsible, package - guessing
+   * them produces an object that activates but reads wrong), and activation
+   * needs the lock gone. Each step is reported, and nothing is rolled back: a
+   * half-created object is visible in the answer and can be corrected or
+   * deleted, which beats silently undoing work the caller may want to keep.
+   */
+  private async createDdicObject(spec: {
+    args: any;
+    objtype: string;
+    what: string;
+    url: string;
+    document: (url: string) => Promise<{ payload: unknown; extra: Record<string, unknown> }>;
+    write: (url: string, payload: unknown, lockHandle: string) => Promise<void>;
+  }): Promise<any> {
+    const { args, objtype, what, url } = spec;
+    const name = String(args?.name || '').trim().toUpperCase();
+    const packageName = String(args?.packageName || '').trim().toUpperCase();
+    if (!name || !packageName || !args?.description) {
+      throw new McpError(ErrorCode.InvalidParams, 'Pass name, description and packageName.');
+    }
+    if (!args?.transport && packageName !== '$TMP') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Creating a ${what} in ${packageName} needs a transport request (the request itself, not a developer task). Only $TMP goes without one.`
+      );
+    }
+
+    const parentPath = `/sap/bc/adt/packages/${encodeURIComponent(packageName.toLowerCase())}`;
+    const steps: Record<string, unknown>[] = [];
+
+    // Validation is cheap and its message is far better than the backend's
+    // answer to a creation that cannot work: a name already taken, a namespace
+    // that is not allowed, a package that does not exist.
+    const validateStart = performance.now();
+    let validation: any;
+    try {
+      validation = await this.readClient.validateNewObject({
+        objtype: objtype as any,
+        objname: name,
+        packagename: packageName,
+        description: String(args.description)
+      });
+      this.trackRequest(validateStart, true);
+    } catch (error: any) {
+      this.trackRequest(validateStart, false);
+      throw wrapAdtError(error, `Failed to validate the new ${what} ${name}`);
+    }
+    steps.push({ step: 'validate', ...validation });
+    if (validation && validation.success === false) {
+      return this.answer({
+        status: 'error',
+        created: false,
+        objectUrl: url,
+        name,
+        steps,
+        hint: `The system refused the name: ${validation.SHORT_TEXT || 'see the validate step'}. Nothing was created.`
+      });
+    }
+
+    if (args?.dryRun === true) {
+      return this.answer({
+        status: 'success',
+        dryRun: true,
+        created: false,
+        objectUrl: url,
+        name,
+        packageName,
+        steps,
+        note: `The name is free and the package accepts it. The definition itself can only be built from the created object's metadata, so a dry run stops here.`
+      });
+    }
+
+    const createStart = performance.now();
+    try {
+      await this.adtclient.createObject(
+        objtype as any,
+        name,
+        packageName,
+        String(args.description),
+        parentPath,
+        args?.responsible,
+        args?.transport
+      );
+      this.trackRequest(createStart, true);
+    } catch (error: any) {
+      this.trackRequest(createStart, false);
+      throw wrapAdtError(error, `Failed to create the ${what} ${name}`);
+    }
+    steps.push({ step: 'create', objectUrl: url, packageName });
+
+    let lockHandle: string;
+    const lockStart = performance.now();
+    try {
+      this.adtclient.stateful = session_types.stateful;
+      const lock = await this.adtclient.lock(url);
+      lockHandle = lock.LOCK_HANDLE;
+      lockRegistry.remember(url, lockHandle);
+      this.trackRequest(lockStart, true);
+    } catch (error: any) {
+      this.trackRequest(lockStart, false);
+      steps.push({ step: 'lock', error: describeAdtError(error).error });
+      return this.answer({
+        status: 'error',
+        created: true,
+        written: false,
+        objectUrl: url,
+        name,
+        steps,
+        hint: `The ${what} exists but has no definition yet, and it could not be locked. Lock it and finish with set${what === 'domain' ? 'Domain' : 'DataElement'}Properties, or delete it with deleteObject.`
+      });
+    }
+    steps.push({ step: 'lock', lockHandle });
+
+    let extra: Record<string, unknown> = {};
+    const writeStart = performance.now();
+    try {
+      const { payload, extra: documentExtra } = await spec.document(url);
+      extra = documentExtra;
+      await spec.write(url, payload, lockHandle);
+      this.trackRequest(writeStart, true);
+      steps.push({ step: 'write', ...(payload as Record<string, unknown>) });
+    } catch (error: any) {
+      this.trackRequest(writeStart, false);
+      steps.push({ step: 'write', error: describeAdtError(error).error });
+      const released = await this.releaseLock(url, lockHandle);
+      steps.push({ step: 'unlock', ...released });
+      return this.answer({
+        status: 'error',
+        created: true,
+        written: false,
+        objectUrl: url,
+        name,
+        steps,
+        ...extra,
+        hint: `The ${what} exists but its definition was not written, so it cannot be activated. Correct the arguments and use the set-properties tool, or delete it with deleteObject.`
+      });
+    }
+
+    const unlock = await this.releaseLock(url, lockHandle);
+    steps.push({ step: 'unlock', ...unlock });
+
+    if (args?.activate === false) {
+      return this.answer({
+        status: 'success',
+        created: true,
+        written: true,
+        activated: false,
+        objectUrl: url,
+        name,
+        steps,
+        ...extra,
+        hint: 'Written to the inactive version and not activated, so nothing can use it yet.'
+      });
+    }
+    if (!unlock.released) {
+      return this.answer({
+        status: 'error',
+        created: true,
+        written: true,
+        activated: false,
+        objectUrl: url,
+        name,
+        steps,
+        ...extra,
+        hint: 'The lock could not be released, and activation fails while it is held. Release it (unlockAll) and run activateSafe.'
+      });
+    }
+
+    const activateStart = performance.now();
+    try {
+      const outcome = await activateAndVerify(this.adtclient, {
+        objectUrl: url,
+        objectName: name,
+        parentUri: parentPath
+      });
+      this.trackRequest(activateStart, true);
+      steps.push({ step: 'activate', ...outcome });
+      return this.answer({
+        status: outcome.success ? 'success' : 'error',
+        created: true,
+        written: true,
+        activated: outcome.success,
+        objectUrl: url,
+        name,
+        steps,
+        ...extra,
+        hint: outcome.success
+          ? `Active. Read it back with get${what === 'domain' ? 'Domain' : 'DataElement'}Properties and version="active" for the proof.`
+          : 'Written but not active, so nothing can use it yet. Nothing was rolled back; correct it and run activateSafe.'
+      });
+    } catch (error: any) {
+      this.trackRequest(activateStart, false);
+      steps.push({ step: 'activate', error: describeAdtError(error).error });
+      return this.answer({
+        status: 'error',
+        created: true,
+        written: true,
+        activated: false,
+        objectUrl: url,
+        name,
+        steps,
+        ...extra,
+        hint: 'Written but not active. Nothing was rolled back; correct it and run activateSafe.'
+      });
+    }
+  }
+
+  /** Release a lock and forget it, reporting rather than throwing. */
+  private async releaseLock(
+    objectUrl: string,
+    lockHandle: string
+  ): Promise<{ released: boolean; error?: string }> {
+    const startTime = performance.now();
+    try {
+      this.adtclient.stateful = session_types.stateful;
+      await this.adtclient.unLock(objectUrl, lockHandle);
+      lockRegistry.forget(objectUrl);
+      this.trackRequest(startTime, true);
+      return { released: true };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      return { released: false, error: describeAdtError(error).error };
+    }
   }
 
   protected dataElementPatch(args: any): DataElementPatch {

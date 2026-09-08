@@ -462,6 +462,8 @@ export class AbapAdtServer extends Server {
             case 'rapGenIsAvailable':
                 result = await this.rapHandlers.handle(toolName, args);
                 break;
+            case 'createDomain':
+            case 'createDataElement':
             case 'getDomainProperties':
             case 'setDomainProperties':
             case 'getDataElementProperties':

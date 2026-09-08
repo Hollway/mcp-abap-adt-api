@@ -40,6 +40,8 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'renameExecute',
   'extractMethodExecute',
   // DDIC contents
+  'createDomain',
+  'createDataElement',
   'setDomainProperties',
   'setDataElementProperties',
   // text elements
