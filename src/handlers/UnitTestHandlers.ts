@@ -9,7 +9,7 @@ export class UnitTestHandlers extends BaseHandler {
         return [
             {
                 name: 'unitTestRun',
-                description: 'Runs unit tests.',
+                description: 'Run ABAP Unit tests for an object. An empty result does not mean the tests passed - it means none ran, and the answer then explains why (inactive object, or an include that does not compile).',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -117,6 +117,44 @@ export class UnitTestHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * An empty result from ABAP Unit does NOT mean "all tests passed", and it
+     * does not mean "this class has no tests" either. It means one of:
+     *   - the class is inactive, so its test include was never compiled;
+     *   - the test include itself does not compile;
+     *   - there really are no tests.
+     * ABAP Unit reports none of that, which has cost real debugging time, so
+     * check the inactive list and say what is actually going on.
+     */
+    private async diagnoseEmptyRun(url: string): Promise<Record<string, unknown>> {
+        try {
+            const inactive = await this.adtclient.inactiveObjects();
+            const target = (url || '').toLowerCase();
+            const related = inactive
+                .map(r => r.object)
+                .filter(e => !!e && (e['adtcore:uri'] || '').toLowerCase().startsWith(target))
+                .map(e => ({ name: e!['adtcore:name'], type: e!['adtcore:type'] }));
+
+            if (related.length > 0) {
+                return {
+                    emptyResult: true,
+                    inactiveParts: related,
+                    hint: 'No tests ran because this object is not active: the test include is not compiled against it. Run activateSafe and try again - its messages carry any syntax error.'
+                };
+            }
+            return {
+                emptyResult: true,
+                inactiveParts: [],
+                hint: 'The object is active, so either the test include does not compile or it defines no tests. Re-save the test include and activate class, public section and include together, then re-run. An empty result never means "all tests passed".'
+            };
+        } catch {
+            return {
+                emptyResult: true,
+                hint: 'No tests ran, and the inactive list could not be read to say why. An empty result never means "all tests passed".'
+            };
+        }
+    }
+
     async handleUnitTestRun(args: any): Promise<any> {
         const startTime = performance.now();
         try {
@@ -124,6 +162,9 @@ export class UnitTestHandlers extends BaseHandler {
                 args.url,
                 this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
             );
+            const diagnosis = Array.isArray(result) && result.length === 0
+                ? await this.diagnoseEmptyRun(args.url)
+                : {};
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -131,6 +172,7 @@ export class UnitTestHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            ...diagnosis,
                             result
                         })
                     }
