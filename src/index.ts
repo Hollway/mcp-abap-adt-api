@@ -225,7 +225,7 @@ export class AbapAdtServer extends Server {
             ...this.revisionHandlers.getTools(),
             {
             name: 'healthcheck',
-            description: 'Check server health and connectivity',
+            description: 'Check ADT connectivity. Calls the backend and reports which SAP system this server talks to (url, client, language, user), the session state and the round-trip latency; on failure it reports whether the session is dead.',
             inputSchema: {
               type: 'object',
               properties: {}
@@ -427,13 +427,68 @@ export class AbapAdtServer extends Server {
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
             case 'healthcheck':
-                result = { status: 'healthy', timestamp: new Date().toISOString() };
+                result = await this.healthcheck();
                 break;
             default:
                 throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
 
     return result;
+  }
+
+  /**
+   * Report what this server is actually connected to and whether ADT answers.
+   *
+   * The old implementation returned a constant 'healthy', so it kept claiming
+   * health while every call failed on a dead session - and it never said which
+   * SAP system this process talks to, which matters when several instances of
+   * this server run side by side against different systems.
+   */
+  private async healthcheck() {
+    const system = {
+      url: this.adtClient.baseUrl,
+      client: this.adtClient.client || undefined,
+      language: this.adtClient.language || undefined,
+      user: this.adtClient.username
+    };
+    const session = {
+      loggedin: this.adtClient.loggedin,
+      stateful: this.adtClient.isStateful,
+      // The token and the cookies themselves stay out of the payload.
+      csrfToken: this.adtClient.csrfToken ? 'present' : 'missing'
+    };
+
+    const startTime = performance.now();
+    try {
+      const discovery = await this.adtClient.adtCoreDiscovery();
+      return {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        system,
+        session: { ...session, loggedin: this.adtClient.loggedin },
+        adt: {
+          reachable: true,
+          latencyMs: Math.round(performance.now() - startTime),
+          collections: Array.isArray(discovery) ? discovery.length : undefined
+        }
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        system,
+        session,
+        adt: {
+          reachable: false,
+          latencyMs: Math.round(performance.now() - startTime)
+        },
+        ...errorPayload(error),
+        sessionFailure: isSessionFailure(error),
+        hint: isSessionFailure(error)
+          ? 'The ADT session looks dead. Call login, or just retry - a read-only call recovers the session by itself.'
+          : 'ADT did not answer. Check the URL, the network route and the credentials.'
+      };
+    }
   }
 
   /**
