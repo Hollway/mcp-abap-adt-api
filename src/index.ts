@@ -363,6 +363,7 @@ export class AbapAdtServer extends Server {
             case 'codeCompletion':
             case 'findDefinition':
             case 'usageReferences':
+            case 'whereUsedMethod':
             case 'typeHierarchy':
             case 'syntaxCheckTypes':
             case 'codeCompletionFull':

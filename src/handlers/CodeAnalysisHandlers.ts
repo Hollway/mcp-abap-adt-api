@@ -7,7 +7,9 @@ import { sourceCache } from '../lib/sourceCache.js';
 import {
     classSourceUrl,
     interfaceSourceUrl,
-    locateType
+    locateMethod,
+    locateType,
+    objectUrlOf
 } from '../lib/symbolPosition';
 import type { SymbolPosition } from '../lib/symbolPosition';
 
@@ -85,6 +87,36 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         column: { type: 'number' }
                     },
                     required: ['url']
+                }
+            },
+            {
+                name: 'whereUsedMethod',
+                description: 'Who calls this method. usageReferences needs the line and column of the name inside the source, which means reading the class first and counting characters; here the method name is enough. Returns the callers with the object they sit in, and their source snippets with snippets=true.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        className: {
+                            type: 'string',
+                            description: 'Class holding the method, e.g. ZCL_MM_PCK_PLAN.'
+                        },
+                        interfaceName: {
+                            type: 'string',
+                            description: 'Interface holding the method, for an interface method.'
+                        },
+                        objectSourceUrl: {
+                            type: 'string',
+                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main.'
+                        },
+                        method: {
+                            type: 'string',
+                            description: 'Method name, e.g. CHECK_PLAN. The declaration is preferred over the implementation, because ADT answers a where-used on the declaration with every caller.'
+                        },
+                        snippets: {
+                            type: 'boolean',
+                            description: 'Also fetch the source snippet of each usage (one more backend call, much larger answer).'
+                        }
+                    },
+                    required: ['method']
                 }
             },
             {
@@ -272,6 +304,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 return this.handleFindDefinition(args);
             case 'usageReferences':
                 return this.handleUsageReferences(args);
+            case 'whereUsedMethod':
+                return this.handleWhereUsedMethod(args);
             case 'typeHierarchy':
                 return this.handleTypeHierarchy(args);
             case 'syntaxCheckTypes':
@@ -548,6 +582,88 @@ export class CodeAnalysisHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to read the type hierarchy');
+        }
+    }
+
+    /**
+     * Where-used for a method, by name.
+     *
+     * usageReferences resolves whatever the cursor is on, so its useful form
+     * needs a position - and a position means reading the class, finding the
+     * method and counting columns before the interesting call can even be
+     * made. All of that happens here.
+     *
+     * Which URL carries the position is a backend detail: the source URL is
+     * the one that matches how ADT itself asks, and if it comes back empty the
+     * object URL is tried as well, with the answer saying which one replied.
+     */
+    async handleWhereUsedMethod(args: any): Promise<any> {
+        const method = String(args?.method || '').trim();
+        if (!method) {
+            throw new McpError(ErrorCode.InvalidParams, 'Which method? Pass method.');
+        }
+        const { sourceUrl } = this.sourceUrlOf({ ...args, name: args?.name || args?.className || args?.interfaceName });
+        const source = await this.sourceOf(sourceUrl);
+        const at = locateMethod(source, method);
+        if (!at) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `No declaration or implementation of '${method}' in ${sourceUrl}. Check the name with sourceOutline or classComponents.`
+            );
+        }
+
+        const startTime = performance.now();
+        try {
+            let askedUrl = sourceUrl;
+            let references = await this.readClient.usageReferences(sourceUrl, at.line, at.column);
+            if ((references || []).length === 0) {
+                const objectUrl = objectUrlOf(sourceUrl);
+                const retry = await this.readClient.usageReferences(objectUrl, at.line, at.column);
+                if ((retry || []).length > 0) {
+                    references = retry;
+                    askedUrl = objectUrl;
+                }
+            }
+            this.trackRequest(startTime, true);
+
+            const usages = (references || []).map((r: any) => ({
+                name: r?.['adtcore:name'],
+                type: r?.['adtcore:type'],
+                uri: r?.uri,
+                package: r?.packageRef?.['adtcore:name'],
+                objectIdentifier: r?.objectIdentifier
+            }));
+
+            const snippets = args?.snippets === true && (references || []).length > 0
+                ? await this.readClient.usageReferenceSnippets(references)
+                : undefined;
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        method: method.toUpperCase(),
+                        resolvedAt: {
+                            sourceUrl,
+                            line: at.line,
+                            column: at.column,
+                            kind: at.kind,
+                            lineText: at.lineText
+                        },
+                        askedUrl,
+                        count: usages.length,
+                        usages,
+                        ...(snippets ? { snippets } : {}),
+                        ...(usages.length === 0
+                            ? { note: 'No usages came back. A private method used only inside its own class, or a method reached only dynamically, looks exactly like this.' }
+                            : {})
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            throw wrapAdtError(error, `Failed to find usages of ${method}`);
         }
     }
 
