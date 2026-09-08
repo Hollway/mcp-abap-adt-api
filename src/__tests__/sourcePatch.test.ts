@@ -86,6 +86,27 @@ describe('anchor edits', () => {
   it('refuses an anchor that is not there', () => {
     expect(() => patch(CRLF, [{ anchor: 'NOPE', replacement: 'x' }])).toThrow(/anchor not found/);
   });
+
+  /**
+   * ADT serves this system's sources with CRLF, and an anchor is written with
+   * plain newlines. Matching it literally meant every multi-line anchor came
+   * back "not found" - seen live while trying to delete a line by quoting it
+   * with its newline.
+   */
+  it('matches a multi-line anchor written with plain newlines', () => {
+    const out = patch(CRLF, [{
+      anchor: '    METHODS one.\n    METHODS two.',
+      replacement: '    METHODS one_and_two.'
+    }]);
+    expect(lines(out)[2]).toBe('    METHODS one_and_two.');
+    expect(out).not.toContain('METHODS two.');
+  });
+
+  it('deletes a line quoted with its own newline', () => {
+    const out = patch(CRLF, [{ anchor: '    METHODS two.\n', replacement: '' }]);
+    expect(out).not.toContain('METHODS two.');
+    expect(lines(out)).toHaveLength(lines(CRLF).length - 1);
+  });
 });
 
 describe('several edits', () => {

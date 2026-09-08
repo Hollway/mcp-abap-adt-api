@@ -187,11 +187,16 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
       if (typeof edit.replacement !== 'string') {
         throw new PatchError('replacement must be a string.');
       }
+      // ADT serves this system's sources with CRLF line ends, and an anchor is
+      // typed with plain newlines - matching it literally made every
+      // multi-line anchor "not found". The anchor is translated to the
+      // source's own line ending, exactly as replacements already are.
+      const anchor = edit.anchor.replace(/\r?\n/g, nl);
       const positions: number[] = [];
-      let at = source.indexOf(edit.anchor);
+      let at = source.indexOf(anchor);
       while (at >= 0) {
         positions.push(at);
-        at = source.indexOf(edit.anchor, at + edit.anchor.length);
+        at = source.indexOf(anchor, at + anchor.length);
       }
       if (positions.length === 0) {
         throw new PatchError(`anchor not found: ${JSON.stringify(edit.anchor.slice(0, 80))}`);
@@ -206,7 +211,7 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
         throw new PatchError(`occurrence must be between 1 and ${positions.length}.`);
       }
       const start = positions[index];
-      const end = start + edit.anchor.length;
+      const end = start + anchor.length;
       resolved.push({
         start,
         end,
