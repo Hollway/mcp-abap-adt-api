@@ -1,4 +1,5 @@
 import { ObjectManagementHandlers } from '../handlers/ObjectManagementHandlers';
+import { activateAndVerify } from '../lib/activation';
 
 /**
  * activateByName is the trap this file guards: on a live system it answered
@@ -65,5 +66,74 @@ describe('activateByName', () => {
     expect(result).toMatchObject({ success: true, reportedSuccess: true });
     expect(result.verified).toBeUndefined();
     expect(result.hint).toMatch(/unverified/);
+  });
+});
+
+/**
+ * The inactive list leaves adtcore:parentUri empty for a program, and
+ * activation refuses an entry without one. Live, that turned a completed edit
+ * into a failed activation over a value the system knows: the workbench path
+ * of the object names its package.
+ */
+describe('activateAndVerify: the package the inactive list omits', () => {
+  const PROGRAM = '/sap/bc/adt/programs/programs/zkri_test';
+  const rowWithoutPackage = () => ({
+    object: {
+      'adtcore:uri': PROGRAM,
+      'adtcore:type': 'PROG/P',
+      'adtcore:name': 'ZKRI_TEST',
+      'adtcore:parentUri': '',
+      user: 'TESTER',
+      deleted: false
+    }
+  });
+
+  const client = (over: Record<string, unknown> = {}) => {
+    let activated: any[] = [];
+    let rounds = 0;
+    const stub = {
+      inactiveObjects: async () => (rounds === 0 ? [rowWithoutPackage()] : []),
+      findObjectPath: async () => [
+        { 'adtcore:type': 'DEVC/K', 'adtcore:name': '$TMP' },
+        { 'adtcore:type': 'PROG/P', 'adtcore:name': 'ZKRI_TEST' }
+      ],
+      activate: async (objects: any[]) => {
+        activated = objects;
+        rounds += 1;
+        return { success: true, messages: [], inactive: [] };
+      },
+      ...over
+    };
+    return { stub, sent: () => activated };
+  };
+
+  it('looks the package up and encodes it for the URI', async () => {
+    const { stub, sent } = client();
+    const outcome = await activateAndVerify(stub as any, { objectUrl: PROGRAM });
+    expect(outcome.success).toBe(true);
+    expect(sent()[0]['adtcore:parentUri']).toBe('/sap/bc/adt/packages/%24tmp');
+  });
+
+  it('prefers the parentUri the caller passed', async () => {
+    const { stub, sent } = client();
+    await activateAndVerify(stub as any, {
+      objectUrl: PROGRAM,
+      parentUri: '/sap/bc/adt/packages/zmm_base'
+    });
+    expect(sent()[0]['adtcore:parentUri']).toBe('/sap/bc/adt/packages/zmm_base');
+  });
+
+  it('still says what to pass when the lookup finds no package', async () => {
+    const { stub } = client({ findObjectPath: async () => [] });
+    await expect(activateAndVerify(stub as any, { objectUrl: PROGRAM }))
+      .rejects.toThrow(/parentUri=\/sap\/bc\/adt\/packages/);
+  });
+
+  it('survives a lookup that fails outright', async () => {
+    const { stub } = client({
+      findObjectPath: async () => { throw new Error('no path for this object'); }
+    });
+    await expect(activateAndVerify(stub as any, { objectUrl: PROGRAM }))
+      .rejects.toThrow(/could not be looked up/);
   });
 });

@@ -93,6 +93,30 @@ export function selectInactive(
 const asRef = (e: { 'adtcore:name': string; 'adtcore:type': string }): ObjectRef =>
   ({ name: e['adtcore:name'], type: e['adtcore:type'] });
 
+/**
+ * Package URI of an object, from the path the workbench shows for it.
+ *
+ * findObjectPath answers with the chain from the package down to the object,
+ * and the package step is the DEVC entry - the object's own metadata does not
+ * carry it. Returns undefined rather than throwing: this is a convenience, and
+ * the caller still has a clear error for the case where it does not work.
+ */
+export async function packageUriOf(
+  client: ADTClient,
+  objectUrl: string
+): Promise<string | undefined> {
+  try {
+    const path: any[] = await client.findObjectPath(objectUrl.split('#')[0]);
+    const devc = (path || []).find(step =>
+      `${step?.['adtcore:type'] || ''}`.toUpperCase().startsWith('DEVC'));
+    const name = devc?.['adtcore:name'];
+    if (!name) return undefined;
+    return `/sap/bc/adt/packages/${encodeURIComponent(String(name).toLowerCase())}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Activate exactly what is inactive for this object, then check it is gone. */
 export async function activateAndVerify(
   client: ADTClient,
@@ -120,13 +144,26 @@ export async function activateAndVerify(
     'adtcore:parentUri': e['adtcore:parentUri'] || request.parentUri || ''
   }));
 
+  // Activation rejects an entry with an empty parentUri, and the inactive list
+  // leaves it empty for a program - seen live on a $TMP report, where the
+  // whole edit succeeded and only the activation fell over on a value the
+  // system knows perfectly well. Ask it.
+  if (objects.some(o => !o['adtcore:parentUri'])) {
+    const resolved = await packageUriOf(client, request.objectUrl || objects[0]['adtcore:uri']);
+    if (resolved) {
+      objects.forEach(o => {
+        if (!o['adtcore:parentUri']) o['adtcore:parentUri'] = resolved;
+      });
+    }
+  }
+
   const missingParent = objects.filter(o => !o['adtcore:parentUri']);
   if (missingParent.length > 0) {
     throw new McpError(
       ErrorCode.InvalidParams,
-      `Activation needs a non-empty adtcore:parentUri, and the inactive list left it empty for: ${
+      `Activation needs a non-empty adtcore:parentUri, the inactive list left it empty for: ${
         missingParent.map(o => o['adtcore:name']).join(', ')
-      }. Pass parentUri=/sap/bc/adt/packages/<package>.`
+      }, and the package could not be looked up. Pass parentUri=/sap/bc/adt/packages/<package>.`
     );
   }
 
