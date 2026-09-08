@@ -154,7 +154,7 @@ export class ObjectSourceHandlers extends BaseHandler {
     const startTime = performance.now();
     try {
       const options = this.sourceOptions(args);
-      const fullSource = await this.adtclient.getObjectSource(args.objectSourceUrl, options);
+      const fullSource = await this.readClient.getObjectSource(args.objectSourceUrl, options);
       // Remember the source so a later syntaxCheckCode on the same URL can reuse
       // it without the caller re-sending it (issue #2). Only the working version
       // is cached under the plain URL: a syntax check is about the code being

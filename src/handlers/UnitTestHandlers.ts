@@ -128,7 +128,7 @@ export class UnitTestHandlers extends BaseHandler {
      */
     private async diagnoseEmptyRun(url: string): Promise<Record<string, unknown>> {
         try {
-            const inactive = await this.adtclient.inactiveObjects();
+            const inactive = await this.readClient.inactiveObjects();
             const target = (url || '').toLowerCase();
             const related = inactive
                 .map(r => r.object)
@@ -187,7 +187,7 @@ export class UnitTestHandlers extends BaseHandler {
     async handleUnitTestEvaluation(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.unitTestEvaluation(
+            const result = await this.readClient.unitTestEvaluation(
                 this.parseObjectArg<UnitTestClass>(args.clas, 'clas'),
                 this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
             );
@@ -212,7 +212,7 @@ export class UnitTestHandlers extends BaseHandler {
     async handleUnitTestOccurrenceMarkers(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const markers = await this.adtclient.unitTestOccurrenceMarkers(args.url, args.source);
+            const markers = await this.readClient.unitTestOccurrenceMarkers(args.url, args.source);
             this.trackRequest(startTime, true);
             return {
                 content: [

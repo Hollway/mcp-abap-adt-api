@@ -105,7 +105,7 @@ export class QueryHandlers extends BaseHandler {
     async handleTableContents(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.tableContents(
+            const result = await this.readClient.tableContents(
                 args.ddicEntityName,
                 this.fetchCount(args),
                 args.decode,
@@ -133,7 +133,7 @@ export class QueryHandlers extends BaseHandler {
     async handleRunQuery(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.runQuery(
+            const result = await this.readClient.runQuery(
                 args.sqlQuery,
                 this.fetchCount(args),
                 args.decode

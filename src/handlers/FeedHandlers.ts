@@ -45,7 +45,7 @@ export class FeedHandlers extends BaseHandler {
     async handleFeeds(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const feeds = await this.adtclient.feeds();
+            const feeds = await this.readClient.feeds();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -67,7 +67,7 @@ export class FeedHandlers extends BaseHandler {
     async handleDumps(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const dumps = await this.adtclient.dumps(args.query);
+            const dumps = await this.readClient.dumps(args.query);
             this.trackRequest(startTime, true);
             return {
                 content: [

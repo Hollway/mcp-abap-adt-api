@@ -237,7 +237,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleSyntaxCheckCdsUrl(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.syntaxCheck(args.cdsUrl);
+            const result = await this.readClient.syntaxCheck(args.cdsUrl);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -275,7 +275,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.syntaxCheck(args.url, args?.mainUrl, code, args?.mainProgram, args?.version);
+            const result = await this.readClient.syntaxCheck(args.url, args?.mainUrl, code, args?.mainProgram, args?.version);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -298,7 +298,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleCodeCompletion(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.codeCompletion(
+            const result = await this.readClient.codeCompletion(
                 args.sourceUrl,
                 args.source,
                 args.line,
@@ -325,7 +325,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleFindDefinition(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.findDefinition(
+            const result = await this.readClient.findDefinition(
                 args.url,
                 args.source,
                 args.line,
@@ -355,7 +355,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleUsageReferences(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.usageReferences(
+            const result = await this.readClient.usageReferences(
                 args.url,
                 args.line,
                 args.column
@@ -381,7 +381,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleSyntaxCheckTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.syntaxCheckTypes();
+            const result = await this.readClient.syntaxCheckTypes();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -403,7 +403,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleCodeCompletionFull(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.codeCompletionFull(args.sourceUrl, args.source, args.line, args.column, args.patternKey);
+            const result = await this.readClient.codeCompletionFull(args.sourceUrl, args.source, args.line, args.column, args.patternKey);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -447,7 +447,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleCodeCompletionElement(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.codeCompletionElement(args.sourceUrl, args.source, args.line, args.column);
+            const result = await this.readClient.codeCompletionElement(args.sourceUrl, args.source, args.line, args.column);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -469,7 +469,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleUsageReferenceSnippets(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.usageReferenceSnippets(this.parseObjectArg(args.references, 'references'));
+            const result = await this.readClient.usageReferenceSnippets(this.parseObjectArg(args.references, 'references'));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -491,7 +491,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleFixProposals(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.fixProposals(args.url, args.source, args.line, args.column);
+            const result = await this.readClient.fixProposals(args.url, args.source, args.line, args.column);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -513,7 +513,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleFixEdits(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.fixEdits(this.parseObjectArg(args.proposal, 'proposal'), args.source);
+            const result = await this.readClient.fixEdits(this.parseObjectArg(args.proposal, 'proposal'), args.source);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -535,7 +535,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleFragmentMappings(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.fragmentMappings(args.url, args.type, args.name);
+            const result = await this.readClient.fragmentMappings(args.url, args.type, args.name);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -557,7 +557,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleAbapDocumentation(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.abapDocumentation(args.objectUri, args.body, args.line, args.column, args.language);
+            const result = await this.readClient.abapDocumentation(args.objectUri, args.body, args.line, args.column, args.language);
             this.trackRequest(startTime, true);
             return {
                 content: [

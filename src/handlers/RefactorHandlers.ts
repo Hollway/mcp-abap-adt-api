@@ -73,7 +73,7 @@ export class RefactorHandlers extends BaseHandler {
         const startTime = performance.now();
         try {
             const range = this.parseObjectArg<Range>(args.range, 'range');
-            const result = await this.adtclient.extractMethodEvaluate(args.uri, range);
+            const result = await this.readClient.extractMethodEvaluate(args.uri, range);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -96,7 +96,7 @@ export class RefactorHandlers extends BaseHandler {
         const startTime = performance.now();
         try {
             const proposal = this.parseObjectArg<ExtractMethodProposal>(args.proposal, 'proposal');
-            const result = await this.adtclient.extractMethodPreview(proposal);
+            const result = await this.readClient.extractMethodPreview(proposal);
             this.trackRequest(startTime, true);
             return {
                 content: [

@@ -177,7 +177,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
   async handleObjectRegistrationInfo(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      const info = await this.adtclient.objectRegistrationInfo(args.objectUrl);
+      const info = await this.readClient.objectRegistrationInfo(args.objectUrl);
       this.trackRequest(startTime, true);
       return {
         content: [{
@@ -197,7 +197,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
   async handleValidateNewObject(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      const result = await this.adtclient.validateNewObject(this.parseObjectArg(args.options, 'options'));
+      const result = await this.readClient.validateNewObject(this.parseObjectArg(args.options, 'options'));
       this.trackRequest(startTime, true);
       return {
         content: [{

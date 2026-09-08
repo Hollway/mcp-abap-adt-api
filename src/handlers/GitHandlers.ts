@@ -270,7 +270,7 @@ export class GitHandlers extends BaseHandler {
     async handleGitRepos(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const repos = await this.adtclient.gitRepos();
+            const repos = await this.readClient.gitRepos();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -292,7 +292,7 @@ export class GitHandlers extends BaseHandler {
     async handleGitExternalRepoInfo(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const repoInfo = await this.adtclient.gitExternalRepoInfo(
+            const repoInfo = await this.readClient.gitExternalRepoInfo(
                 args.repourl,
                 args.user,
                 args.password
@@ -450,7 +450,7 @@ export class GitHandlers extends BaseHandler {
     async handleCheckRepo(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.checkRepo(
+            const result = await this.readClient.checkRepo(
                 args.repo,
                 args.user,
                 args.password
@@ -476,7 +476,7 @@ export class GitHandlers extends BaseHandler {
     async handleRemoteRepoInfo(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const repoInfo = await this.adtclient.remoteRepoInfo(
+            const repoInfo = await this.readClient.remoteRepoInfo(
                 args.repo,
                 args.user,
                 args.password

@@ -326,7 +326,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportInfo(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const transportInfo = await this.adtclient.transportInfo(
+            const transportInfo = await this.readClient.transportInfo(
                 args.objSourceUrl,
                 args.devClass,
                 args.operation
@@ -380,7 +380,7 @@ export class TransportHandlers extends BaseHandler {
     async handleHasTransportConfig(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const hasConfig = await this.adtclient.hasTransportConfig();
+            const hasConfig = await this.readClient.hasTransportConfig();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -402,7 +402,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportConfigurations(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const configurations = await this.adtclient.transportConfigurations();
+            const configurations = await this.readClient.transportConfigurations();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -424,7 +424,7 @@ export class TransportHandlers extends BaseHandler {
     async handleGetTransportConfiguration(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const configuration = await this.adtclient.getTransportConfiguration(args.url);
+            const configuration = await this.readClient.getTransportConfiguration(args.url);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -558,7 +558,7 @@ export class TransportHandlers extends BaseHandler {
             // empty workbench/customizing lists even for users whose requests
             // demonstrably exist, which reads as "no transports".
             const targets = args?.targets === undefined ? true : args.targets;
-            const transports = await this.adtclient.userTransports(args.user, targets);
+            const transports = await this.readClient.userTransports(args.user, targets);
             this.trackRequest(startTime, true);
 
             if (args?.raw === true) {
@@ -590,7 +590,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportsByConfig(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const transports = await this.adtclient.transportsByConfig(args.configUri, args.targets);
+            const transports = await this.readClient.transportsByConfig(args.configUri, args.targets);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -700,7 +700,7 @@ export class TransportHandlers extends BaseHandler {
     async handleSystemUsers(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const users = await this.adtclient.systemUsers();
+            const users = await this.readClient.systemUsers();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -722,7 +722,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportReference(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const reference = await this.adtclient.transportReference(args.pgmid, args.obj_wbtype, args.obj_name, args.tr_number);
+            const reference = await this.readClient.transportReference(args.pgmid, args.obj_wbtype, args.obj_name, args.tr_number);
             this.trackRequest(startTime, true);
             return {
                 content: [

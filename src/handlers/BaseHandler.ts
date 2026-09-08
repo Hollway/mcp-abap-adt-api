@@ -14,6 +14,34 @@ export abstract class BaseHandler {
   }
 
   /**
+   * Client for calls that only read.
+   *
+   * The main client is stateful, because locks and source writes require it -
+   * and abap-adt-api deliberately skips its re-login retry while a client is
+   * stateful (AdtHTTP.request guards it with !this.isStateful). A long stretch
+   * of reads on the stateful session is therefore exactly how that session
+   * used to rot and take every later call down with it.
+   *
+   * statelessClone is a separate client with its own session: reads recover on
+   * their own and never disturb the session holding the locks. Flipping the
+   * main client's session type per call is NOT an option - sending
+   * X-sap-adt-sessiontype: stateless ends the stateful session and releases
+   * every lock with it.
+   *
+   * The debugger keeps using the stateful client: its reads only mean anything
+   * inside the attached session.
+   */
+  protected get readClient(): ADTClient {
+    try {
+      // statelessClone needs credentials to build, and a stubbed client in a
+      // test may not have it at all - fall back rather than fail the call.
+      return this.adtclient.statelessClone || this.adtclient;
+    } catch {
+      return this.adtclient;
+    }
+  }
+
+  /**
    * Count one backend call. The numbers live in lib/metrics so healthcheck can
    * report them; the log line is debug, not info, because it used to be
    * written on every single request.

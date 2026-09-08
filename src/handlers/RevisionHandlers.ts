@@ -40,7 +40,7 @@ export class RevisionHandlers extends BaseHandler {
     async handleRevisions(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const revisions = await this.adtclient.revisions(args.objectUrl, args.clsInclude);
+            const revisions = await this.readClient.revisions(args.objectUrl, args.clsInclude);
             this.trackRequest(startTime, true);
             return {
                 content: [

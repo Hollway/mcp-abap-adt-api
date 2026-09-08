@@ -124,7 +124,7 @@ export class ServiceBindingHandlers extends BaseHandler {
     async handleBindingDetails(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const details = await this.adtclient.bindingDetails(args.binding, args.index);
+            const details = await this.readClient.bindingDetails(args.binding, args.index);
             this.trackRequest(startTime, true);
             return {
                 content: [

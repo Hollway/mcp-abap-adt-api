@@ -74,7 +74,7 @@ export class ClassHandlers extends BaseHandler {
     async handleClassComponents(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.classComponents(args.url);
+            const result = await this.readClient.classComponents(args.url);
             this.trackRequest(startTime, true);
             return {
                 content: [

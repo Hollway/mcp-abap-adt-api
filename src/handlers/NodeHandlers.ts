@@ -72,7 +72,7 @@ export class NodeHandlers extends BaseHandler {
     async handleNodeContents(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const nodeContents = await this.adtclient.nodeContents(
+            const nodeContents = await this.readClient.nodeContents(
                 args.parent_type,
                 args.parent_name,
                 args.user_name,
@@ -101,7 +101,7 @@ export class NodeHandlers extends BaseHandler {
     async handleMainPrograms(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const mainPrograms = await this.adtclient.mainPrograms(args.includeUrl);
+            const mainPrograms = await this.readClient.mainPrograms(args.includeUrl);
             this.trackRequest(startTime, true);
             return {
                 content: [

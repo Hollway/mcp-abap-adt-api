@@ -100,7 +100,7 @@ export class ObjectHandlers extends BaseHandler {
     async handleObjectStructure(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const structure = await this.adtclient.objectStructure(args.objectUrl, args.version);
+            const structure = await this.readClient.objectStructure(args.objectUrl, args.version);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -123,7 +123,7 @@ export class ObjectHandlers extends BaseHandler {
     async handleFindObjectPath(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const path = await this.adtclient.findObjectPath(args.objectUrl);
+            const path = await this.readClient.findObjectPath(args.objectUrl);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -146,7 +146,7 @@ export class ObjectHandlers extends BaseHandler {
     async handleSearchObject(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const results = await this.adtclient.searchObject(
+            const results = await this.readClient.searchObject(
                 args.query,
                 args.objType,
                 args.max
@@ -173,7 +173,7 @@ export class ObjectHandlers extends BaseHandler {
     async handleObjectTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const types = await this.adtclient.objectTypes();
+            const types = await this.readClient.objectTypes();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -196,7 +196,7 @@ export class ObjectHandlers extends BaseHandler {
     async handleReentranceTicket(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const ticket = await this.adtclient.reentranceTicket();
+            const ticket = await this.readClient.reentranceTicket();
             this.trackRequest(startTime, true);
             return {
                 content: [

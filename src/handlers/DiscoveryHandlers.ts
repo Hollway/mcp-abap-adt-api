@@ -107,7 +107,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleFeatureDetails(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const details = await this.adtclient.featureDetails(args.title);
+            const details = await this.readClient.featureDetails(args.title);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -129,7 +129,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleCollectionFeatureDetails(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const details = await this.adtclient.collectionFeatureDetails(args.url);
+            const details = await this.readClient.collectionFeatureDetails(args.url);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -151,7 +151,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleFindCollectionByUrl(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const collection = await this.adtclient.findCollectionByUrl(args.url);
+            const collection = await this.readClient.findCollectionByUrl(args.url);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -173,7 +173,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleLoadTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const types = await this.adtclient.loadTypes();
+            const types = await this.readClient.loadTypes();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -195,7 +195,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleAdtDiscovery(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const discovery = await this.adtclient.adtDiscovery();
+            const discovery = await this.readClient.adtDiscovery();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -217,7 +217,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleAdtCoreDiscovery(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const discovery = await this.adtclient.adtCoreDiscovery();
+            const discovery = await this.readClient.adtCoreDiscovery();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -239,7 +239,7 @@ export class DiscoveryHandlers extends BaseHandler {
     async handleAdtCompatibilityGraph(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const graph = await this.adtclient.adtCompatibiliyGraph();
+            const graph = await this.readClient.adtCompatibiliyGraph();
             this.trackRequest(startTime, true);
             return {
                 content: [

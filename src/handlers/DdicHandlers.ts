@@ -94,7 +94,7 @@ export class DdicHandlers extends BaseHandler {
     async handleAnnotationDefinitions(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.annotationDefinitions();
+            const result = await this.readClient.annotationDefinitions();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -116,7 +116,7 @@ export class DdicHandlers extends BaseHandler {
     async handleDdicElement(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.ddicElement(
+            const result = await this.readClient.ddicElement(
                 args.path,
                 args.getTargetForAssociation,
                 args.getExtensionViews,
@@ -143,7 +143,7 @@ export class DdicHandlers extends BaseHandler {
     async handleDdicRepositoryAccess(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.ddicRepositoryAccess(args.path);
+            const result = await this.readClient.ddicRepositoryAccess(args.path);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -165,7 +165,7 @@ export class DdicHandlers extends BaseHandler {
     async handlePackageSearchHelp(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.packageSearchHelp(args.type, args.name);
+            const result = await this.readClient.packageSearchHelp(args.type, args.name);
             this.trackRequest(startTime, true);
             return {
                 content: [
