@@ -1,70 +1,76 @@
-# Changelog
+# История изменений
 
-## [0.1.0] - Initial Commit
-- Initial project setup.
+## [0.1.0] — первый коммит
+- Начальная структура проекта.
 
-## [0.1.1] - Better unified response structure
-- Improved and unified the response structure.
+## [0.1.1] — единообразная структура ответа
+- Ответы инструментов приведены к общему виду.
 
-## Unreleased - hardening
+## Не выпущено — доработка надёжности
 
-Reliability
+### Надёжность
 
-- **ADT errors keep SAP's diagnosis.** Every handler used to repack exceptions
-  into an axios message ("Request failed with status code 400"), and anything
-  that was not an `McpError` became "Internal server error". Failures now carry
-  `status`, `adtType`, `t100`, `localizedMessage` and `diagnostic` (`sap` for a
-  real rejection, `transport` for an HTTP failure with no answer from SAP).
-- **The ADT session recovers itself.** abap-adt-api skips its re-login retry
-  while the client is stateful, which this server always is, so a dead session
-  meant every later call failed until `login` was called by hand. The server now
-  detects that shape, re-authenticates and retries read-only calls (marking the
-  answer `sessionRecovered`). Calls that write are never replayed: the session is
-  restored, and the caller is told the lock handle is void.
-- **Reads run on their own session.** Read-only calls go through the stateless
-  clone, so the library recovers them by itself and they never disturb the
-  stateful session holding the locks. Writes, locks and the debugger stay on it.
-- **`healthcheck` actually checks.** It calls the backend and reports the target
-  system, session state, tool profile, metrics and latency, instead of a
-  constant "healthy".
-- **`login`, `logout` and `dropSession` return valid results.** `login` used to
-  emit no text at all, so clients rejected the response schema although the
-  re-authentication had succeeded. `logout` now warns that the client cannot log
-  in again afterwards.
+- **Ошибки ADT сохраняют диагностику SAP.** Раньше каждый хендлер перепаковывал
+  исключение в сообщение axios («Request failed with status code 400»), а всё,
+  что не было `McpError`, превращалось в «Internal server error». Теперь ошибка
+  несёт `status`, `adtType`, `t100`, `localizedMessage` и `diagnostic`: `sap` —
+  настоящий отказ системы, `transport` — сбой HTTP, на который SAP не ответила.
+- **Сессия ADT восстанавливается сама.** `abap-adt-api` не делает повторный
+  логон, пока клиент stateful, а этот сервер держал его таким всегда — поэтому
+  умершая сессия означала, что все последующие вызовы падают до ручного вызова
+  `login`. Сервер распознаёт эту картину, переподключается и повторяет читающие
+  вызовы один раз, помечая ответ `sessionRecovered`. Пишущие вызовы не
+  повторяются никогда: сессия восстанавливается, но вызывающему сообщается, что
+  дескриптор блокировки мёртв.
+- **Чтение идёт по отдельной сессии.** Читающие вызовы выполняются через
+  stateless-клон, поэтому библиотека восстанавливает их сама, и они не трогают
+  stateful-сессию, которая держит блокировки. Запись, блокировки и отладчик
+  остаются на ней.
+- **`healthcheck` действительно проверяет.** Он обращается к системе и
+  сообщает, к какой именно подключён, состояние сессии, профиль инструментов,
+  метрики и время ответа — вместо неизменного «healthy».
+- **`login`, `logout` и `dropSession` возвращают корректный результат.** `login`
+  раньше не отдавал текста вовсе, и клиент отклонял ответ по схеме, хотя
+  переаутентификация проходила успешно. В описании `logout` теперь сказано, что
+  после него клиент не может залогиниться заново.
 
-New tools
+### Новые инструменты
 
-- **`patchObjectSource`** changes part of an object: the server reads the current
-  source, applies line-range, anchor or insertion edits and returns a unified
-  diff, so a small change no longer costs a full re-upload. `dryRun` previews it.
-- **`activateSafe`** activates and then verifies that nothing is left inactive.
-- **`listLocks` / `unlockAll`** expose the locks this process holds; they are
-  also released on shutdown and dropped after a re-login.
-- **`createInclude`** creates a report include (`PROG/I`), which `createObject`
-  cannot: the library omits the reference to the main program.
+- **`patchObjectSource`** меняет часть объекта: сервер сам читает текущий
+  исходник, применяет правки (диапазон строк, точный фрагмент текста или
+  вставка) и возвращает unified diff — небольшое изменение больше не стоит
+  полной перезаливки. `dryRun` показывает результат без записи.
+- **`activateSafe`** активирует объект и затем проверяет, что неактивным ничего
+  не осталось.
+- **`listLocks` / `unlockAll`** показывают блокировки, которые держит процесс, и
+  снимают их разом; они также снимаются при остановке сервера и обнуляются после
+  повторного логона.
+- **`createInclude`** создаёт включаемую программу (`PROG/I`), чего `createObject`
+  не умеет: библиотека не передаёт ссылку на главную программу.
 
-Usability
+### Удобство
 
-- `getObjectSource` takes a `version` (`active`/`inactive`/`workingArea`); the
-  active version was previously unreachable through the tool.
-- `unitTestRun` explains an empty result instead of leaving it to be misread as
-  "all tests passed".
-- `userTransports` returns a flat list with filters on status, owner, number and
-  description; `raw` brings back the full payload.
-- `runQuery` and `tableContents` take an `offset`.
-- Object and array parameters are declared as such and parsed - `unitTestRun`
-  flags, the class to evaluate, references, proposals, configurations and
-  breakpoints were all declared as strings and handed to the library unparsed.
+- `getObjectSource` принимает `version` (`active` / `inactive` / `workingArea`) —
+  раньше активная версия через инструмент была недоступна.
+- `unitTestRun` объясняет пустой результат, а не оставляет его на прочтение как
+  «все тесты прошли».
+- `userTransports` отдаёт плоский список с фильтрами по статусу, владельцу,
+  номеру и описанию; `raw` возвращает исходную структуру.
+- `runQuery` и `tableContents` принимают `offset`.
+- Объектные и массивные параметры объявлены как таковые и разбираются: флаги
+  `unitTestRun`, класс для оценки, ссылки, предложения, конфигурации и точки
+  останова были объявлены строками и уходили в библиотеку неразобранными.
 
-Operations
+### Эксплуатация
 
-- `SAP_READONLY` refuses every mutating tool; `SAP_TOOLS_EXCLUDE` hides tool
-  groups; tools carry `readOnlyHint` and `destructiveHint`.
-- Answers larger than `SAP_MAX_RESPONSE_CHARS` are replaced by an envelope with
-  the size and a preview.
-- `LOG_LEVEL` (default `warn`) replaces a per-request info line; metrics moved
-  into `healthcheck`; the dead rate limiter is gone.
-- The server prints its target system on startup and warns when the settings
-  came from the `.env` fallback rather than the client.
-- Unit tests (45) and a read-only end-to-end smoke script (`npm run smoke`);
-  `npm test` previously found no tests at all.
+- `SAP_READONLY` отбивает все изменяющие инструменты, `SAP_TOOLS_EXCLUDE`
+  скрывает их группы, у инструментов появились `readOnlyHint` и
+  `destructiveHint`.
+- Ответ больше `SAP_MAX_RESPONSE_CHARS` заменяется конвертом с размером и
+  усечённым фрагментом.
+- `LOG_LEVEL` (по умолчанию `warn`) вместо строки метрик на каждый запрос; сами
+  метрики переехали в `healthcheck`; неиспользуемый ограничитель частоты удалён.
+- При старте сервер печатает, к какой системе подключился, и предупреждает,
+  если настройки взяты из `.env`, а не переданы клиентом.
+- Появились модульные тесты (51) и сквозной smoke-скрипт только для чтения
+  (`npm run smoke`); до этого `npm test` не находил ни одного теста.
