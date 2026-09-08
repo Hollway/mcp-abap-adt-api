@@ -6,6 +6,7 @@ import { session_types } from 'abap-adt-api';
 import type { ObjectVersion } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
 import { activateAndVerify } from '../lib/activation';
+import { releaseLock, takeLock } from '../lib/lockCycle';
 import { describeAdtError } from '../lib/adtError';
 import {
   dataElementUrl,
@@ -669,15 +670,15 @@ export class DdicPropertyHandlers extends BaseHandler {
     steps.push({ step: 'create', objectUrl: url, packageName });
 
     let lockHandle: string;
-    const lockStart = performance.now();
     try {
-      this.adtclient.stateful = session_types.stateful;
-      const lock = await this.adtclient.lock(url);
-      lockHandle = lock.LOCK_HANDLE;
-      lockRegistry.remember(url, lockHandle);
-      this.trackRequest(lockStart, true);
+      const lock = await takeLock(
+        this.adtclient,
+        url,
+        undefined,
+        (start, ok) => this.trackRequest(start, ok)
+      );
+      lockHandle = lock.lockHandle;
     } catch (error: any) {
-      this.trackRequest(lockStart, false);
       steps.push({ step: 'lock', error: describeAdtError(error).error });
       return this.answer({
         status: 'error',
@@ -785,22 +786,16 @@ export class DdicPropertyHandlers extends BaseHandler {
     }
   }
 
-  /** Release a lock and forget it, reporting rather than throwing. */
   private async releaseLock(
     objectUrl: string,
     lockHandle: string
   ): Promise<{ released: boolean; error?: string }> {
-    const startTime = performance.now();
-    try {
-      this.adtclient.stateful = session_types.stateful;
-      await this.adtclient.unLock(objectUrl, lockHandle);
-      lockRegistry.forget(objectUrl);
-      this.trackRequest(startTime, true);
-      return { released: true };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      return { released: false, error: describeAdtError(error).error };
-    }
+    return releaseLock(
+      this.adtclient,
+      objectUrl,
+      lockHandle,
+      (start, ok) => this.trackRequest(start, ok)
+    );
   }
 
   protected dataElementPatch(args: any): DataElementPatch {

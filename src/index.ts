@@ -404,6 +404,7 @@ export class AbapAdtServer extends Server {
             case 'activateSafe':
                 result = await this.objectManagementHandlers.handle(toolName, args);
                 break;
+            case 'createAndWrite':
             case 'objectRegistrationInfo':
             case 'validateNewObject':
             case 'createObject':

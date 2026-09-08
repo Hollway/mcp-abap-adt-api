@@ -20,6 +20,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'deleteObject',
   'createObject',
   'createInclude',
+  'createAndWrite',
   'createTestInclude',
   // activation
   'activateObjects',

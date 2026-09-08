@@ -8,6 +8,7 @@ import { sourceCache, sourceCacheKey } from '../lib/sourceCache';
 import { lockRegistry } from '../lib/lockRegistry';
 import { resolveEdits, applyEdits, buildDiff, newlineOf, PatchError } from '../lib/sourcePatch';
 import { activateAndVerify } from '../lib/activation';
+import { releaseLock } from '../lib/lockCycle';
 import type { SourceEdit } from '../lib/sourcePatch';
 
 const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
@@ -474,22 +475,16 @@ export class ObjectSourceHandlers extends BaseHandler {
     }
   }
 
-  /** Release a lock and forget it, reporting rather than throwing. */
   private async releaseLock(
     objectUrl: string,
     lockHandle: string
   ): Promise<{ released: boolean; error?: string }> {
-    const startTime = performance.now();
-    try {
-      this.adtclient.stateful = session_types.stateful;
-      await this.adtclient.unLock(objectUrl, lockHandle);
-      lockRegistry.forget(objectUrl);
-      this.trackRequest(startTime, true);
-      return { released: true };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      return { released: false, error: describeAdtError(error).error };
-    }
+    return releaseLock(
+      this.adtclient,
+      objectUrl,
+      lockHandle,
+      (start, ok) => this.trackRequest(start, ok)
+    );
   }
 
   private answer(payload: Record<string, unknown>) {
