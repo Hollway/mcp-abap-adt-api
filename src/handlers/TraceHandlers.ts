@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, TraceStatementOptions, TraceParameters, TracesCreationConfig } from 'abap-adt-api';
 
@@ -193,10 +194,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get traces list: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get traces list');
         }
     }
 
@@ -218,10 +216,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get trace requests: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get trace requests');
         }
     }
 
@@ -243,10 +238,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get trace hit list: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get trace hit list');
         }
     }
 
@@ -268,10 +260,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get trace DB access: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get trace DB access');
         }
     }
 
@@ -293,10 +282,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get trace statements: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get trace statements');
         }
     }
 
@@ -318,10 +304,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to set trace parameters: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to set trace parameters');
         }
     }
 
@@ -343,10 +326,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create trace configuration: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create trace configuration');
         }
     }
 
@@ -368,10 +348,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to delete trace configuration: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to delete trace configuration');
         }
     }
 
@@ -393,10 +370,7 @@ export class TraceHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to delete trace: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to delete trace');
         }
     }
 }

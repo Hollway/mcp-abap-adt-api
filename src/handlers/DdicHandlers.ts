@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, PackageValueHelpType } from 'abap-adt-api';
 
@@ -112,10 +113,7 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get annotation definitions: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get annotation definitions');
         }
     }
 
@@ -142,10 +140,7 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get DDIC element: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get DDIC element');
         }
     }
 
@@ -167,10 +162,7 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to access DDIC repository: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to access DDIC repository');
         }
     }
 
@@ -192,10 +184,7 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get package search help: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get package search help');
         }
     }
 }

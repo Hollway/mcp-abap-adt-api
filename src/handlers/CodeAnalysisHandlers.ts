@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from 'abap-adt-api';
 import { sourceCache } from '../lib/sourceCache.js';
@@ -249,10 +250,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Syntax check failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Syntax check failed');
         }
     }
     async handleSyntaxCheckCode(args: any): Promise<any> {
@@ -291,10 +289,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Syntax check failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Syntax check failed');
         }
     }
 
@@ -321,10 +316,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Code completion failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Code completion failed');
         }
     }
 
@@ -354,10 +346,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Find definition failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Find definition failed');
         }
     }
 
@@ -383,10 +372,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Usage references failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Usage references failed');
         }
     }
 
@@ -408,10 +394,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Syntax check types failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Syntax check types failed');
         }
     }
 
@@ -433,10 +416,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Code completion full failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Code completion full failed');
         }
     }
 
@@ -458,10 +438,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Run class failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Run class failed');
         }
     }
 
@@ -483,10 +460,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Code completion element failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Code completion element failed');
         }
     }
 
@@ -508,10 +482,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Usage reference snippets failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Usage reference snippets failed');
         }
     }
 
@@ -533,10 +504,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Fix proposals failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Fix proposals failed');
         }
     }
 
@@ -558,10 +526,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Fix edits failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Fix edits failed');
         }
     }
 
@@ -583,10 +548,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Fragment mappings failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Fragment mappings failed');
         }
     }
 
@@ -608,10 +570,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `ABAP documentation failed: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'ABAP documentation failed');
         }
     }
 }

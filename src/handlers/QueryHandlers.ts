@@ -1,5 +1,6 @@
 import { ADTClient } from 'abap-adt-api';
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 
 export class QueryHandlers extends BaseHandler {
@@ -95,7 +96,7 @@ export class QueryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new Error(`Failed to retrieve table contents: ${error.message || 'Unknown error'}`);
+            throw wrapAdtError(error, 'Failed to retrieve table contents');
         }
     }
 
@@ -121,7 +122,7 @@ export class QueryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new Error(`Failed to run query: ${error.message || 'Unknown error'}`);
+            throw wrapAdtError(error, 'Failed to run query');
         }
     }
 }

@@ -36,6 +36,7 @@ import { AtcHandlers } from './handlers/AtcHandlers.js';
 import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
+import { AdtToolError, errorPayload } from './lib/adtError';
 
 config({ path: path.resolve(__dirname, '../.env') });
 
@@ -153,8 +154,17 @@ export class AbapAdtServer extends Server {
   }
 
   private handleError(error: unknown) {
-    if (!(error instanceof Error)) {
-      error = new Error(String(error));
+    // Keep SAP's own diagnosis: an AdtToolError carries status, exception type,
+    // T100 key and localizedMessage, all of which used to be flattened into
+    // 'Internal server error' or an axios message.
+    if (error instanceof AdtToolError) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ...errorPayload(error), code: error.code })
+        }],
+        isError: true
+      };
     }
     if (error instanceof McpError) {
       return {
@@ -172,7 +182,7 @@ export class AbapAdtServer extends Server {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'Internal server error',
+          ...errorPayload(error),
           code: ErrorCode.InternalError
         })
       }],

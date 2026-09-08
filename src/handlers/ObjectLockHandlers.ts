@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 
@@ -74,10 +75,7 @@ export class ObjectLockHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to lock object: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to lock object');
     }
   }
 
@@ -101,10 +99,7 @@ export class ObjectLockHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to unlock object: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to unlock object');
     }
   }
 }

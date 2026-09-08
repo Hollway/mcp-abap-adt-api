@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, RenameRefactoringProposal, RenameRefactoring } from 'abap-adt-api';
 
@@ -104,10 +105,7 @@ export class RenameHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to evaluate rename: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to evaluate rename');
         }
     }
 
@@ -132,10 +130,7 @@ export class RenameHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to preview rename: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to preview rename');
         }
     }
 
@@ -157,10 +152,7 @@ export class RenameHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to execute rename: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to execute rename');
         }
     }
 }

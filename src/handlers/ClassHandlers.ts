@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from 'abap-adt-api';
 
@@ -66,10 +67,7 @@ export class ClassHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get class includes: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get class includes');
         }
     }
 
@@ -91,10 +89,7 @@ export class ClassHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get class components: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get class components');
         }
     }
 

@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 
 export class AuthHandlers extends BaseHandler {
@@ -60,10 +61,7 @@ export class AuthHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Login failed: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Login failed');
     }
   }
 
@@ -82,10 +80,7 @@ export class AuthHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Logout failed: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Logout failed');
     }
   }
 
@@ -104,10 +99,7 @@ export class AuthHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Drop session failed: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Drop session failed');
     }
   }
 }

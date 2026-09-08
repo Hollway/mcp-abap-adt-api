@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 
@@ -118,12 +119,7 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            const errorMessage = error.message || 'Unknown error';
-            const detailedError = error.response?.data?.message || errorMessage;
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get object structure: ${detailedError}`
-            );
+            throw wrapAdtError(error, 'Failed to get object structure');
         }
     }
 
@@ -146,12 +142,7 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            const errorMessage = error.message || 'Unknown error';
-            const detailedError = error.response?.data?.message || errorMessage;
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to find object path: ${detailedError}`
-            );
+            throw wrapAdtError(error, 'Failed to find object path');
         }
     }
 
@@ -178,12 +169,7 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            const errorMessage = error.message || 'Unknown error';
-            const detailedError = error.response?.data?.message || errorMessage;
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to search objects: ${detailedError}`
-            );
+            throw wrapAdtError(error, 'Failed to search objects');
         }
     }
 
@@ -206,12 +192,7 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            const errorMessage = error.message || 'Unknown error';
-            const detailedError = error.response?.data?.message || errorMessage;
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get object types: ${detailedError}`
-            );
+            throw wrapAdtError(error, 'Failed to get object types');
         }
     }
 
@@ -234,12 +215,7 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            const errorMessage = error.message || 'Unknown error';
-            const detailedError = error.response?.data?.message || errorMessage;
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get reentrance ticket: ${detailedError}`
-            );
+            throw wrapAdtError(error, 'Failed to get reentrance ticket');
         }
     }
 }

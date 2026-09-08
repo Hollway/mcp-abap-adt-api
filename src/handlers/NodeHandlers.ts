@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { NodeParents, NodeStructure } from "abap-adt-api";
 
@@ -98,10 +99,7 @@ export class NodeHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get node contents: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get node contents');
         }
     }
 
@@ -123,10 +121,7 @@ export class NodeHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get main programs: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get main programs');
         }
     }
 }

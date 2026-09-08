@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, ServiceBinding } from "abap-adt-api";
 
@@ -95,10 +96,7 @@ export class ServiceBindingHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to publish service binding: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to publish service binding');
         }
     }
 
@@ -120,10 +118,7 @@ export class ServiceBindingHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to unpublish service binding: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to unpublish service binding');
         }
     }
 
@@ -145,10 +140,7 @@ export class ServiceBindingHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get binding details: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get binding details');
         }
     }
 }

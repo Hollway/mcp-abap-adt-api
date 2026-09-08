@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 
@@ -60,10 +61,7 @@ export class FeedHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get feeds: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get feeds');
         }
     }
 
@@ -85,10 +83,7 @@ export class FeedHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get dumps: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get dumps');
         }
     }
 }

@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 
@@ -66,12 +67,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      const errorMessage = error.message || 'Unknown error';
-      const detailedError = error.response?.data?.message || errorMessage;
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to delete object: ${detailedError}`
-      );
+      throw wrapAdtError(error, 'Failed to delete object');
     }
   }
 }

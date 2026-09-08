@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, UnitTestRunFlags } from 'abap-adt-api';
 
@@ -121,10 +122,7 @@ export class UnitTestHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to run unit test: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to run unit test');
         }
     }
 
@@ -146,10 +144,7 @@ export class UnitTestHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to evaluate unit test: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to evaluate unit test');
         }
     }
 
@@ -171,10 +166,7 @@ export class UnitTestHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get unit test markers: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get unit test markers');
         }
     }
 
@@ -197,10 +189,7 @@ export class UnitTestHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create test include: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create test include');
         }
     }
 }

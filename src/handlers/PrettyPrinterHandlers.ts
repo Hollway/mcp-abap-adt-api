@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 
@@ -80,10 +81,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get pretty printer settings: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get pretty printer settings');
         }
     }
 
@@ -105,10 +103,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to set pretty printer settings: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to set pretty printer settings');
         }
     }
 
@@ -130,10 +125,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to format ABAP code: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to format ABAP code');
         }
     }
 }

@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 
@@ -326,10 +327,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get transport info: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get transport info');
         }
     }
 
@@ -357,10 +355,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create transport: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create transport');
         }
     }
 
@@ -382,10 +377,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to check transport config: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to check transport config');
         }
     }
 
@@ -407,10 +399,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get transport configurations: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get transport configurations');
         }
     }
 
@@ -432,10 +421,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get transport configuration: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get transport configuration');
         }
     }
 
@@ -457,10 +443,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to set transports config: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to set transports config');
         }
     }
 
@@ -482,10 +465,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create transports config: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create transports config');
         }
     }
 
@@ -507,10 +487,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get user transports: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get user transports');
         }
     }
 
@@ -532,10 +509,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get transports by config: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get transports by config');
         }
     }
 
@@ -557,10 +531,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to delete transport: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to delete transport');
         }
     }
 
@@ -582,10 +553,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to release transport: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to release transport');
         }
     }
 
@@ -607,10 +575,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to set transport owner: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to set transport owner');
         }
     }
 
@@ -632,10 +597,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to add user to transport: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to add user to transport');
         }
     }
 
@@ -657,10 +619,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get system users: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get system users');
         }
     }
 
@@ -682,10 +641,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get transport reference: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get transport reference');
         }
     }
 }

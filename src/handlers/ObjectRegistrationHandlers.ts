@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 
 export class ObjectRegistrationHandlers extends BaseHandler {
@@ -76,10 +77,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to get registration info: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to get registration info');
     }
   }
 
@@ -99,10 +97,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to validate new object: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to validate new object');
     }
   }
 
@@ -130,10 +125,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to create object: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to create object');
     }
   }
 }

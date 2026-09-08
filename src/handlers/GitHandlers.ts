@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { GitRepo, GitStaging } from 'abap-adt-api';
 
@@ -305,10 +306,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get git repos: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get git repos');
         }
     }
 
@@ -334,10 +332,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get external repo info: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get external repo info');
         }
     }
 
@@ -366,10 +361,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create git repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create git repo');
         }
     }
 
@@ -397,10 +389,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to pull git repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to pull git repo');
         }
     }
 
@@ -422,10 +411,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to unlink git repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to unlink git repo');
         }
     }
 
@@ -451,10 +437,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to stage repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to stage repo');
         }
     }
 
@@ -481,10 +464,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to push repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to push repo');
         }
     }
 
@@ -510,10 +490,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to check repo: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to check repo');
         }
     }
 
@@ -539,10 +516,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get remote repo info: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get remote repo info');
         }
     }
 
@@ -570,10 +544,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to switch repo branch: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to switch repo branch');
         }
     }
 }

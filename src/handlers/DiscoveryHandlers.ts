@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 
 export class DiscoveryHandlers extends BaseHandler {
@@ -121,10 +122,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get feature details: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get feature details');
         }
     }
 
@@ -146,10 +144,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get collection feature details: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get collection feature details');
         }
     }
 
@@ -171,10 +166,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to find collection by URL: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to find collection by URL');
         }
     }
 
@@ -196,10 +188,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to load types: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to load types');
         }
     }
 
@@ -221,10 +210,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to perform ADT discovery: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to perform ADT discovery');
         }
     }
 
@@ -246,10 +232,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to perform ADT core discovery: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to perform ADT core discovery');
         }
     }
 
@@ -271,10 +254,7 @@ export class DiscoveryHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ADT compatibility graph: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ADT compatibility graph');
         }
     }
 }

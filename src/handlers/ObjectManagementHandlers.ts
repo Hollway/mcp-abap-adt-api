@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 
 interface InactiveObject {
@@ -149,10 +150,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       if (error instanceof McpError) {
         throw error;
       }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to activate objects: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to activate objects');
     }
   }
 
@@ -181,10 +179,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       if (error instanceof McpError) {
         throw error;
       }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to activate object: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to activate object');
     }
   }
 
@@ -204,10 +199,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       if (error instanceof McpError) {
         throw error;
       }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to get inactive objects: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to get inactive objects');
     }
   }
 }

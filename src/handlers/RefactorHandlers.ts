@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, Range, ExtractMethodProposal, GenericRefactoring } from 'abap-adt-api';
 
@@ -98,10 +99,7 @@ export class RefactorHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to evaluate extract method: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to evaluate extract method');
         }
     }
 
@@ -124,10 +122,7 @@ export class RefactorHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to preview extract method: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to preview extract method');
         }
     }
 
@@ -150,10 +145,7 @@ export class RefactorHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to execute extract method: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to execute extract method');
         }
     }
 }

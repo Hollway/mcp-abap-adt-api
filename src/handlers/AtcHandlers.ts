@@ -1,5 +1,6 @@
 import { ADTClient } from 'abap-adt-api';
 import { BaseHandler } from './BaseHandler.js';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { AtcProposal } from 'abap-adt-api';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
@@ -211,10 +212,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC customizing: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC customizing');
         }
     }
 
@@ -236,10 +234,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC check variant: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC check variant');
         }
     }
 
@@ -261,10 +256,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to create ATC run: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to create ATC run');
         }
     }
 
@@ -286,10 +278,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC worklists: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC worklists');
         }
     }
 
@@ -311,10 +300,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC users: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC users');
         }
     }
 
@@ -336,10 +322,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC exempt proposal: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC exempt proposal');
         }
     }
 
@@ -361,10 +344,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to request ATC exemption: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to request ATC exemption');
         }
     }
 
@@ -386,10 +366,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to check if proposal message: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to check if proposal message');
         }
     }
 
@@ -411,10 +388,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to get ATC contact URI: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to get ATC contact URI');
         }
     }
 
@@ -436,10 +410,7 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw new McpError(
-                ErrorCode.InternalError,
-                `Failed to change ATC contact: ${error.message || 'Unknown error'}`
-            );
+            throw wrapAdtError(error, 'Failed to change ATC contact');
         }
     }
 }

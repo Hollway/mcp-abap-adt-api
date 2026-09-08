@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
+import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from "abap-adt-api";
 import { sourceCache } from '../lib/sourceCache';
@@ -98,10 +99,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to get object source: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to get object source');
     }
   }
 
@@ -133,10 +131,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to set object source: ${error.message || 'Unknown error'}`
-      );
+      throw wrapAdtError(error, 'Failed to set object source');
     }
   }
 }
