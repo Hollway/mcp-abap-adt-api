@@ -96,7 +96,8 @@ const check = (label, condition, detail) => {
   const tools = (await send('tools/list', {})).result.tools;
   check(`tools/list returns tools (${tools.length})`, tools.length > 0);
   const byName = new Map(tools.map(t => [t.name, t]));
-  for (const name of ['healthcheck', 'getObjectSource', 'patchObjectSource', 'activateSafe', 'listLocks']) {
+  for (const name of ['healthcheck', 'getObjectSource', 'patchObjectSource', 'activateSafe', 'listLocks',
+                      'findInSource', 'sourceOutline', 'editObject']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
   check('read-only tools are annotated as such',
@@ -137,6 +138,61 @@ const check = (label, condition, detail) => {
     missingObject.payload.diagnostic === 'sap' &&
     !!missingObject.payload.adtType,
     missingObject.payload);
+
+  const outline = await call('sourceOutline', { objectSourceUrl: CLASS_URL });
+  check(`sourceOutline finds the blocks of ${CLASS_NAME}`,
+    outline.payload.status === 'success' && outline.payload.entries > 0,
+    outline.payload);
+  check('sourceOutline reports a class implementation',
+    (outline.payload.results || []).some(r =>
+      r.entries.some(e => e.kind === 'CLASS-IMPLEMENTATION' || e.kind === 'CLASS-DEFINITION')),
+    outline.payload.results && outline.payload.results[0].entries.slice(0, 5));
+
+  const found = await call('findInSource', {
+    objectSourceUrl: CLASS_URL, pattern: 'METHOD ', maxMatches: 3
+  });
+  check('findInSource returns line numbers',
+    found.payload.status === 'success' &&
+    found.payload.totalMatches > 0 &&
+    found.payload.results[0].matches[0].line > 0,
+    found.payload);
+  check('findInSource caps the list but keeps the total honest',
+    found.payload.returnedMatches <= 3 && found.payload.totalMatches >= found.payload.returnedMatches);
+
+  const badRegex = await call('findInSource', {
+    objectSourceUrl: CLASS_URL, pattern: '(unclosed', regex: true
+  });
+  check('findInSource refuses a broken regular expression', badRegex.isError === true, badRegex.payload);
+
+  // Refusals that never reach the backend, so they stay read-only
+  const badFragment = await call('fragmentMappings', {
+    url: CLASS_URL.replace('/source/main', ''), type: 'FORM', name: 'ANYTHING'
+  });
+  check('fragmentMappings refuses a type that is not one', badFragment.isError === true, badFragment.payload);
+
+  const includeThroughCreate = await call('createObject', {
+    objtype: 'PROG/I', name: 'ZSMOKE_INCLUDE', parentName: 'ZSMOKE',
+    description: 'smoke', parentPath: '/sap/bc/adt/packages/$tmp'
+  });
+  check('createObject refuses PROG/I and names createInclude',
+    includeThroughCreate.isError === true &&
+    /createInclude/.test(JSON.stringify(includeThroughCreate.payload)),
+    includeThroughCreate.payload);
+
+  // dryRun takes no lock and writes nothing
+  const preview = await call('editObject', {
+    objectSourceUrl: CLASS_URL,
+    edits: [{ insertAfterLine: 0, insertion: '* smoke test, never written' }],
+    dryRun: true
+  });
+  check('editObject dryRun returns a diff without touching anything',
+    preview.payload.status === 'success' &&
+    preview.payload.dryRun === true &&
+    /smoke test, never written/.test(preview.payload.patch.diff),
+    preview.payload);
+
+  const afterPreview = await call('listLocks');
+  check('editObject dryRun took no lock', afterPreview.payload.count === 0, afterPreview.payload);
 
   console.log(failures === 0 ? '\nall smoke checks pass' : `\n${failures} smoke check(s) failed`);
   child.kill();

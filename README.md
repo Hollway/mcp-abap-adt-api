@@ -12,7 +12,8 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 
 ## Features
 
-- **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, and `createInclude` for report includes.
+- **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, `editObject` for the whole lock/patch/unlock/activate sequence in one call, and `createInclude` for report includes.
+- **Reading source**: `sourceOutline` lists the blocks of a program or class with their line numbers, and `findInSource` searches a source - and the includes of a report - for text or a regular expression. ADT itself can only locate a class method.
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
 - **Transports**: filterable transport lists, plus creation, release and ownership tools.
@@ -189,8 +190,19 @@ objects, activating them, running tests, and handling transports.
   version by default, so reading your own edit back proves nothing about what
   the system runs - pass version="active" for that. Use startLine/maxLines
   to page through a large object instead of pulling all of it.
+* `sourceOutline` is the table of contents of a source: every REPORT, CLASS,
+  METHOD, FORM, MODULE, FUNCTION, INCLUDE and event block with its line.
+  `findInSource` searches for text or a regular expression and answers with
+  line numbers; searchIncludes follows a report's INCLUDE statements. Use
+  these to find a FORM or a MODULE - `fragmentMappings` only knows class
+  fragments (CLAS/OM), and a type it does not know is answered with 400.
 
 **Changing an object**
+
+`editObject` does the whole sequence below in one call - lock, patch, unlock,
+activate, verify - and reports each step. Nothing is rolled back if a step
+fails; the source stays in the inactive version, which is not what the system
+executes. The steps by hand:
 
 1. `lock` the object URI (without /source/main). Keep the lockHandle; the
    server also remembers it, and `listLocks` shows what is held.
