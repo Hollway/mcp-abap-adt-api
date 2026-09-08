@@ -4,6 +4,12 @@ import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from 'abap-adt-api';
 import { sourceCache } from '../lib/sourceCache.js';
+import {
+    classSourceUrl,
+    interfaceSourceUrl,
+    locateType
+} from '../lib/symbolPosition';
+import type { SymbolPosition } from '../lib/symbolPosition';
 
 export class CodeAnalysisHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -79,6 +85,51 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         column: { type: 'number' }
                     },
                     required: ['url']
+                }
+            },
+            {
+                name: 'typeHierarchy',
+                description: 'Subclasses or superclasses of a class or interface. Pass className or interfaceName and the declaration is located in the source here - the backend resolves a hierarchy from a cursor position rather than from a name, which is why url/body/line/offset are only the escape hatch. Defaults to descendants; set superTypes to walk upwards.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        className: {
+                            type: 'string',
+                            description: 'Class name, e.g. ZCL_MM_PCK_PLAN.'
+                        },
+                        interfaceName: {
+                            type: 'string',
+                            description: 'Interface name, e.g. ZIF_MM_C.'
+                        },
+                        objectSourceUrl: {
+                            type: 'string',
+                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main. Pass name as well.'
+                        },
+                        name: {
+                            type: 'string',
+                            description: 'Which type to point at, when the source holds more than one. Defaults to className/interfaceName.'
+                        },
+                        superTypes: {
+                            type: 'boolean',
+                            description: 'Walk upwards (superclasses, implemented interfaces) instead of downwards (default false).'
+                        },
+                        url: {
+                            type: 'string',
+                            description: 'Escape hatch: object URL, used with body, line and offset instead of the lookup.'
+                        },
+                        body: {
+                            type: 'string',
+                            description: 'Escape hatch: the source to resolve the position in.'
+                        },
+                        line: {
+                            type: 'number',
+                            description: 'Escape hatch: 1-based line of the type name.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Escape hatch: 0-based column of the type name.'
+                        }
+                    }
                 }
             },
             {
@@ -221,6 +272,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 return this.handleFindDefinition(args);
             case 'usageReferences':
                 return this.handleUsageReferences(args);
+            case 'typeHierarchy':
+                return this.handleTypeHierarchy(args);
             case 'syntaxCheckTypes':
                 return this.handleSyntaxCheckTypes(args);
             case 'codeCompletionFull':
@@ -384,6 +437,117 @@ export class CodeAnalysisHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Usage references failed');
+        }
+    }
+
+    /**
+     * The source of an object, from the cache when it is already there.
+     *
+     * These lookups exist to save the caller a read of the whole source, so
+     * re-reading one it has just fetched would defeat the point.
+     */
+    protected async sourceOf(sourceUrl: string): Promise<string> {
+        const cached = sourceCache.get(sourceUrl);
+        if (cached !== undefined) return cached;
+        const startTime = performance.now();
+        try {
+            const source = await this.readClient.getObjectSource(sourceUrl);
+            this.trackRequest(startTime, true);
+            sourceCache.set(sourceUrl, source);
+            return source;
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            throw wrapAdtError(error, `Failed to read ${sourceUrl}`);
+        }
+    }
+
+    /** Which source URL a name-or-url argument set points at, and which name. */
+    protected sourceUrlOf(args: any): { sourceUrl: string; name: string } {
+        if (typeof args?.objectSourceUrl === 'string' && args.objectSourceUrl.trim()) {
+            const name = String(args?.name || args?.className || args?.interfaceName || '').trim();
+            if (!name) {
+                throw new McpError(
+                    ErrorCode.InvalidParams,
+                    'With objectSourceUrl, pass name too - the position is found by looking that name up in the source.'
+                );
+            }
+            return { sourceUrl: args.objectSourceUrl.trim(), name };
+        }
+        if (typeof args?.className === 'string' && args.className.trim()) {
+            return {
+                sourceUrl: classSourceUrl(args.className),
+                name: String(args?.name || args.className).trim()
+            };
+        }
+        if (typeof args?.interfaceName === 'string' && args.interfaceName.trim()) {
+            return {
+                sourceUrl: interfaceSourceUrl(args.interfaceName),
+                name: String(args?.name || args.interfaceName).trim()
+            };
+        }
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            'Which object? Pass className, interfaceName, or objectSourceUrl together with name.'
+        );
+    }
+
+    async handleTypeHierarchy(args: any): Promise<any> {
+        // A caller that already knows the position skips the lookup.
+        const raw = typeof args?.url === 'string' && typeof args?.body === 'string'
+            && typeof args?.line === 'number' && typeof args?.offset === 'number';
+
+        let url: string;
+        let body: string;
+        let line: number;
+        let offset: number;
+        let resolved: SymbolPosition | undefined;
+
+        if (raw) {
+            url = args.url;
+            body = args.body;
+            line = args.line;
+            offset = args.offset;
+        } else {
+            const { sourceUrl, name } = this.sourceUrlOf(args);
+            body = await this.sourceOf(sourceUrl);
+            const found = locateType(body, name);
+            if (!found) {
+                throw new McpError(
+                    ErrorCode.InvalidParams,
+                    `No CLASS or INTERFACE statement for '${name}' in ${sourceUrl}. Check the name, or pass url, body, line and offset yourself.`
+                );
+            }
+            resolved = found;
+            url = sourceUrl;
+            line = found.line;
+            offset = found.column;
+        }
+
+        const startTime = performance.now();
+        try {
+            const nodes = await this.readClient.typeHierarchy(
+                url,
+                body,
+                line,
+                offset,
+                args?.superTypes === true
+            );
+            this.trackRequest(startTime, true);
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        direction: args?.superTypes === true ? 'superTypes' : 'subTypes',
+                        ...(resolved ? { resolvedAt: { line, column: offset, lineText: resolved.lineText } } : {}),
+                        count: (nodes || []).length,
+                        nodes
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            throw wrapAdtError(error, 'Failed to read the type hierarchy');
         }
     }
 
