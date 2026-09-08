@@ -284,6 +284,7 @@ export class AbapAdtServer extends Server {
                 break;
             case 'getObjectSource':
             case 'setObjectSource':
+            case 'patchObjectSource':
                 result = await this.objectSourceHandlers.handle(toolName, args);
                 break;
             case 'deleteObject':
@@ -292,6 +293,7 @@ export class AbapAdtServer extends Server {
             case 'activateObjects':
             case 'activateByName':
             case 'inactiveObjects':
+            case 'activateSafe':
                 result = await this.objectManagementHandlers.handle(toolName, args);
                 break;
             case 'objectRegistrationInfo':

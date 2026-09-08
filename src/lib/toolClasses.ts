@@ -15,12 +15,14 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'unLock',
   'unlockAll',
   'setObjectSource',
+  'patchObjectSource',
   'deleteObject',
   'createObject',
   'createTestInclude',
   // activation
   'activateObjects',
   'activateByName',
+  'activateSafe',
   // transports
   'createTransport',
   'transportDelete',

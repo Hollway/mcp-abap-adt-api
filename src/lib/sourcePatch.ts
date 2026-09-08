@@ -1,0 +1,251 @@
+/**
+ * Apply small edits to an ABAP source text.
+ *
+ * ADT has no partial write: setObjectSource replaces the whole object, so a
+ * sixteen-line change means re-uploading two thousand lines and hoping nothing
+ * else moved. These helpers let the server do that arithmetic instead: the
+ * caller says what to replace, the server reads the current source, applies the
+ * edits and can show exactly which lines changed.
+ *
+ * Every position refers to the source as it was read. Edits are resolved to
+ * character ranges first and applied from the end, so earlier edits cannot
+ * shift the coordinates of later ones.
+ */
+
+export interface LineEdit {
+  /** 1-based first line to replace. */
+  startLine: number;
+  /** 1-based last line to replace; defaults to startLine. */
+  endLine?: number;
+  /** Replacement text; '' deletes the lines. */
+  replacement: string;
+}
+
+export interface TextEdit {
+  /** Exact substring to replace. */
+  anchor: string;
+  replacement: string;
+  /** Which occurrence to replace, 1-based. Required when the anchor repeats. */
+  occurrence?: number;
+}
+
+export interface InsertEdit {
+  /** Insert after this 1-based line; 0 inserts at the top of the file. */
+  insertAfterLine: number;
+  insertion: string;
+}
+
+export type SourceEdit = LineEdit | TextEdit | InsertEdit;
+
+export interface ResolvedEdit {
+  start: number;
+  end: number;
+  text: string;
+  /** 1-based line range the edit covers in the original source. */
+  firstLine: number;
+  lastLine: number;
+  describe: string;
+}
+
+export class PatchError extends Error {}
+
+const isLineEdit = (e: SourceEdit): e is LineEdit =>
+  typeof (e as LineEdit).startLine === 'number';
+const isTextEdit = (e: SourceEdit): e is TextEdit =>
+  typeof (e as TextEdit).anchor === 'string';
+const isInsertEdit = (e: SourceEdit): e is InsertEdit =>
+  typeof (e as InsertEdit).insertAfterLine === 'number';
+
+export const newlineOf = (source: string): string =>
+  source.includes('\r\n') ? '\r\n' : '\n';
+
+/** Character offset of the start of every line, plus the total length. */
+const lineOffsets = (source: string, nl: string): number[] => {
+  const offsets = [0];
+  let at = 0;
+  while (true) {
+    const next = source.indexOf(nl, at);
+    if (next < 0) break;
+    at = next + nl.length;
+    offsets.push(at);
+  }
+  return offsets;
+};
+
+const lineOfOffset = (offsets: number[], offset: number): number => {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (offsets[mid] <= offset) low = mid;
+    else high = mid - 1;
+  }
+  return low + 1;
+};
+
+export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[] {
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw new PatchError('No edits given.');
+  }
+  const nl = newlineOf(source);
+  const offsets = lineOffsets(source, nl);
+  const lineCount = offsets.length;
+  const resolved: ResolvedEdit[] = [];
+
+  const lineStart = (line: number) => offsets[line - 1];
+  const lineEndExclusive = (line: number) =>
+    line < lineCount ? offsets[line] : source.length;
+
+  for (const edit of edits) {
+    if (isLineEdit(edit)) {
+      const first = edit.startLine;
+      const last = edit.endLine ?? edit.startLine;
+      if (!Number.isInteger(first) || !Number.isInteger(last)) {
+        throw new PatchError('startLine and endLine must be whole numbers.');
+      }
+      if (first < 1 || first > lineCount) {
+        throw new PatchError(`startLine ${first} is outside the source (1..${lineCount}).`);
+      }
+      if (last < first || last > lineCount) {
+        throw new PatchError(`endLine ${last} must be between startLine and ${lineCount}.`);
+      }
+      if (typeof edit.replacement !== 'string') {
+        throw new PatchError('replacement must be a string (use "" to delete the lines).');
+      }
+      // The range covers the line contents without the trailing newline, so a
+      // replacement is spliced in place. A deletion has to swallow a newline as
+      // well, otherwise removing a line would leave an empty one behind - the
+      // following line's newline normally, the preceding one for the last line.
+      const deleting = edit.replacement.length === 0;
+      let start = lineStart(first);
+      let end = last < lineCount ? lineEndExclusive(last) - nl.length : source.length;
+      if (deleting) {
+        if (last < lineCount) end += nl.length;
+        else if (first > 1) start -= nl.length;
+      }
+      resolved.push({
+        start,
+        end,
+        text: edit.replacement.replace(/\r?\n/g, nl),
+        firstLine: first,
+        lastLine: last,
+        describe: first === last ? `line ${first}` : `lines ${first}-${last}`
+      });
+      continue;
+    }
+
+    if (isInsertEdit(edit)) {
+      const after = edit.insertAfterLine;
+      if (!Number.isInteger(after) || after < 0 || after > lineCount) {
+        throw new PatchError(`insertAfterLine ${after} is outside the source (0..${lineCount}).`);
+      }
+      if (typeof edit.insertion !== 'string') {
+        throw new PatchError('insertion must be a string.');
+      }
+      const at = after === 0 ? 0 : lineEndExclusive(after);
+      const body = edit.insertion.replace(/\r?\n/g, nl);
+      // Insertion at the very end of a file with no trailing newline needs one.
+      const needsLeadingNl = after > 0 && at === source.length && !source.endsWith(nl);
+      resolved.push({
+        start: at,
+        end: at,
+        text: (needsLeadingNl ? nl : '') + body + (at === source.length && !needsLeadingNl ? '' : nl),
+        firstLine: after === 0 ? 1 : after,
+        lastLine: after === 0 ? 1 : after,
+        describe: after === 0 ? 'before line 1' : `after line ${after}`
+      });
+      continue;
+    }
+
+    if (isTextEdit(edit)) {
+      if (!edit.anchor) throw new PatchError('anchor must not be empty.');
+      if (typeof edit.replacement !== 'string') {
+        throw new PatchError('replacement must be a string.');
+      }
+      const positions: number[] = [];
+      let at = source.indexOf(edit.anchor);
+      while (at >= 0) {
+        positions.push(at);
+        at = source.indexOf(edit.anchor, at + edit.anchor.length);
+      }
+      if (positions.length === 0) {
+        throw new PatchError(`anchor not found: ${JSON.stringify(edit.anchor.slice(0, 80))}`);
+      }
+      if (positions.length > 1 && edit.occurrence === undefined) {
+        throw new PatchError(
+          `anchor matches ${positions.length} times; pass occurrence (1..${positions.length}) or extend the anchor.`
+        );
+      }
+      const index = (edit.occurrence ?? 1) - 1;
+      if (index < 0 || index >= positions.length) {
+        throw new PatchError(`occurrence must be between 1 and ${positions.length}.`);
+      }
+      const start = positions[index];
+      const end = start + edit.anchor.length;
+      resolved.push({
+        start,
+        end,
+        text: edit.replacement.replace(/\r?\n/g, nl),
+        firstLine: lineOfOffset(offsets, start),
+        lastLine: lineOfOffset(offsets, Math.max(start, end - 1)),
+        describe: `anchor at line ${lineOfOffset(offsets, start)}`
+      });
+      continue;
+    }
+
+    throw new PatchError(
+      'Each edit needs startLine (+ optional endLine), anchor, or insertAfterLine.'
+    );
+  }
+
+  const ordered = [...resolved].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i].start < ordered[i - 1].end) {
+      throw new PatchError(
+        `Edits overlap: ${ordered[i - 1].describe} and ${ordered[i].describe}.`
+      );
+    }
+  }
+  return ordered;
+}
+
+/** Apply resolved edits from the end so earlier ones keep their offsets. */
+export function applyEdits(source: string, resolved: ResolvedEdit[]): string {
+  let out = source;
+  for (const edit of [...resolved].reverse()) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  return out;
+}
+
+/**
+ * A unified-diff-style hunk per edit, with context. Built from the known ranges
+ * rather than by diffing the whole file, so it is exact and cheap.
+ */
+export function buildDiff(
+  source: string,
+  resolved: ResolvedEdit[],
+  context = 3
+): string {
+  const nl = newlineOf(source);
+  const before = source.split(nl);
+  const hunks: string[] = [];
+
+  for (const edit of resolved) {
+    const removed = source.slice(edit.start, edit.end).split(nl);
+    const added = edit.text.length > 0 ? edit.text.split(nl) : [];
+    const from = Math.max(1, edit.firstLine - context);
+    const to = Math.min(before.length, edit.lastLine + context);
+
+    const lines: string[] = [
+      `@@ -${edit.firstLine},${removed.length} +${edit.firstLine},${added.length} @@ ${edit.describe}`
+    ];
+    for (let i = from; i < edit.firstLine; i++) lines.push(` ${before[i - 1]}`);
+    for (const line of removed) if (line.length > 0 || removed.length > 1) lines.push(`-${line}`);
+    for (const line of added) lines.push(`+${line}`);
+    for (let i = edit.lastLine + 1; i <= to; i++) lines.push(` ${before[i - 1]}`);
+    hunks.push(lines.join('\n'));
+  }
+
+  return hunks.join('\n');
+}
