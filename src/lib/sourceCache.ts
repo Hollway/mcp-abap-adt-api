@@ -9,6 +9,15 @@
  */
 const cache = new Map<string, string>();
 
+/**
+ * Cache key for one object version. The working version (ADT's default, i.e.
+ * `inactive`) keeps the plain URL as its key, so a syntax check still finds the
+ * code being edited; an explicitly requested `active` read is stored separately
+ * and cannot shadow it.
+ */
+export const sourceCacheKey = (url: string, version?: string): string =>
+  version && version !== 'inactive' ? `${url}?version=${version}` : url;
+
 export const sourceCache = {
   set(url: string, source: string): void {
     if (typeof url === 'string' && url.length > 0 && typeof source === 'string') {

@@ -3,19 +3,31 @@ import { BaseHandler } from './BaseHandler';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from "abap-adt-api";
-import { sourceCache } from '../lib/sourceCache';
+import type { ObjectSourceOptions, ObjectVersion } from "abap-adt-api";
+import { sourceCache, sourceCacheKey } from '../lib/sourceCache';
+
+const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
 
 export class ObjectSourceHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'getObjectSource',
-        description: 'Retrieves source code for ABAP objects. For large objects, use startLine/maxLines to page through the source instead of retrieving it all at once.',
+        description: 'Retrieves source code for ABAP objects. ADT serves the INACTIVE version by default, so reading your own edit back proves nothing about what runs - pass version="active" to see the live code. For large objects, use startLine/maxLines to page through the source instead of retrieving it all at once.',
         inputSchema: {
           type: 'object',
           properties: {
             objectSourceUrl: { type: 'string' },
-            options: { type: 'string' },
+            version: {
+              type: 'string',
+              description: 'Which version to read: "active" (what the system executes), "inactive" (the working version, ADT default) or "workingArea". Omit for the ADT default.',
+              optional: true
+            },
+            options: {
+              type: 'string',
+              description: 'Deprecated. JSON object of raw abap-adt-api source options, e.g. {"version":"active"}; prefer the version parameter.',
+              optional: true
+            },
             startLine: {
               type: 'number',
               description: '1-based line number to start from (default 1). Use with maxLines to page through large sources.',
@@ -58,14 +70,53 @@ export class ObjectSourceHandlers extends BaseHandler {
     }
   }
 
+  /**
+   * Build the source options abap-adt-api expects.
+   *
+   * The tool used to declare `options` as a plain string while the library
+   * takes an object, so the version could not be selected at all and callers
+   * had to append ?version=active to the URL by hand. `version` is now a
+   * first-class parameter; the old string is still accepted, as JSON or as a
+   * bare "version=active" fragment.
+   */
+  private sourceOptions(args: any): ObjectSourceOptions {
+    const options: ObjectSourceOptions = {};
+    const legacy = args?.options;
+    if (typeof legacy === 'string' && legacy.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(legacy);
+        if (parsed && typeof parsed === 'object') Object.assign(options, parsed);
+      } catch {
+        const match = legacy.match(/version=(active|inactive|workingArea)/);
+        if (match) options.version = match[1] as ObjectVersion;
+      }
+    } else if (legacy && typeof legacy === 'object') {
+      Object.assign(options, legacy);
+    }
+    const version = args?.version;
+    if (typeof version === 'string' && version.length > 0) {
+      if (!VERSIONS.includes(version as ObjectVersion)) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `version must be one of ${VERSIONS.join(', ')}`
+        );
+      }
+      options.version = version as ObjectVersion;
+    }
+    return options;
+  }
+
   async handleGetObjectSource(args: any): Promise<any> {
-    
+
     const startTime = performance.now();
     try {
-      const fullSource = await this.adtclient.getObjectSource(args.objectSourceUrl, args.options);
+      const options = this.sourceOptions(args);
+      const fullSource = await this.adtclient.getObjectSource(args.objectSourceUrl, options);
       // Remember the source so a later syntaxCheckCode on the same URL can reuse
-      // it without the caller re-sending it (issue #2).
-      sourceCache.set(args.objectSourceUrl, fullSource);
+      // it without the caller re-sending it (issue #2). Only the working version
+      // is cached under the plain URL: a syntax check is about the code being
+      // edited, so an explicitly requested "active" read must not shadow it.
+      sourceCache.set(sourceCacheKey(args.objectSourceUrl, options.version), fullSource);
       this.trackRequest(startTime, true);
 
       const lines = fullSource.split('\n');
@@ -90,6 +141,7 @@ export class ObjectSourceHandlers extends BaseHandler {
               status: 'success',
               source,
               totalLines,
+              version: options.version || 'default',
               startLine: hasPaging ? startLine : 1,
               returnedLines: Math.max(0, returnedLines),
               hasMore: hasPaging ? endIndex < totalLines : false
