@@ -1,6 +1,7 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, describeAdtError } from '../lib/adtError';
+import { lockRegistry } from '../lib/lockRegistry';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 
@@ -51,6 +52,20 @@ export class ObjectDeletionHandlers extends BaseHandler {
         args.lockHandle,
         args.transport
       );
+      // Deleting an object does not release its lock: the lock survives, and
+      // the registry would keep pointing at an object that no longer exists.
+      // Release it here (best effort - the deletion itself has succeeded, so a
+      // failure to unlock must not turn into a failed call).
+      let lockReleased = false;
+      let lockError: string | undefined;
+      try {
+        await this.adtclient.unLock(args.objectUrl, args.lockHandle);
+        lockReleased = true;
+      } catch (unlockError: any) {
+        lockError = describeAdtError(unlockError).error;
+      }
+      lockRegistry.forget(args.objectUrl);
+
       this.trackRequest(startTime, true);
       return {
         content: [
@@ -59,6 +74,9 @@ export class ObjectDeletionHandlers extends BaseHandler {
             text: JSON.stringify({
               status: 'success',
               result,
+              lockReleased,
+              ...(lockError ? { lockError } : {}),
+              locksHeld: lockRegistry.count(),
               message: 'Object deleted successfully'
             }, null, 2)
           }
