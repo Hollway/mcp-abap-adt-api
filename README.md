@@ -338,6 +338,13 @@ locks, writes or activates anything:
 SAP_URL=... SAP_USER=... SAP_PASSWORD=... SMOKE_CLASS=CL_SALV_TABLE npm run smoke
 ```
 
+### The changelog
+
+One working session, one version. Each session of work on this server adds a
+new version section at the top of `CHANGELOG.md` with its date, its commit
+range, how the tool and test counts moved, and what it changed - so the history
+shows what each round brought rather than only where things ended up.
+
 ## Contributing
 
 Contributions are welcome! Please follow these steps to contribute:
