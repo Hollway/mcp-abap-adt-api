@@ -50,6 +50,18 @@ export interface ResolvedEdit {
    * the only accurate description of what it removes.
    */
   wholeLines: boolean;
+  /**
+   * For a pure insertion: the line it goes after (0 = before the first line).
+   * An insertion sits between two lines instead of replacing any, which a
+   * diff has to describe differently.
+   */
+  insertAfter?: number;
+  /**
+   * The text starts with a newline that only terminates the line already
+   * there - the case of inserting at the end of a file that does not end with
+   * a newline. That newline adds no line of its own.
+   */
+  textClosesPreviousLine?: boolean;
   describe: string;
 }
 
@@ -163,6 +175,8 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
         firstLine: after === 0 ? 1 : after,
         lastLine: after === 0 ? 1 : after,
         wholeLines: false,
+        insertAfter: after,
+        textClosesPreviousLine: needsLeadingNl,
         describe: after === 0 ? 'before line 1' : `after line ${after}`
       });
       continue;
@@ -266,17 +280,32 @@ export function buildDiff(
       : edit.wholeLines
         ? before.slice(edit.firstLine - 1, edit.lastLine)
         : chunkLines(source.slice(edit.start, edit.end));
-    const added = edit.text.length > 0 ? chunkLines(edit.text) : [];
-    const from = Math.max(1, edit.firstLine - context);
-    const to = Math.min(before.length, edit.lastLine + context);
 
-    const lines: string[] = [
-      `@@ -${edit.firstLine},${removed.length} +${edit.firstLine},${added.length} @@ ${edit.describe}`
-    ];
-    for (let i = from; i < edit.firstLine; i++) lines.push(` ${before[i - 1]}`);
+    const added = edit.text.length > 0 ? chunkLines(edit.text) : [];
+    // Inserting at the end of a file that does not end with a newline needs a
+    // leading newline, but that newline only terminates the line already
+    // there - it adds no line of its own and must not appear as one.
+    if (edit.textClosesPreviousLine && added[0] === '') added.shift();
+
+    // A pure insertion sits between two lines rather than replacing any, so
+    // the line it follows belongs to the context before it - the old code
+    // stopped one line short and dropped it from the hunk entirely.
+    const isInsert = edit.insertAfter !== undefined;
+    const contextEnd = isInsert ? edit.insertAfter! : edit.firstLine - 1;
+    const contextStart = isInsert ? edit.insertAfter! + 1 : edit.lastLine + 1;
+    const from = Math.max(1, (isInsert ? edit.insertAfter! : edit.firstLine) - context);
+    const to = Math.min(before.length, contextStart + context - 1);
+
+    const header = isInsert
+      // unified-diff convention for an insertion after line N: -N,0 +N+1,count
+      ? `@@ -${edit.insertAfter},0 +${edit.insertAfter! + 1},${added.length} @@ ${edit.describe}`
+      : `@@ -${edit.firstLine},${removed.length} +${edit.firstLine},${added.length} @@ ${edit.describe}`;
+
+    const lines: string[] = [header];
+    for (let i = from; i <= contextEnd; i++) lines.push(` ${before[i - 1]}`);
     for (const line of removed) lines.push(`-${line}`);
     for (const line of added) lines.push(`+${line}`);
-    for (let i = edit.lastLine + 1; i <= to; i++) lines.push(` ${before[i - 1]}`);
+    for (let i = contextStart; i <= to; i++) lines.push(` ${before[i - 1]}`);
     hunks.push(lines.join('\n'));
   }
 

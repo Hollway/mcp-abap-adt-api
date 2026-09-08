@@ -137,7 +137,40 @@ describe('buildDiff', () => {
     const diff = diffOf([{ insertAfterLine: 4, insertion: '    METHODS three.' }]);
     expect(marks(diff, '+')).toEqual(['+    METHODS three.']);
     expect(marks(diff, '-')).toEqual([]);
-    expect(diff).toMatch(/^@@ -4,0 \+4,1 @@/m);
+    // an insertion after line 4 lands on line 5 of the result
+    expect(diff).toMatch(/^@@ -4,0 \+5,1 @@/m);
+  });
+
+  it('keeps the line an insertion follows in the context', () => {
+    const diff = diffOf([{ insertAfterLine: 4, insertion: '    METHODS three.' }]);
+    const context = diff.split('\n').filter(line => line.startsWith(' '));
+    // line 4 is the one being inserted after: it used to be dropped entirely
+    expect(context).toContain('     METHODS two.');
+    expect(context).toContain('     METHODS one.');
+    expect(context).toContain(' ENDCLASS.');
+  });
+
+  /**
+   * The include created by createInclude is three lines with no trailing
+   * newline, so an insertion at its end has to add one - and that newline only
+   * terminates the line already there. It was counted as an added blank line.
+   */
+  it('does not count the newline that closes the last line of a file', () => {
+    const src = ['*&----*', '*&  Include  zkri_test', '*&----*'].join('\r\n');
+    const edits = [{ insertAfterLine: 3, insertion: 'FORM x.\r\nENDFORM.' }];
+    const diff = buildDiff(src, resolveEdits(src, edits));
+    expect(marks(diff, '+')).toEqual(['+FORM x.', '+ENDFORM.']);
+    expect(diff).toMatch(/^@@ -3,0 \+4,2 @@/m);
+    // and the count matches what the patch really produces
+    expect(applyEdits(src, resolveEdits(src, edits)).split('\r\n')).toHaveLength(5);
+  });
+
+  it('describes an insertion at the top of the file', () => {
+    const src = ['a', 'b', 'c', 'd', 'e'].join('\n');
+    const diff = buildDiff(src, resolveEdits(src, [{ insertAfterLine: 0, insertion: '* header' }]));
+    expect(marks(diff, '+')).toEqual(['+* header']);
+    expect(diff).toMatch(/^@@ -0,0 \+1,1 @@/m);
+    expect(diff.split('\n').filter(line => line.startsWith(' '))).toEqual([' a', ' b', ' c']);
   });
 
   it('shows exactly the lines a deletion removes', () => {
