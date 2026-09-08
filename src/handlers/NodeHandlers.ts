@@ -19,28 +19,23 @@ export class NodeHandlers extends BaseHandler {
                         },
                         parent_name: {
                             type: 'string',
-                            description: 'The name of the parent node.',
-                            optional: true
+                            description: 'The name of the parent node.'
                         },
                         user_name: {
                             type: 'string',
-                            description: 'The user name.',
-                            optional: true
+                            description: 'The user name.'
                         },
                         parent_tech_name: {
                             type: 'string',
-                            description: 'The technical name of the parent node.',
-                            optional: true
+                            description: 'The technical name of the parent node.'
                         },
                         rebuild_tree: {
                             type: 'boolean',
-                            description: 'Whether to rebuild the tree.',
-                            optional: true
+                            description: 'Whether to rebuild the tree.'
                         },
                         parentnodes: {
                             type: 'array',
-                            description: 'An array of parent node IDs.',
-                            optional: true
+                            description: 'An array of parent node IDs.'
                         },
                     },
                     required: ['parent_type']

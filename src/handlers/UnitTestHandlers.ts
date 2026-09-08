@@ -2,7 +2,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
-import { ADTClient, UnitTestRunFlags } from 'abap-adt-api';
+import { ADTClient, UnitTestRunFlags, UnitTestClass } from 'abap-adt-api';
 
 export class UnitTestHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -18,9 +18,16 @@ export class UnitTestHandlers extends BaseHandler {
                             description: 'The URL of the object to test.'
                         },
                         flags: {
-                            type: 'string',
-                            description: 'Flags for the unit test run.',
-                            optional: true
+                            type: 'object',
+                            description: 'Which test risk levels and durations to run. Six booleans; a JSON string is accepted too. Omit for the ADT defaults.',
+                            properties: {
+                                harmless: { type: 'boolean' },
+                                dangerous: { type: 'boolean' },
+                                critical: { type: 'boolean' },
+                                short: { type: 'boolean' },
+                                medium: { type: 'boolean' },
+                                long: { type: 'boolean' }
+                            }
                         }
                     },
                     required: ['url']
@@ -33,13 +40,20 @@ export class UnitTestHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         clas: {
-                            type: 'string',
-                            description: 'The class to evaluate.'
+                            type: 'object',
+                            description: 'A test class as returned by unitTestRun (object, or a JSON string).'
                         },
                         flags: {
-                            type: 'string',
-                            description: 'Flags for the unit test evaluation.',
-                            optional: true
+                            type: 'object',
+                            description: 'Which test risk levels and durations to evaluate. Six booleans; a JSON string is accepted too. Omit for the ADT defaults.',
+                            properties: {
+                                harmless: { type: 'boolean' },
+                                dangerous: { type: 'boolean' },
+                                critical: { type: 'boolean' },
+                                short: { type: 'boolean' },
+                                medium: { type: 'boolean' },
+                                long: { type: 'boolean' }
+                            }
                         }
                     },
                     required: ['clas']
@@ -79,8 +93,7 @@ export class UnitTestHandlers extends BaseHandler {
                         },
                         transport: {
                             type: 'string',
-                            description: 'The transport.',
-                            optional: true
+                            description: 'The transport.'
                         }
                     },
                     required: ['clas', 'lockHandle']
@@ -107,7 +120,10 @@ export class UnitTestHandlers extends BaseHandler {
     async handleUnitTestRun(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.unitTestRun(args.url, args.flags);
+            const result = await this.adtclient.unitTestRun(
+                args.url,
+                this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
+            );
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -129,7 +145,10 @@ export class UnitTestHandlers extends BaseHandler {
     async handleUnitTestEvaluation(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.unitTestEvaluation(args.clas, args.flags);
+            const result = await this.adtclient.unitTestEvaluation(
+                this.parseObjectArg<UnitTestClass>(args.clas, 'clas'),
+                this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
+            );
             this.trackRequest(startTime, true);
             return {
                 content: [

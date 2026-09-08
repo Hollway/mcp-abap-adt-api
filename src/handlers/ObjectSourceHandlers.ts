@@ -20,23 +20,19 @@ export class ObjectSourceHandlers extends BaseHandler {
             objectSourceUrl: { type: 'string' },
             version: {
               type: 'string',
-              description: 'Which version to read: "active" (what the system executes), "inactive" (the working version, ADT default) or "workingArea". Omit for the ADT default.',
-              optional: true
+              description: 'Which version to read: "active" (what the system executes), "inactive" (the working version, ADT default) or "workingArea". Omit for the ADT default.'
             },
             options: {
               type: 'string',
-              description: 'Deprecated. JSON object of raw abap-adt-api source options, e.g. {"version":"active"}; prefer the version parameter.',
-              optional: true
+              description: 'Deprecated. JSON object of raw abap-adt-api source options, e.g. {"version":"active"}; prefer the version parameter.'
             },
             startLine: {
               type: 'number',
-              description: '1-based line number to start from (default 1). Use with maxLines to page through large sources.',
-              optional: true
+              description: '1-based line number to start from (default 1). Use with maxLines to page through large sources.'
             },
             maxLines: {
               type: 'number',
-              description: 'Maximum number of lines to return from startLine. Omit to return the rest of the source.',
-              optional: true
+              description: 'Maximum number of lines to return from startLine. Omit to return the rest of the source.'
             }
           },
           required: ['objectSourceUrl']

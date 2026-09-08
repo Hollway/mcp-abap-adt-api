@@ -18,8 +18,7 @@ export class ObjectLockHandlers extends BaseHandler {
           },
           accessMode: { 
             type: 'string',
-            description: 'Access mode for the lock',
-            optional: true 
+            description: 'Access mode for the lock'
           }
         },
         required: ['objectUrl']

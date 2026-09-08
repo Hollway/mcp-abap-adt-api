@@ -45,8 +45,7 @@ export class RenameHandlers extends BaseHandler {
                         },
                         transport: {
                             type: 'string',
-                            description: 'The transport.',
-                            optional: true
+                            description: 'The transport.'
                         }
                     },
                     required: ['renameRefactoring']

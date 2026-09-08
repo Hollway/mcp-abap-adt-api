@@ -69,17 +69,6 @@ export class RefactorHandlers extends BaseHandler {
         }
     }
 
-    // Schemas declare these params as JSON strings, but the abap-adt-api methods
-    // expect deserialized objects; also accept plain objects for forward compatibility
-    private parseObjectArg<T>(value: unknown, name: string): T {
-        if (typeof value !== 'string') return value as T;
-        try {
-            return JSON.parse(value) as T;
-        } catch {
-            throw new McpError(ErrorCode.InvalidParams, `Parameter '${name}' is not valid JSON`);
-        }
-    }
-
     async handleExtractMethodEvaluate(args: any): Promise<any> {
         const startTime = performance.now();
         try {

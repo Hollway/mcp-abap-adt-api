@@ -19,13 +19,11 @@ export class TransportHandlers extends BaseHandler {
                         },
                         devClass: {
                             type: 'string',
-                            description: 'Development class',
-                            optional: true
+                            description: 'Development class'
                         },
                         operation: {
                             type: 'string',
-                            description: 'Transport operation',
-                            optional: true
+                            description: 'Transport operation'
                         }
                     },
                     required: ['objSourceUrl']
@@ -51,8 +49,7 @@ export class TransportHandlers extends BaseHandler {
                         },
                         transportLayer: {
                             type: 'string',
-                            description: 'Transport layer',
-                            optional: true
+                            description: 'Transport layer'
                         }
                     },
                     required: ['objSourceUrl', 'REQUEST_TEXT', 'DEVCLASS']
@@ -103,8 +100,8 @@ export class TransportHandlers extends BaseHandler {
                             description: 'The ETag for the transport configuration.'
                         },
                         config: {
-                            type: 'string',
-                            description: 'The transport configuration.'
+                            type: 'object',
+                            description: 'The transport configuration (object, or a JSON string).'
                         }
                     },
                     required: ['uri', 'etag', 'config']
@@ -130,8 +127,7 @@ export class TransportHandlers extends BaseHandler {
                         },
                         targets: {
                             type: 'boolean',
-                            description: 'Whether to include target systems.',
-                            optional: true
+                            description: 'Whether to include target systems.'
                         }
                     },
                     required: ['user']
@@ -149,8 +145,7 @@ export class TransportHandlers extends BaseHandler {
                         },
                         targets: {
                             type: 'boolean',
-                            description: 'Whether to include target systems.',
-                            optional: true
+                            description: 'Whether to include target systems.'
                         }
                     },
                     required: ['configUri']
@@ -182,13 +177,11 @@ export class TransportHandlers extends BaseHandler {
                         },
                         ignoreLocks: {
                             type: 'boolean',
-                            description: 'Whether to ignore locks.',
-                            optional: true
+                            description: 'Whether to ignore locks.'
                         },
                         IgnoreATC: {
                             type: 'boolean',
-                            description: 'Whether to ignore ATC checks.',
-                            optional: true
+                            description: 'Whether to ignore ATC checks.'
                         }
                     },
                     required: ['transportNumber']
@@ -258,8 +251,7 @@ export class TransportHandlers extends BaseHandler {
                         },
                         tr_number: {
                             type: 'string',
-                            description: 'The transport number.',
-                            optional: true
+                            description: 'The transport number.'
                         }
                     },
                     required: ['pgmid', 'obj_wbtype', 'obj_name']
@@ -428,7 +420,7 @@ export class TransportHandlers extends BaseHandler {
     async handleSetTransportsConfig(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.setTransportsConfig(args.uri, args.etag, args.config);
+            const result = await this.adtclient.setTransportsConfig(args.uri, args.etag, this.parseObjectArg(args.config, 'config'));
             this.trackRequest(startTime, true);
             return {
                 content: [

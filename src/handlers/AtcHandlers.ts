@@ -46,8 +46,7 @@ export class AtcHandlers extends BaseHandler {
                         },
                         maxResults: {
                             type: 'number',
-                            description: 'The maximum number of results to retrieve.',
-                            optional: true
+                            description: 'The maximum number of results to retrieve.'
                         }
                     },
                     required: ['variant', 'mainUrl']
@@ -65,18 +64,15 @@ export class AtcHandlers extends BaseHandler {
                         },
                         timestamp: {
                             type: 'number',
-                            description: 'The timestamp.',
-                            optional: true
+                            description: 'The timestamp.'
                         },
                         usedObjectSet: {
                             type: 'string',
-                            description: 'The used object set.',
-                            optional: true
+                            description: 'The used object set.'
                         },
                         includeExempted: {
                             type: 'boolean',
-                            description: 'Whether to include exempted findings.',
-                            optional: true
+                            description: 'Whether to include exempted findings.'
                         }
                     },
                     required: ['runResultId']
@@ -329,7 +325,7 @@ export class AtcHandlers extends BaseHandler {
     async handleAtcRequestExemption(args: { proposal: AtcProposal }): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.atcRequestExemption(args.proposal);
+            const result = await this.adtclient.atcRequestExemption(this.parseObjectArg(args.proposal, 'proposal'));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -351,7 +347,7 @@ export class AtcHandlers extends BaseHandler {
     async handleIsProposalMessage(args: { proposal: AtcProposal }): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.isProposalMessage(args.proposal);
+            const result = await this.adtclient.isProposalMessage(this.parseObjectArg(args.proposal, 'proposal'));
             this.trackRequest(startTime, true);
             return {
                 content: [

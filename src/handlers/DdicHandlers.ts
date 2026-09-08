@@ -27,18 +27,15 @@ export class DdicHandlers extends BaseHandler {
                         },
                         getTargetForAssociation: {
                             type: 'boolean',
-                            description: 'Whether to get the target for association.',
-                            optional: true
+                            description: 'Whether to get the target for association.'
                         },
                         getExtensionViews: {
                             type: 'boolean',
-                            description: 'Whether to get extension views.',
-                            optional: true
+                            description: 'Whether to get extension views.'
                         },
                         getSecondaryObjects: {
                             type: 'boolean',
-                            description: 'Whether to get secondary objects.',
-                            optional: true
+                            description: 'Whether to get secondary objects.'
                         }
                     },
                     required: ['path']
@@ -70,8 +67,7 @@ export class DdicHandlers extends BaseHandler {
                         },
                         name: {
                             type: 'string',
-                            description: 'The package name.',
-                            optional: true
+                            description: 'The package name.'
                         }
                     },
                     required: ['type']

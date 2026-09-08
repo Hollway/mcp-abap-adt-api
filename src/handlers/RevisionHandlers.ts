@@ -19,8 +19,7 @@ export class RevisionHandlers extends BaseHandler {
                         },
                         clsInclude: {
                             type: 'string',
-                            description: 'The class include.',
-                            optional: true
+                            description: 'The class include.'
                         }
                     },
                     required: ['objectUrl']

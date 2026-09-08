@@ -44,14 +44,23 @@ export class ObjectManagementHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            objects: { 
-              type: 'string',
-              description: 'JSON array of objects to activate. Each object must have adtcore:uri, adtcore:type, adtcore:name, and adtcore:parentUri properties'
+            objects: {
+              type: 'array',
+              description: 'Objects to activate, ideally exactly the rows returned by inactiveObjects. A JSON string is accepted too.',
+              items: {
+                type: 'object',
+                properties: {
+                  'adtcore:uri': { type: 'string' },
+                  'adtcore:type': { type: 'string' },
+                  'adtcore:name': { type: 'string' },
+                  'adtcore:parentUri': { type: 'string' }
+                },
+                required: ['adtcore:uri', 'adtcore:type', 'adtcore:name', 'adtcore:parentUri']
+              }
             },
             preauditRequested: {
               type: 'boolean',
-              description: 'Whether to perform pre-audit checks',
-              optional: true
+              description: 'Whether to perform pre-audit checks'
             }
           },
           required: ['objects']
@@ -73,13 +82,11 @@ export class ObjectManagementHandlers extends BaseHandler {
             },
             mainInclude: {
               type: 'string',
-              description: 'Main include context',
-              optional: true
+              description: 'Main include context'
             },
             preauditRequested: {
               type: 'boolean',
-              description: 'Whether to perform pre-audit checks',
-              optional: true
+              description: 'Whether to perform pre-audit checks'
             }
           },
           required: ['objectName', 'objectUrl']
@@ -112,15 +119,15 @@ export class ObjectManagementHandlers extends BaseHandler {
   async handleActivateObjects(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      if (!args.objects || typeof args.objects !== 'string') {
-        throw new McpError(ErrorCode.InvalidParams, "objects parameter must be a JSON string");
+      if (!args.objects) {
+        throw new McpError(ErrorCode.InvalidParams, "objects parameter is required");
       }
 
       let objects: InactiveObject[];
       try {
-        objects = JSON.parse(args.objects);
+        objects = this.parseObjectArg<InactiveObject[]>(args.objects, 'objects');
         if (!Array.isArray(objects)) {
-          throw new Error("Parsed objects must be an array");
+          throw new Error("objects must be an array");
         }
         
         // Validate each object has required properties

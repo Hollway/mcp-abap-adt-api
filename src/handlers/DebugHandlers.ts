@@ -31,8 +31,7 @@ export class DebugHandlers extends BaseHandler {
                         },
                         checkConflict: {
                             type: 'boolean',
-                            description: 'Whether to check for conflicts.',
-                            optional: true
+                            description: 'Whether to check for conflicts.'
                         }
                     },
                     required: ['debuggingMode', 'terminalId', 'ideId', 'user']
@@ -62,13 +61,11 @@ export class DebugHandlers extends BaseHandler {
                         },
                         checkConflict: {
                             type: 'boolean',
-                            description: 'Whether to check for conflicts.',
-                            optional: true
+                            description: 'Whether to check for conflicts.'
                         },
                         isNotifiedOnConflict: {
                             type: 'boolean',
-                            description: 'Whether to be notified on conflict.',
-                            optional: true
+                            description: 'Whether to be notified on conflict.'
                         }
                     },
                     required: ['debuggingMode', 'terminalId', 'ideId', 'user']
@@ -132,23 +129,19 @@ export class DebugHandlers extends BaseHandler {
                         },
                         scope: {
                             type: 'string',
-                            description: 'The debugger scope.',
-                            optional: true
+                            description: 'The debugger scope.'
                         },
                         systemDebugging: {
                             type: 'boolean',
-                            description: 'Whether to enable system debugging.',
-                            optional: true
+                            description: 'Whether to enable system debugging.'
                         },
                         deactivated: {
                             type: 'boolean',
-                            description: 'Whether to deactivate the breakpoints.',
-                            optional: true
+                            description: 'Whether to deactivate the breakpoints.'
                         },
                         syncScupeUrl: {
                             type: 'string',
-                            description: 'The URL for scope synchronization.',
-                            optional: true
+                            description: 'The URL for scope synchronization.'
                         }
                     },
                     required: ['debuggingMode', 'terminalId', 'ideId', 'clientId', 'breakpoints', 'user']
@@ -182,8 +175,7 @@ export class DebugHandlers extends BaseHandler {
                         },
                         scope: {
                             type: 'string',
-                            description: 'The debugger scope.',
-                            optional: true
+                            description: 'The debugger scope.'
                         }
                     },
                     required: ['breakpoint', 'debuggingMode', 'terminalId', 'ideId', 'requestUser']
@@ -209,8 +201,7 @@ export class DebugHandlers extends BaseHandler {
                         },
                         dynproDebugging: {
                             type: 'boolean',
-                            description: 'Whether to enable Dynpro debugging.',
-                            optional: true
+                            description: 'Whether to enable Dynpro debugging.'
                         }
                     },
                     required: ['debuggingMode', 'debuggeeId', 'user']
@@ -238,8 +229,7 @@ export class DebugHandlers extends BaseHandler {
                     properties: {
                         semanticURIs: {
                             type: 'boolean',
-                            description: 'Whether to use semantic URIs.',
-                            optional: true
+                            description: 'Whether to use semantic URIs.'
                         }
                     }
                 }
@@ -266,8 +256,7 @@ export class DebugHandlers extends BaseHandler {
                     properties: {
                         parent: {
                             type: 'array',
-                            description: 'The parent variable name.',
-                            optional: true
+                            description: 'The parent variable name.'
                         }
                     }
                 }
@@ -284,8 +273,7 @@ export class DebugHandlers extends BaseHandler {
                         },
                         url: {
                             type: 'string',
-                            description: 'The URL for step types "stepRunToLine" or "stepJumpToLine".',
-                            optional: true
+                            description: 'The URL for step types "stepRunToLine" or "stepJumpToLine".'
                         }
                     },
                     required: ['steptype']
@@ -451,7 +439,7 @@ export class DebugHandlers extends BaseHandler {
                 args.terminalId,
                 args.ideId,
                 args.clientId,
-                args.breakpoints,
+                this.parseObjectArg(args.breakpoints, 'breakpoints'),
                 args.user,
                 args.scope,
                 args.systemDebugging,

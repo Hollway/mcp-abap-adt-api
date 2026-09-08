@@ -16,13 +16,12 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     properties: {
                         code: {
                             type: 'string',
-                            description: 'The ABAP source to check. Optional if the source for "url" was already read or written this session.',
-                            optional: true
+                            description: 'The ABAP source to check. Optional if the source for "url" was already read or written this session.'
                         },
-                        url: { type: 'string', optional: true },
-                        mainUrl: { type: 'string', optional: true },
-                        mainProgram: { type: 'string', optional: true },
-                        version: { type: 'string', optional: true }
+                        url: { type: 'string' },
+                        mainUrl: { type: 'string' },
+                        mainProgram: { type: 'string' },
+                        version: { type: 'string' }
                     },
                     required: ['url']
                 }
@@ -63,8 +62,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         line: { type: 'number' },
                         startCol: { type: 'number' },
                         endCol: { type: 'number' },
-                        implementation: { type: 'boolean', optional: true },
-                        mainProgram: { type: 'string', optional: true }
+                        implementation: { type: 'boolean' },
+                        mainProgram: { type: 'string' }
                     },
                     required: ['url', 'source', 'line', 'startCol', 'endCol']
                 }
@@ -76,8 +75,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         url: { type: 'string' },
-                        line: { type: 'number', optional: true },
-                        column: { type: 'number', optional: true }
+                        line: { type: 'number' },
+                        column: { type: 'number' }
                     },
                     required: ['url']
                 }
@@ -161,7 +160,10 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        proposal: { type: 'string' },
+                        proposal: {
+                            type: 'object',
+                            description: 'One proposal from fixProposals (object, or a JSON string).'
+                        },
                         source: { type: 'string' }
                     },
                     required: ['proposal', 'source']
@@ -190,7 +192,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         body: { type: 'string' },
                         line: { type: 'number' },
                         column: { type: 'number' },
-                        language: { type: 'string', optional: true }
+                        language: { type: 'string' }
                     },
                     required: ['objectUri', 'body', 'line', 'column']
                 }
@@ -467,7 +469,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleUsageReferenceSnippets(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.usageReferenceSnippets(args.references);
+            const result = await this.adtclient.usageReferenceSnippets(this.parseObjectArg(args.references, 'references'));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -511,7 +513,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleFixEdits(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.fixEdits(args.proposal, args.source);
+            const result = await this.adtclient.fixEdits(this.parseObjectArg(args.proposal, 'proposal'), args.source);
             this.trackRequest(startTime, true);
             return {
                 content: [

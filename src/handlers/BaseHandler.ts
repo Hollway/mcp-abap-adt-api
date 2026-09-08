@@ -24,5 +24,20 @@ export abstract class BaseHandler {
     this.logger.debug('Request completed', { duration: Math.round(duration), success });
   }
 
+  /**
+   * Accept a structured argument either as JSON already parsed by the client
+   * or as a JSON string. Several tools declared object/array parameters as
+   * plain strings and handed them to abap-adt-api unparsed, which meant the
+   * library read properties off a string and silently did the wrong thing.
+   */
+  protected parseObjectArg<T>(value: unknown, name: string): T {
+    if (typeof value !== 'string') return value as T;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      throw new McpError(ErrorCode.InvalidParams, `Parameter '${name}' is not valid JSON`);
+    }
+  }
+
   abstract getTools(): ToolDefinition[];
 }

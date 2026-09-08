@@ -15,8 +15,7 @@ export class TraceHandlers extends BaseHandler {
                     properties: {
                         user: {
                             type: 'string',
-                            description: 'The user.',
-                            optional: true
+                            description: 'The user.'
                         }
                     }
                 }
@@ -29,8 +28,7 @@ export class TraceHandlers extends BaseHandler {
                     properties: {
                         user: {
                             type: 'string',
-                            description: 'The user.',
-                            optional: true
+                            description: 'The user.'
                         }
                     }
                 }
@@ -47,8 +45,7 @@ export class TraceHandlers extends BaseHandler {
                         },
                         withSystemEvents: {
                             type: 'boolean',
-                            description: 'Whether to include system events.',
-                            optional: true
+                            description: 'Whether to include system events.'
                         }
                     },
                     required: ['id']
@@ -66,8 +63,7 @@ export class TraceHandlers extends BaseHandler {
                         },
                         withSystemEvents: {
                             type: 'boolean',
-                            description: 'Whether to include system events.',
-                            optional: true
+                            description: 'Whether to include system events.'
                         }
                     },
                     required: ['id']
@@ -84,9 +80,8 @@ export class TraceHandlers extends BaseHandler {
                             description: 'The ID of the trace.'
                         },
                         options: {
-                            type: 'string',
-                            description: 'Options for retrieving statements.',
-                            optional: true
+                            type: 'object',
+                            description: 'Options for retrieving statements (object, or a JSON string).'
                         }
                     },
                     required: ['id']
@@ -99,8 +94,8 @@ export class TraceHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         parameters: {
-                            type: 'string',
-                            description: 'The trace parameters.'
+                            type: 'object',
+                            description: 'The trace parameters (object, or a JSON string).'
                         }
                     },
                     required: ['parameters']
@@ -113,8 +108,8 @@ export class TraceHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         config: {
-                            type: 'string',
-                            description: 'The trace configuration.'
+                            type: 'object',
+                            description: 'The trace configuration (object, or a JSON string).'
                         }
                     },
                     required: ['config']
@@ -267,7 +262,7 @@ export class TraceHandlers extends BaseHandler {
     async handleTracesStatements(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const statements = await this.adtclient.tracesStatements(args.id, args.options);
+            const statements = await this.adtclient.tracesStatements(args.id, this.parseObjectArg(args.options, 'options'));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -289,7 +284,7 @@ export class TraceHandlers extends BaseHandler {
     async handleTracesSetParameters(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.tracesSetParameters(args.parameters);
+            const result = await this.adtclient.tracesSetParameters(this.parseObjectArg(args.parameters, 'parameters'));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -311,7 +306,7 @@ export class TraceHandlers extends BaseHandler {
     async handleTracesCreateConfiguration(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.tracesCreateConfiguration(args.config);
+            const result = await this.adtclient.tracesCreateConfiguration(this.parseObjectArg(args.config, 'config'));
             this.trackRequest(startTime, true);
             return {
                 content: [

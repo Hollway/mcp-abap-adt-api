@@ -23,8 +23,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
             },
             transport: { 
               type: 'string',
-              description: 'Transport request number',
-              optional: true
+              description: 'Transport request number'
             }
           },
           required: ['objectUrl', 'lockHandle']

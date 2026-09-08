@@ -19,8 +19,7 @@ export class ObjectHandlers extends BaseHandler {
                         },
                         version: {
                             type: 'string',
-                            description: 'Version of the object',
-                            optional: true
+                            description: 'Version of the object'
                         }
                     },
                     required: ['objectUrl']
@@ -38,13 +37,11 @@ export class ObjectHandlers extends BaseHandler {
                         },
                         objType: {
                             type: 'string',
-                            description: 'Object type filter',
-                            optional: true
+                            description: 'Object type filter'
                         },
                         max: {
                             type: 'number',
-                            description: 'Maximum number of results',
-                            optional: true
+                            description: 'Maximum number of results'
                         }
                     },
                     required: ['query']

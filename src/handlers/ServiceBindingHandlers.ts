@@ -55,8 +55,7 @@ export class ServiceBindingHandlers extends BaseHandler {
                         },
                         index: {
                             type: 'number',
-                            description: 'The index of the service binding.',
-                            optional: true
+                            description: 'The index of the service binding.'
                         }
                     },
                     required: ['binding']

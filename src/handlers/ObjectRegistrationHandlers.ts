@@ -23,7 +23,10 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            options: { type: 'string' }
+            options: {
+              type: 'object',
+              description: 'Validation options: {objtype, objname, packagename, description} for an object, or the group/package variants. A JSON string is accepted too.'
+            }
           },
           required: ['options']
         }
@@ -39,8 +42,8 @@ export class ObjectRegistrationHandlers extends BaseHandler {
             parentName: { type: 'string' },
             description: { type: 'string' },
             parentPath: { type: 'string' },
-            responsible: { type: 'string', optional: true },
-            transport: { type: 'string', optional: true }
+            responsible: { type: 'string' },
+            transport: { type: 'string' }
           },
           required: ['objtype', 'name', 'parentName', 'description', 'parentPath']
         }
@@ -84,7 +87,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
   async handleValidateNewObject(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      const result = await this.adtclient.validateNewObject(args.options);
+      const result = await this.adtclient.validateNewObject(this.parseObjectArg(args.options, 'options'));
       this.trackRequest(startTime, true);
       return {
         content: [{

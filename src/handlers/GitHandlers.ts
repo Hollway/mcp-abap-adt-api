@@ -27,13 +27,11 @@ export class GitHandlers extends BaseHandler {
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repourl']
@@ -55,23 +53,19 @@ export class GitHandlers extends BaseHandler {
                         },
                         branch: {
                             type: 'string',
-                            description: 'The branch name.',
-                            optional: true
+                            description: 'The branch name.'
                         },
                         transport: {
                             type: 'string',
-                            description: 'The transport.',
-                            optional: true
+                            description: 'The transport.'
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['packageName', 'repourl']
@@ -89,23 +83,19 @@ export class GitHandlers extends BaseHandler {
                         },
                         branch: {
                             type: 'string',
-                            description: 'The branch name.',
-                            optional: true
+                            description: 'The branch name.'
                         },
                         transport: {
                             type: 'string',
-                            description: 'The transport.',
-                            optional: true
+                            description: 'The transport.'
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repoId']
@@ -137,13 +127,11 @@ export class GitHandlers extends BaseHandler {
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repo']
@@ -165,13 +153,11 @@ export class GitHandlers extends BaseHandler {
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repo', 'staging']
@@ -189,13 +175,11 @@ export class GitHandlers extends BaseHandler {
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repo']
@@ -213,13 +197,11 @@ export class GitHandlers extends BaseHandler {
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repo']
@@ -241,18 +223,15 @@ export class GitHandlers extends BaseHandler {
                         },
                         create: {
                             type: 'boolean',
-                            description: 'Whether to create the branch if it doesn\'t exist.',
-                            optional: true
+                            description: 'Whether to create the branch if it doesn\'t exist.'
                         },
                         user: {
                             type: 'string',
-                            description: 'The username.',
-                            optional: true
+                            description: 'The username.'
                         },
                         password: {
                             type: 'string',
-                            description: 'The password.',
-                            optional: true
+                            description: 'The password.'
                         }
                     },
                     required: ['repo', 'branch']

@@ -23,8 +23,7 @@ export class FeedHandlers extends BaseHandler {
                     properties: {
                         query: {
                             type: 'string',
-                            description: 'An optional query string to filter the dumps.',
-                            optional: true
+                            description: 'An optional query string to filter the dumps.'
                         }
                     }
                 }

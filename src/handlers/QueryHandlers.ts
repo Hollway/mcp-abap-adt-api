@@ -18,18 +18,15 @@ export class QueryHandlers extends BaseHandler {
                         },
                         rowNumber: {
                             type: 'number',
-                            description: 'The maximum number of rows to retrieve.',
-                            optional: true
+                            description: 'The maximum number of rows to retrieve.'
                         },
                         decode: {
                             type: 'boolean',
-                            description: 'Whether to decode the data.',
-                            optional: true
+                            description: 'Whether to decode the data.'
                         },
                         sqlQuery: {
                             type: 'string',
-                            description: 'An optional SQL query to filter the data.',
-                            optional: true
+                            description: 'An optional SQL query to filter the data.'
                         }
                     },
                     required: ['ddicEntityName']
@@ -47,13 +44,11 @@ export class QueryHandlers extends BaseHandler {
                         },
                         rowNumber: {
                             type: 'number',
-                            description: 'The maximum number of rows to retrieve.',
-                            optional: true
+                            description: 'The maximum number of rows to retrieve.'
                         },
                         decode: {
                             type: 'boolean',
-                            description: 'Whether to decode the data.',
-                            optional: true
+                            description: 'Whether to decode the data.'
                         }
                     },
                     required: ['sqlQuery']
