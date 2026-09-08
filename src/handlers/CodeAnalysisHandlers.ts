@@ -171,13 +171,22 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'fragmentMappings',
-                description: 'Retrieves fragment mappings.',
+                description: 'Locate a named fragment of an object and get the line and column where it starts - the cheap way to find one method in a class of a few thousand lines. type is an ADT fragment type, <OBJTYPE>/<code>: CLAS/OM for a class method, CLAS/OA for an attribute. There is no working fragment type for a FORM of a report; use findInSource for that.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        url: { type: 'string' },
-                        type: { type: 'string' },
-                        name: { type: 'string' }
+                        url: {
+                            type: 'string',
+                            description: 'Object URL, e.g. /sap/bc/adt/oo/classes/zcl_mm'
+                        },
+                        type: {
+                            type: 'string',
+                            description: 'ADT fragment type, e.g. CLAS/OM. Bare names such as FORM are not fragment types and the backend rejects them.'
+                        },
+                        name: {
+                            type: 'string',
+                            description: 'Fragment name, e.g. the method name.'
+                        }
                     },
                     required: ['url', 'type', 'name']
                 }
@@ -534,6 +543,19 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
     async handleFragmentMappings(args: any): Promise<any> {
         const startTime = performance.now();
+        // An ADT fragment type is always <OBJTYPE>/<code>. A bare word - FORM
+        // was the one that cost an afternoon - is not one, and the backend
+        // answers 400 or 500 to it. Saying so here costs nothing; the call
+        // itself used to be worse than useless, because a rejected fragment
+        // type is one of the ways an ADT session dies.
+        const type = String(args?.type || '');
+        if (!type.includes('/')) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `'${type}' is not an ADT fragment type - those are written <OBJTYPE>/<code>, e.g. CLAS/OM for a class method. ` +
+                'To find a FORM, a MODULE or any other statement in a report, use findInSource.'
+            );
+        }
         try {
             const result = await this.readClient.fragmentMappings(args.url, args.type, args.name);
             this.trackRequest(startTime, true);
@@ -550,7 +572,14 @@ export class CodeAnalysisHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Fragment mappings failed');
+            // The backend rejects fragment types it does not know for the
+            // object at hand, and the rejection says nothing useful. Point at
+            // what does work rather than passing the bare 400 on.
+            throw wrapAdtError(
+                error,
+                `Fragment mappings failed for type '${type}'. Class methods answer to CLAS/OM; ` +
+                'for a FORM, a MODULE or free-standing code in a report, use findInSource instead of a fragment type. This ran on the read session, so no lock was lost'
+            );
         }
     }
 
