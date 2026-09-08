@@ -43,6 +43,20 @@ import { metrics } from './lib/metrics';
 import { lockRegistry } from './lib/lockRegistry';
 import type { ToolDefinition } from './types/tools.js';
 
+/**
+ * Which connection variables the client actually passed, captured before
+ * dotenv fills the rest in from the .env file next to the server.
+ *
+ * That fallback is a trap when several instances of this server run against
+ * different systems: a typo in one client entry would silently connect to
+ * whatever system .env points at, so the server says out loud where its
+ * settings came from.
+ */
+const CLIENT_PROVIDED = new Set(
+  ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD', 'SAP_CLIENT', 'SAP_LANGUAGE']
+    .filter(name => process.env[name] !== undefined)
+);
+
 config({ path: path.resolve(__dirname, '../.env') });
 
 const HEALTHCHECK_TOOL: ToolDefinition = {
@@ -99,9 +113,12 @@ export class AbapAdtServer extends Server {
 
     const missingVars = ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
     if (missingVars.length > 0) {
-      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+      throw new Error(
+        `Missing required environment variables: ${missingVars.join(', ')}. ` +
+        'Note the user variable is SAP_USER, not SAP_USERNAME.'
+      );
     }
-    
+
     this.adtClient = new ADTClient(
       process.env.SAP_URL as string,
       process.env.SAP_USER as string,
@@ -110,7 +127,9 @@ export class AbapAdtServer extends Server {
       process.env.SAP_LANGUAGE as string
     );
     this.adtClient.stateful = session_types.stateful
-    
+
+    this.announceTarget();
+
     // Initialize handlers
     this.authHandlers = new AuthHandlers(this.adtClient);
     this.transportHandlers = new TransportHandlers(this.adtClient);
@@ -141,6 +160,37 @@ export class AbapAdtServer extends Server {
 
         // Setup tool handlers
     this.setupToolHandlers();
+  }
+
+  /** Where the settings came from, so a misdirected instance is obvious. */
+  private configSource(): 'client environment' | '.env file' {
+    return CLIENT_PROVIDED.has('SAP_URL') ? 'client environment' : '.env file';
+  }
+
+  /**
+   * Say on startup which system this process talks to. With several instances
+   * of this server connected to different systems, "which one am I" is the
+   * question worth answering before anything else happens.
+   */
+  private announceTarget(): void {
+    console.error(
+      `[config] ${process.env.SAP_URL} client=${process.env.SAP_CLIENT || '-'} ` +
+      `language=${process.env.SAP_LANGUAGE || '-'} user=${process.env.SAP_USER} ` +
+      `(settings from ${this.configSource()})`
+    );
+    if (this.configSource() === '.env file') {
+      console.error(
+        '[config] WARNING: SAP_URL was not passed by the client, so it came from the .env ' +
+        'file next to the server. Check that this is the system you meant.'
+      );
+    }
+    if (isReadOnly()) {
+      console.error('[config] SAP_READONLY is set: every tool that changes the system is refused');
+    }
+    const excluded = [...excludedTokens()];
+    if (excluded.length) {
+      console.error(`[config] SAP_TOOLS_EXCLUDE hides: ${excluded.join(', ')}`);
+    }
   }
 
   private serializeResult(result: any) {
@@ -550,7 +600,8 @@ export class AbapAdtServer extends Server {
       url: this.adtClient.baseUrl,
       client: this.adtClient.client || undefined,
       language: this.adtClient.language || undefined,
-      user: this.adtClient.username
+      user: this.adtClient.username,
+      configuredBy: this.configSource()
     };
     const excluded = [...excludedTokens()];
     const profile = {

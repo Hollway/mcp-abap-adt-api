@@ -12,12 +12,14 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 
 ## Features
 
-- **Authentication**: Securely authenticate with ABAP systems using the `login` tool.
-- **Object Management**: Create, read, update, and delete ABAP objects seamlessly.
-- **Transport Handling**: Manage transport requests with tools like `createTransport` and `transportInfo`.
-- **Code Analysis**: Perform syntax checks and retrieve code completion suggestions.
-- **Extensibility**: Easily extend the server with additional tools and resources as needed.
-- **Session Management**: Handle session caching and termination using `dropSession` and `logout`.
+- **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, and `createInclude` for report includes.
+- **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
+- **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
+- **Transports**: filterable transport lists, plus creation, release and ownership tools.
+- **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC, traces and the debugger.
+- **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
+- **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
+- **Guardrails**: a read-only mode, tool profiles, per-tool read-only/destructive annotations and a cap on oversized answers.
 
 ## Prerequisites
 
@@ -79,6 +81,20 @@ The server is published on npm, so you don't need to clone or build anything —
 ```
 
 If your SAP system uses a self-signed certificate, add `"NODE_TLS_REJECT_UNAUTHORIZED": "0"` to the `env` block (development only).
+
+### Environment variables
+
+| Variable | Meaning |
+| --- | --- |
+| `SAP_URL`, `SAP_USER`, `SAP_PASSWORD` | Connection; required. The user variable is `SAP_USER` - not `SAP_USERNAME`. |
+| `SAP_CLIENT`, `SAP_LANGUAGE` | Logon client and language. |
+| `SAP_READONLY` | `1` hides every tool that changes the system and refuses it if called anyway. Use it for a system that must only be read. |
+| `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
+| `SAP_MAX_RESPONSE_CHARS` | Cap on a single answer (default 200000). Over it, the answer is replaced by an envelope with the size and a preview. |
+| `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr. |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` accepts a self-signed certificate (development only). |
+
+Connection settings can also come from a `.env` file next to the server, but that is only a fallback: when several instances run against different systems, a typo in one client entry would silently connect to whatever `.env` points at. The server prints its target system and where the settings came from on startup, and `healthcheck` reports both.
 
 > **Windows tip:** if `npx` isn't found, set `"command": "npx.cmd"`, or use the full path to `node` with the absolute path to `dist/index.js` from a source install (see below).
 
@@ -154,70 +170,71 @@ If your SAP system uses a self-signed certificate, add `"NODE_TLS_REJECT_UNAUTHO
    ```
 
 ## Custom Instruction
-Use this Custom Instruction to explain the tool to your model:
+
+Use this instruction to explain the server to your model:
+
 ```
 ## mcp-abap-abap-adt-api Server
 
-This server provides tools for interacting with an SAP system via ADT (ABAP Development Tools) APIs. It allows you to retrieve information about ABAP objects, modify source code, and manage transports.
+Tools for working on an SAP system through ADT: reading and changing ABAP
+objects, activating them, running tests, and handling transports.
 
-**Key Tools and Usage:**
+**Finding things**
 
-*   **`searchObject`:** Finds ABAP objects based on a query string (e.g., class name).
-    *   `query`: (string, required) The search term.
-    *   Returns the object's URI.  Example: `/sap/bc/adt/oo/classes/zcl_invoice_xml_gen_model`
+* `searchObject` resolves a name to an object URI, e.g.
+  /sap/bc/adt/oo/classes/zcl_invoice. `objectStructure` describes an object,
+  `nodeContents` lists a package, `usageReferences` finds callers.
+* `getObjectSource` takes the URI plus /source/main. It serves the INACTIVE
+  version by default, so reading your own edit back proves nothing about what
+  the system runs - pass version="active" for that. Use startLine/maxLines
+  to page through a large object instead of pulling all of it.
 
-*   **`transportInfo`:** Retrieves transport information for a given object.
-    *   `objSourceUrl`: (string, required) The object's URI (obtained from `searchObject`).
-    *   Returns transport details, including the transport request number (`TRKORR` or `transportInfo.LOCKS.HEADER.TRKORR` in the JSON response).
+**Changing an object**
 
-*   **`lock`:** Locks an ABAP object for editing.
-    *   `objectUrl`: (string, required) The object's URI.
-    *   Returns a `lockHandle`, which is required for subsequent modifications.
+1. `lock` the object URI (without /source/main). Keep the lockHandle; the
+   server also remembers it, and `listLocks` shows what is held.
+2. `patchObjectSource` with the source URI and the edits: a line range
+   ({startLine, endLine, replacement}), exact text ({anchor, replacement}) or
+   an insertion ({insertAfterLine, insertion}). It reads the current source,
+   applies the edits and returns a diff. Pass dryRun first if unsure.
+   `setObjectSource` still exists, but it replaces the whole object.
+3. `unLock` **before activating**: activating while holding the lock fails
+   with "user X is already processing Y". This differs from the ADT editor.
+4. `activateSafe` with the object name. It activates every inactive part -
+   the class, its changed method fragments, its sections, its test include -
+   and then checks that nothing is left inactive. Do not trust
+   `activateByName`: it has answered success:true without activating.
+5. Verify with `getObjectSource` version="active", or `inactiveObjects`
+   returning an empty list.
 
-*   **`unLock`:** Unlocks a previously locked ABAP object.
-    *   `objectUrl`: (string, required) The object's URI.
-    *   `lockHandle`: (string, required) The lock handle obtained from the `lock` operation.
+**Tests**
 
-*   **`setObjectSource`:** Modifies the source code of an ABAP object.
-    *   `objectSourceUrl`: (string, required) The object's URI *with the suffix `/source/main`*.  Example: `/sap/bc/adt/oo/classes/zcl_invoice_xml_gen_model/source/main`
-    *   `lockHandle`: (string, required) The lock handle obtained from the `lock` operation.
-    *   `source`: (string, required) The complete, modified ABAP source code.
-    *   `transport`: (string, optional) The transport request number.
+`unitTestRun` returning an empty result does NOT mean the tests passed - it
+means none ran. The answer explains why: the object is inactive, or the test
+include does not compile. Fix that and run it again.
 
-*   **`syntaxCheckCode`:** Performs a syntax check on a given ABAP source code.
-    *   `code`: (string, required) The ABAP source code to check.
-    *   `url`: (string, optional) The URL of the object.
-    *   `mainUrl`: (string, optional) The main URL.
-    *   `mainProgram`: (string, optional) The main program.
-    *   `version`: (string, optional) The version.
-    *   Returns syntax check results, including any errors.
+**Transports**
 
-*   **`activate`:** Activates an ABAP object. (See notes below on activation/unlocking.)
-    *    `object`: The object to be activated.
+`userTransports` lists a user's requests, filterable by status (D
+modifiable, R released), owner, number and description. `transportInfo` on an
+object URI shows which request would take a change. Ask the user which
+request to use rather than creating one.
 
-*   **`getObjectSource`:** Retrieves the source code of an ABAP object.
-    *   `objectSourceUrl`: (string, required) The object's URI *with the suffix `/source/main`*.
+**Errors**
 
-**Workflow for Modifying ABAP Code:**
+Failures carry SAP's own diagnosis: adtType (the ADT exception), t100 (the
+message key), localizedMessage, status, and diagnostic - "sap" for a real
+rejection, "transport" for an HTTP failure with no answer from SAP. A dead
+session is recovered automatically for read-only calls, which then come back
+marked sessionRecovered; a call that writes is never repeated for you,
+because its lock handle died with the session - re-lock and retry.
 
-1.  **Find the object URI:** Use `searchObject`.
-2.  **Read the original source code:** Use `getObjectSource` (with the `/source/main` suffix).
-3.  **Clone and Modify the source code locally:** (e.g., `write_to_file` for creating a local copy, and using `read_file`, `replace_in_file` for modifying this local copy).
-4.  **Get transport information:** Use `transportInfo`.
-5.  **Lock the object:** Use `lock`.
-6.  **Set the modified source code:** Use `setObjectSource` (with the `/source/main` suffix).
-7.  **Perform a syntax check:** Use `syntaxCheckCode`.
-8.  **Activate** the object, Use `activate`..
-9.  **unLock the object:** Use `unLock`.
+**Notes**
 
-**Important Notes:**
-*   **File Handling:** SAP is completly de-coupled from the local file system. Reading source code will only return the code as tool result - it has no effect on file. Files are not synchronized with SAP but merely a local copy for our reference. FYI: It's not strictly necessary for you to create local copies of source codes, as they have no effect on SAP, but it helps us track changes. 
-*   **File Handling:** The local filenames you will use will not contain any paths, but only a filename! It's preferable to use a pattern like "[ObjectName].[ObjectType].abap". (e.g., SAPMV45A.prog.abap for a ABAP Program SAPMV45A, CL_IXML.clas.abap for a Class CL_IXML)
-*   **URL Suffix:**  Remember to add `/source/main` to the object URI when using `setObjectSource` and `getObjectSource`.
-*   **Transport Request:** Obtain the transport request number (e.g., from `transportInfo` or from the user) and include it in relevant operations.
-*   **Lock Handle:**  The `lockHandle` obtained from the `lock` operation is crucial for `setObjectSource` and `unLock`. Ensure you are using a valid `lockHandle`. If a lock fails, you may need to re-acquire the lock. Locks can expire or be released by other users.
-*   **Activation/Unlocking Order:** The exact order of `activate` and `unLock` operations might need clarification. Refer to the tool descriptions or ask the user. It appears `activate` can be used without unlocking first.
-* **Error Handling:** The tools return JSON responses. Check for error messages within these responses.
+* SAP is decoupled from the local file system. Reading source returns it as a
+  tool result only; local copies are for your own reference.
+* Writes land in the inactive version, so a botched write never touches what
+  is running until it is activated.
 ```
 
 ## Efficient Database Access
@@ -248,6 +265,27 @@ When working with ABAP objects, you may encounter errors related to unknown fiel
 *   **`npx` can't find the package / client won't start it:** ensure Node.js is installed and on your PATH (`node -v`, `npm -v`). On Windows try `"command": "npx.cmd"`, or use a source build with an absolute path to `node dist/index.js`.
 *   **SAP connection errors:** verify your credentials (`SAP_URL`, `SAP_USER`, `SAP_PASSWORD`, `SAP_CLIENT`), confirm the system is reachable, that your user has ADT authorizations, and that `/sap/bc/adt` is active in `SICF`.
 *   **TLS / self-signed certificate errors:** for development only, set `NODE_TLS_REJECT_UNAUTHORIZED=0` (env var or in the client `env` block).
+*   **Every call suddenly fails with status 400:** the ADT session died. The server detects that shape (an HTTP failure with no `exc:exception` body), re-authenticates and retries read-only calls, marking the answer `sessionRecovered`. A call that writes is not repeated: re-lock the object and try again. `healthcheck` says whether the session is alive.
+*   **A change seems to have no effect:** it is probably still inactive. `getObjectSource` serves the inactive version by default - read it with `version="active"`, and check `inactiveObjects` is empty after activating. Prefer `activateSafe`.
+*   **`logout` and then nothing works:** the underlying client cannot log in again after `logout`; restart the server process. Use `dropSession` to release a session instead.
+*   **An answer comes back as `{"status":"truncated"}`:** it exceeded `SAP_MAX_RESPONSE_CHARS`. Narrow the request (`startLine`/`maxLines`, `rowNumber`, the `userTransports` filters) or raise the limit.
+*   **A tool is missing from the list:** check `SAP_READONLY` and `SAP_TOOLS_EXCLUDE` - `healthcheck` reports the active profile.
+
+## Development
+
+```bash
+npm install
+npm run build      # compile src/ to dist/
+npm test           # unit tests (no SAP system needed)
+npm run smoke      # end-to-end checks against a real system, read-only
+```
+
+`npm run smoke` takes the same environment variables as the server and never
+locks, writes or activates anything:
+
+```bash
+SAP_URL=... SAP_USER=... SAP_PASSWORD=... SMOKE_CLASS=CL_SALV_TABLE npm run smoke
+```
 
 ## Contributing
 
