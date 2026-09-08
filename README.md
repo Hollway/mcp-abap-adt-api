@@ -12,12 +12,15 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 
 ## Features
 
-- **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, `editObject` for the whole lock/patch/unlock/activate sequence in one call, and `createInclude` for report includes.
+- **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, `editObject` for the whole lock/patch/unlock/activate sequence in one call, `createAndWrite` for create + write + activate, and `createInclude` for report includes.
+- **Dictionary**: `createDataElement` and `createDomain` create a DDIC object and give it its definition in one call, and `get`/`setDataElementProperties` and `get`/`setDomainProperties` read and change one. `createObject` alone leaves a DDIC object with no type, which cannot be activated.
 - **Reading source**: `sourceOutline` lists the blocks of a program or class with their line numbers, and `findInSource` searches a source - and the includes of a report - for text or a regular expression. ADT itself can only locate a class method.
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
+- **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
-- **Transports**: filterable transport lists, plus creation, release and ownership tools.
-- **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC, traces and the debugger.
+- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools.
+- **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC (with `atcDocumentation` for the rule text), traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
+- **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
 - **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
 - **Guardrails**: a read-only mode, tool profiles, per-tool read-only/destructive annotations and a cap on oversized answers.
@@ -220,7 +223,37 @@ executes. The steps by hand:
 5. Verify with `getObjectSource` version="active", or `inactiveObjects`
    returning an empty list.
 
+**Creating an object**
+
+`createAndWrite` creates the object and writes its source in one call, then
+activates it: validate the name, create, lock, write, unlock, activate. It
+knows where the source of a CLAS/OC, INTF/OI, PROG/P, PROG/I, FUGR/F, FUGR/FF
+or FUGR/I lives; anything else is `createObject` plus `setObjectSource`. A
+package other than $TMP needs a transport request - ask the user which one.
+
+Objects are created in the logon language. That matters: the underlying
+library defaults to EN and makes it the master language, and SAP then answers
+a read in any other language with an empty description.
+
+**The dictionary**
+
+`createDataElement` and `createDomain` create and define in one call. The type
+of a data element comes either from a domain or from a built-in ABAP type, not
+both, and the four field labels are cut to the lengths SAP allows (10/20/40/55)
+with the answer saying which were cut. `setDataElementProperties` and
+`setDomainProperties` change an existing one: the backend PUT replaces the
+whole definition, so anything not passed is kept as the system has it.
+
+Not every release serves these over ADT. On a classic ERP system data elements
+work while domains answer 404 for every path including validation - the tools
+say so instead of looking like a wrong name, and the domain has to be
+maintained in SE11.
+
 **Tests**
+
+`runTests` is the one to use: it activates the object first, because no test
+runs against an inactive one, and then reports how many methods ran, how many
+passed, and each failure with its class, method and ABAP Unit message.
 
 `unitTestRun` returning an empty result does NOT mean the tests passed - it
 means none ran. The answer explains why: the object is inactive, or the test
@@ -229,9 +262,14 @@ include does not compile. Fix that and run it again.
 **Transports**
 
 `userTransports` lists a user's requests, filterable by status (D
-modifiable, R released), owner, number and description. `transportInfo` on an
-object URI shows which request would take a change. Ask the user which
+modifiable, R released), owner, number and description. `transportDetails`
+answers what is inside one request - its tasks and every object recorded in
+it - and resolves a task number to the request holding it. `transportInfo` on
+an object URI shows which request would take a change. Ask the user which
 request to use rather than creating one.
+
+Pass the number of the request, not of a developer task: a task number is
+refused by a write with "not a change request".
 
 **Errors**
 

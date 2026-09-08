@@ -97,7 +97,11 @@ const check = (label, condition, detail) => {
   check(`tools/list returns tools (${tools.length})`, tools.length > 0);
   const byName = new Map(tools.map(t => [t.name, t]));
   for (const name of ['healthcheck', 'getObjectSource', 'patchObjectSource', 'activateSafe', 'listLocks',
-                      'findInSource', 'sourceOutline', 'editObject']) {
+                      'findInSource', 'sourceOutline', 'editObject', 'createAndWrite', 'runTests',
+                      'createDataElement', 'createDomain', 'getDataElementProperties',
+                      'getDomainProperties', 'transportDetails', 'typeHierarchy', 'whereUsedMethod',
+                      'objectEnhancements', 'getTextElements', 'atcDocumentation',
+                      'changePackagePreview', 'rapGenIsAvailable']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
   check('read-only tools are annotated as such',
@@ -193,6 +197,86 @@ const check = (label, condition, detail) => {
 
   const afterPreview = await call('listLocks');
   check('editObject dryRun took no lock', afterPreview.payload.count === 0, afterPreview.payload);
+
+  // The lookups that work out a cursor position from a name
+  const hierarchy = await call('typeHierarchy', { className: CLASS_NAME, superTypes: true });
+  check(`typeHierarchy resolves ${CLASS_NAME} from its name`,
+    hierarchy.payload.status === 'success' &&
+    hierarchy.payload.resolvedAt.line > 0 &&
+    Array.isArray(hierarchy.payload.nodes),
+    hierarchy.payload);
+
+  const noSuchMethod = await call('whereUsedMethod', {
+    className: CLASS_NAME, method: 'ZZ_NO_SUCH_METHOD_SMOKE'
+  });
+  check('whereUsedMethod says which source it looked in',
+    noSuchMethod.isError === true &&
+    /No declaration or implementation/.test(JSON.stringify(noSuchMethod.payload)),
+    noSuchMethod.payload);
+
+  // Dictionary reads. Domains are not served over ADT on every release, so the
+  // check is that the answer is either the definition or the explanation.
+  const element = await call('getDataElementProperties', { name: 'WERKS_D' });
+  check('getDataElementProperties reads a standard element',
+    element.payload.status === 'success' &&
+    element.payload.typeKind === 'domain' &&
+    element.payload.properties.dataTypeLength > 0,
+    element.payload);
+
+  const domain = await call('getDomainProperties', { name: 'WERKS' });
+  check('getDomainProperties answers, or explains that this release has no domain endpoint',
+    (domain.payload.status === 'success' && !!domain.payload.properties) ||
+    (domain.isError === true && /does not serve DDIC domains/.test(JSON.stringify(domain.payload))),
+    domain.payload);
+
+  // A request that cannot exist: found:false rather than an empty request
+  const noSuchTransport = await call('transportDetails', { transportNumber: 'ZZZK9999999' });
+  check('transportDetails reports a missing request as not found',
+    noSuchTransport.payload.status === 'success' && noSuchTransport.payload.found === false,
+    noSuchTransport.payload);
+
+  const rap = await call('rapGenIsAvailable');
+  check('rapGenIsAvailable answers either way',
+    rap.payload.status === 'success' && typeof rap.payload.available === 'boolean',
+    rap.payload);
+
+  const texts = await call('getTextElements', { objectName: CLASS_NAME, objectType: 'CLAS/OC' });
+  check('getTextElements answers, or explains that this release has no text element endpoint',
+    (texts.payload.status === 'success' && Array.isArray(texts.payload.textElements)) ||
+    (texts.isError === true && /does not serve text elements/.test(JSON.stringify(texts.payload))),
+    texts.payload);
+
+  // Refusals that never reach the backend
+  const bothTypes = await call('createDataElement', {
+    name: 'ZSMOKE_DTEL', description: 'smoke', packageName: '$TMP',
+    domain: 'ZSMOKE_DOMA', dataType: 'CHAR', length: 4
+  });
+  check('createDataElement refuses a domain and a built-in type at once',
+    bothTypes.isError === true && /either from a domain/.test(JSON.stringify(bothTypes.payload)),
+    bothTypes.payload);
+
+  const noTransport = await call('createAndWrite', {
+    objtype: 'CLAS/OC', name: 'ZCL_SMOKE_NEVER', description: 'smoke',
+    packageName: 'ZSMOKE_PACKAGE', source: 'CLASS zcl_smoke_never DEFINITION. ENDCLASS.'
+  });
+  check('createAndWrite refuses a real package without a transport',
+    noTransport.isError === true && /transport request/.test(JSON.stringify(noTransport.payload)),
+    noTransport.payload);
+
+  const unplaceable = await call('createAndWrite', {
+    objtype: 'TABL/DT', name: 'ZSMOKE_TABLE', description: 'smoke',
+    packageName: '$TMP', source: 'nothing'
+  });
+  check('createAndWrite refuses a type whose source it cannot place',
+    unplaceable.isError === true &&
+    /does not know where the source/.test(JSON.stringify(unplaceable.payload)),
+    unplaceable.payload);
+
+  const noObject = await call('runTests', {});
+  check('runTests asks which object', noObject.isError === true, noObject.payload);
+
+  const afterReads = await call('listLocks');
+  check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
 
   console.log(failures === 0 ? '\nall smoke checks pass' : `\n${failures} smoke check(s) failed`);
   child.kill();
