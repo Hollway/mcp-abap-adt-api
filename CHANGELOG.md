@@ -21,6 +21,9 @@ Reliability
   detects that shape, re-authenticates and retries read-only calls (marking the
   answer `sessionRecovered`). Calls that write are never replayed: the session is
   restored, and the caller is told the lock handle is void.
+- **Reads run on their own session.** Read-only calls go through the stateless
+  clone, so the library recovers them by itself and they never disturb the
+  stateful session holding the locks. Writes, locks and the debugger stay on it.
 - **`healthcheck` actually checks.** It calls the backend and reports the target
   system, session state, tool profile, metrics and latency, instead of a
   constant "healthy".
