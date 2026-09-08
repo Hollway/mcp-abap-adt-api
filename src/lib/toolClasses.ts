@@ -39,6 +39,9 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   // refactorings that write
   'renameExecute',
   'extractMethodExecute',
+  // DDIC contents
+  'setDomainProperties',
+  'setDataElementProperties',
   // settings
   'setPrettyPrinterSetting',
   // abapGit

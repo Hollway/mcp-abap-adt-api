@@ -28,6 +28,7 @@ import { UnitTestHandlers } from './handlers/UnitTestHandlers.js';
 import { PrettyPrinterHandlers } from './handlers/PrettyPrinterHandlers.js';
 import { GitHandlers } from './handlers/GitHandlers.js';
 import { DdicHandlers } from './handlers/DdicHandlers.js';
+import { DdicPropertyHandlers } from './handlers/DdicPropertyHandlers.js';
 import { ServiceBindingHandlers } from './handlers/ServiceBindingHandlers.js';
 import { QueryHandlers } from './handlers/QueryHandlers.js';
 import { FeedHandlers } from './handlers/FeedHandlers.js';
@@ -92,6 +93,7 @@ export class AbapAdtServer extends Server {
     private prettyPrinterHandlers: PrettyPrinterHandlers;
     private gitHandlers: GitHandlers;
     private ddicHandlers: DdicHandlers;
+    private ddicPropertyHandlers: DdicPropertyHandlers;
     private serviceBindingHandlers: ServiceBindingHandlers;
     private queryHandlers: QueryHandlers;
     private feedHandlers: FeedHandlers;
@@ -152,6 +154,7 @@ export class AbapAdtServer extends Server {
     this.prettyPrinterHandlers = new PrettyPrinterHandlers(this.adtClient);
     this.gitHandlers = new GitHandlers(this.adtClient);
     this.ddicHandlers = new DdicHandlers(this.adtClient);
+    this.ddicPropertyHandlers = new DdicPropertyHandlers(this.adtClient);
     this.serviceBindingHandlers = new ServiceBindingHandlers(this.adtClient);
     this.queryHandlers = new QueryHandlers(this.adtClient);
     this.feedHandlers = new FeedHandlers(this.adtClient);
@@ -437,6 +440,12 @@ export class AbapAdtServer extends Server {
             case 'packageSearchHelp':
                 result = await this.ddicHandlers.handle(toolName, args);
                 break;
+            case 'getDomainProperties':
+            case 'setDomainProperties':
+            case 'getDataElementProperties':
+            case 'setDataElementProperties':
+                result = await this.ddicPropertyHandlers.handle(toolName, args);
+                break;
             case 'publishServiceBinding':
             case 'unPublishServiceBinding':
             case 'bindingDetails':
@@ -534,6 +543,7 @@ export class AbapAdtServer extends Server {
       { group: 'prettyPrinter', tools: this.prettyPrinterHandlers.getTools() },
       { group: 'git', tools: this.gitHandlers.getTools() },
       { group: 'ddic', tools: this.ddicHandlers.getTools() },
+      { group: 'ddic', tools: this.ddicPropertyHandlers.getTools() },
       { group: 'serviceBinding', tools: this.serviceBindingHandlers.getTools() },
       { group: 'query', tools: this.queryHandlers.getTools() },
       { group: 'feed', tools: this.feedHandlers.getTools() },
