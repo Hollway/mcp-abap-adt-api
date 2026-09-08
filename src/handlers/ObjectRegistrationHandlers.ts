@@ -47,6 +47,44 @@ export class ObjectRegistrationHandlers extends BaseHandler {
           },
           required: ['objtype', 'name', 'parentName', 'description', 'parentPath']
         }
+      },
+      {
+        name: 'createInclude',
+        description: 'Create a report include (PROG/I). Use this instead of createObject for includes: abap-adt-api builds the creation body without the reference to the main program, so the backend rejects it (400/500) whatever parameters are passed. This posts the include document together with its context reference.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Include name, e.g. ZR_MM_FOO_F01.'
+            },
+            description: {
+              type: 'string',
+              description: 'Short description.'
+            },
+            packageName: {
+              type: 'string',
+              description: 'Development package, e.g. ZMM_BASE.'
+            },
+            mainProgram: {
+              type: 'string',
+              description: 'Main program the include belongs to, e.g. ZR_MM_FOO. This is the reference createObject fails to send.'
+            },
+            transport: {
+              type: 'string',
+              description: 'Transport request.'
+            },
+            responsible: {
+              type: 'string',
+              description: 'Responsible user; defaults to the logon user.'
+            },
+            masterLanguage: {
+              type: 'string',
+              description: 'Master language; defaults to the logon language, or EN.'
+            }
+          },
+          required: ['name', 'description', 'packageName', 'mainProgram']
+        }
       }
     ];
   }
@@ -59,8 +97,80 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         return this.handleValidateNewObject(args);
       case 'createObject':
         return this.handleCreateObject(args);
+      case 'createInclude':
+        return this.handleCreateInclude(args);
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown object registration tool: ${toolName}`);
+    }
+  }
+
+  private xmlAttr(value: string): string {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /**
+   * Create a program include.
+   *
+   * abap-adt-api routes PROG/I through its generic createBodySimple, which
+   * emits only a packageRef - the include document needs a context reference
+   * to its main program as well, so the backend answers 400 or 500 no matter
+   * which parentPath is passed (confirmed on separate days, with brand-new
+   * names, which rules out a name collision). The document is built here
+   * instead and posted through the library's own HTTP client, so cookies, CSRF
+   * token and session handling stay exactly as for every other call.
+   */
+  async handleCreateInclude(args: any): Promise<any> {
+    const startTime = performance.now();
+    try {
+      const name = String(args.name || '').toUpperCase();
+      const mainProgram = String(args.mainProgram || '').toUpperCase();
+      const responsible = String(args.responsible || this.adtclient.username || '').toUpperCase();
+      const language = (args.masterLanguage || this.adtclient.language || 'EN').toUpperCase();
+
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes"
+    xmlns:adtcore="http://www.sap.com/adt/core"
+    adtcore:description="${this.xmlAttr(args.description)}"
+    adtcore:name="${this.xmlAttr(name)}" adtcore:type="PROG/I"
+    adtcore:language="${this.xmlAttr(language)}" adtcore:masterLanguage="${this.xmlAttr(language)}"
+    adtcore:responsible="${this.xmlAttr(responsible)}">
+  <adtcore:packageRef adtcore:name="${this.xmlAttr(String(args.packageName).toUpperCase())}"/>
+  <include:contextRef adtcore:name="${this.xmlAttr(mainProgram)}" adtcore:type="PROG/P"
+    adtcore:uri="/sap/bc/adt/programs/programs/${encodeURIComponent(mainProgram.toLowerCase())}"/>
+</include:abapInclude>`;
+
+      const qs: Record<string, string> = {};
+      if (args.transport) qs.corrNr = args.transport;
+
+      await this.adtclient.httpClient.request('/sap/bc/adt/programs/includes', {
+        body,
+        headers: { 'Content-Type': 'application/*' },
+        method: 'POST',
+        qs
+      });
+      this.trackRequest(startTime, true);
+
+      const url = `/sap/bc/adt/programs/includes/${encodeURIComponent(name.toLowerCase())}`;
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            status: 'success',
+            name,
+            mainProgram,
+            objectUrl: url,
+            sourceUrl: `${url}/source/main`,
+            hint: 'Created empty. Write its body with setObjectSource on the sourceUrl (the include needs a lock), and add the INCLUDE statement to the main program.'
+          })
+        }]
+      };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      throw wrapAdtError(error, 'Failed to create include');
     }
   }
 

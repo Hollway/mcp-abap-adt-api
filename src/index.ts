@@ -328,6 +328,7 @@ export class AbapAdtServer extends Server {
             case 'objectRegistrationInfo':
             case 'validateNewObject':
             case 'createObject':
+            case 'createInclude':
                 result = await this.objectRegistrationHandlers.handle(toolName, args);
                 break;
             case 'nodeContents':
