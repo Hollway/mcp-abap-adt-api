@@ -29,6 +29,9 @@ import { PrettyPrinterHandlers } from './handlers/PrettyPrinterHandlers.js';
 import { GitHandlers } from './handlers/GitHandlers.js';
 import { DdicHandlers } from './handlers/DdicHandlers.js';
 import { DdicPropertyHandlers } from './handlers/DdicPropertyHandlers.js';
+import { EnhancementHandlers } from './handlers/EnhancementHandlers.js';
+import { TextElementHandlers } from './handlers/TextElementHandlers.js';
+import { RapHandlers } from './handlers/RapHandlers.js';
 import { ServiceBindingHandlers } from './handlers/ServiceBindingHandlers.js';
 import { QueryHandlers } from './handlers/QueryHandlers.js';
 import { FeedHandlers } from './handlers/FeedHandlers.js';
@@ -94,6 +97,9 @@ export class AbapAdtServer extends Server {
     private gitHandlers: GitHandlers;
     private ddicHandlers: DdicHandlers;
     private ddicPropertyHandlers: DdicPropertyHandlers;
+    private enhancementHandlers: EnhancementHandlers;
+    private textElementHandlers: TextElementHandlers;
+    private rapHandlers: RapHandlers;
     private serviceBindingHandlers: ServiceBindingHandlers;
     private queryHandlers: QueryHandlers;
     private feedHandlers: FeedHandlers;
@@ -155,6 +161,9 @@ export class AbapAdtServer extends Server {
     this.gitHandlers = new GitHandlers(this.adtClient);
     this.ddicHandlers = new DdicHandlers(this.adtClient);
     this.ddicPropertyHandlers = new DdicPropertyHandlers(this.adtClient);
+    this.enhancementHandlers = new EnhancementHandlers(this.adtClient);
+    this.textElementHandlers = new TextElementHandlers(this.adtClient);
+    this.rapHandlers = new RapHandlers(this.adtClient);
     this.serviceBindingHandlers = new ServiceBindingHandlers(this.adtClient);
     this.queryHandlers = new QueryHandlers(this.adtClient);
     this.feedHandlers = new FeedHandlers(this.adtClient);
@@ -443,6 +452,16 @@ export class AbapAdtServer extends Server {
             case 'packageSearchHelp':
                 result = await this.ddicHandlers.handle(toolName, args);
                 break;
+            case 'objectEnhancements':
+                result = await this.enhancementHandlers.handle(toolName, args);
+                break;
+            case 'getTextElements':
+            case 'setTextElements':
+                result = await this.textElementHandlers.handle(toolName, args);
+                break;
+            case 'rapGenIsAvailable':
+                result = await this.rapHandlers.handle(toolName, args);
+                break;
             case 'getDomainProperties':
             case 'setDomainProperties':
             case 'getDataElementProperties':
@@ -547,6 +566,9 @@ export class AbapAdtServer extends Server {
       { group: 'git', tools: this.gitHandlers.getTools() },
       { group: 'ddic', tools: this.ddicHandlers.getTools() },
       { group: 'ddic', tools: this.ddicPropertyHandlers.getTools() },
+      { group: 'enhancement', tools: this.enhancementHandlers.getTools() },
+      { group: 'textElement', tools: this.textElementHandlers.getTools() },
+      { group: 'rap', tools: this.rapHandlers.getTools() },
       { group: 'serviceBinding', tools: this.serviceBindingHandlers.getTools() },
       { group: 'query', tools: this.queryHandlers.getTools() },
       { group: 'feed', tools: this.feedHandlers.getTools() },

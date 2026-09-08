@@ -42,6 +42,8 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   // DDIC contents
   'setDomainProperties',
   'setDataElementProperties',
+  // text elements
+  'setTextElements',
   // settings
   'setPrettyPrinterSetting',
   // abapGit
