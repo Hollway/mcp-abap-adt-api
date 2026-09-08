@@ -37,8 +37,10 @@ import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
-import { isMutatingTool, isDestructiveTool, isReplayable } from './lib/toolClasses';
-import { isReadOnly, excludedTokens, maxResponseChars } from './lib/serverConfig';
+import { isMutatingTool, isReplayable } from './lib/toolClasses';
+import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
+import { refusalFor, annotationsFor } from './lib/toolFilter';
+import type { ToolProfile } from './lib/toolFilter';
 import { metrics } from './lib/metrics';
 import { lockRegistry } from './lib/lockRegistry';
 import type { ToolDefinition } from './types/tools.js';
@@ -185,7 +187,11 @@ export class AbapAdtServer extends Server {
       );
     }
     if (isReadOnly()) {
-      console.error('[config] SAP_READONLY is set: every tool that changes the system is refused');
+      const allowed = [...readOnlyAllowances()];
+      console.error(
+        '[config] SAP_READONLY is set: tools that change the system are refused' +
+        (allowed.length ? `, except: ${allowed.join(', ')}` : '')
+      );
     }
     const excluded = [...excludedTokens()];
     if (excluded.length) {
@@ -538,21 +544,26 @@ export class AbapAdtServer extends Server {
    * the annotations a client needs to judge how risky a call is.
    */
   private exposedTools(): ToolDefinition[] {
-    const excluded = excludedTokens();
-    const readOnly = isReadOnly();
+    const profile = this.profile();
     return this.toolGroups()
-      .filter(g => !excluded.has(g.group))
-      .reduce<ToolDefinition[]>((acc, g) => acc.concat(g.tools), [])
-      .filter(t => !excluded.has(t.name))
-      .filter(t => !(readOnly && isMutatingTool(t.name)))
-      .map(t => ({
-        ...t,
-        annotations: {
-          ...t.annotations,
-          readOnlyHint: !isMutatingTool(t.name),
-          destructiveHint: isDestructiveTool(t.name)
-        }
+      .reduce<{ tool: ToolDefinition; group: string }[]>(
+        (acc, g) => acc.concat(g.tools.map(tool => ({ tool, group: g.group }))),
+        []
+      )
+      .filter(({ tool, group }) => !refusalFor(tool.name, group, profile, this.adtClient.baseUrl))
+      .map(({ tool }) => ({
+        ...tool,
+        annotations: { ...tool.annotations, ...annotationsFor(tool.name) }
       }));
+  }
+
+  /** The active read-only / exclusion / allowance profile. */
+  private profile(): ToolProfile {
+    return {
+      readOnly: isReadOnly(),
+      excluded: excludedTokens(),
+      allowed: readOnlyAllowances()
+    };
   }
 
   /**
@@ -560,19 +571,14 @@ export class AbapAdtServer extends Server {
    * directly, because a client may still hold an older tool list.
    */
   private assertAllowed(toolName: string): void {
-    if (isReadOnly() && isMutatingTool(toolName)) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `${toolName} changes the system, and this server runs with SAP_READONLY set for ${this.adtClient.baseUrl}. Nothing was sent to SAP.`
-      );
-    }
-    const excluded = excludedTokens();
-    const group = this.groupOf(toolName);
-    if (excluded.has(toolName) || (group && excluded.has(group))) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `${toolName}${group ? ` (group ${group})` : ''} is disabled by SAP_TOOLS_EXCLUDE on this server.`
-      );
+    const refusal = refusalFor(
+      toolName,
+      this.groupOf(toolName),
+      this.profile(),
+      this.adtClient.baseUrl
+    );
+    if (refusal) {
+      throw new McpError(ErrorCode.InvalidRequest, refusal.message);
     }
   }
 
@@ -604,9 +610,11 @@ export class AbapAdtServer extends Server {
       configuredBy: this.configSource()
     };
     const excluded = [...excludedTokens()];
+    const allowed = [...readOnlyAllowances()];
     const profile = {
       readOnly: isReadOnly(),
       excluded: excluded.length ? excluded : undefined,
+      readOnlyAllow: allowed.length ? allowed : undefined,
       toolsExposed: this.exposedTools().length
     };
     const session = {

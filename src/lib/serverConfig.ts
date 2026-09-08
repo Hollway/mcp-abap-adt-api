@@ -17,18 +17,30 @@ const truthy = (value: string | undefined): boolean =>
  */
 export const isReadOnly = (): boolean => truthy(process.env.SAP_READONLY);
 
-/**
- * Tool groups or individual tool names to hide, comma or space separated
- * (SAP_TOOLS_EXCLUDE=debugger,traces,atc,git). 127 tools is a lot of context
- * to spend when a session only ever needs a handful of them.
- */
-export const excludedTokens = (): Set<string> => {
-  const raw = process.env.SAP_TOOLS_EXCLUDE;
+const tokenSet = (raw: string | undefined): Set<string> => {
   if (!raw) return new Set();
   return new Set(
     raw.split(/[,\s]+/).map(t => t.trim()).filter(t => t.length > 0)
   );
 };
+
+/**
+ * Tool groups or individual tool names to hide, comma or space separated
+ * (SAP_TOOLS_EXCLUDE=debugger,traces,atc,git). 132 tools is a lot of context
+ * to spend when a session only ever needs a handful of them.
+ */
+export const excludedTokens = (): Set<string> => tokenSet(process.env.SAP_TOOLS_EXCLUDE);
+
+/**
+ * Groups or tool names allowed through despite SAP_READONLY
+ * (SAP_READONLY_ALLOW=debugger). For a system that should not be developed on
+ * but does need one specific capability - debugging a running session, say -
+ * this keeps the fence around everything else instead of turning it off.
+ *
+ * These tools are still not reads: they keep readOnlyHint false, so a client
+ * still treats them as changing the system.
+ */
+export const readOnlyAllowances = (): Set<string> => tokenSet(process.env.SAP_READONLY_ALLOW);
 
 /** Log verbosity for the stderr logger. */
 export const logLevel = (): 'error' | 'warn' | 'info' | 'debug' => {
