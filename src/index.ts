@@ -36,10 +36,11 @@ import { AtcHandlers } from './handlers/AtcHandlers.js';
 import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
-import { AdtToolError, errorPayload, isSessionFailure } from './lib/adtError';
+import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isDestructiveTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens } from './lib/serverConfig';
 import { metrics } from './lib/metrics';
+import { lockRegistry } from './lib/lockRegistry';
 import type { ToolDefinition } from './types/tools.js';
 
 config({ path: path.resolve(__dirname, '../.env') });
@@ -529,7 +530,8 @@ export class AbapAdtServer extends Server {
       loggedin: this.adtClient.loggedin,
       stateful: this.adtClient.isStateful,
       // The token and the cookies themselves stay out of the payload.
-      csrfToken: this.adtClient.csrfToken ? 'present' : 'missing'
+      csrfToken: this.adtClient.csrfToken ? 'present' : 'missing',
+      locksHeld: lockRegistry.count()
     };
 
     const startTime = performance.now();
@@ -575,7 +577,15 @@ export class AbapAdtServer extends Server {
   private async relogin(): Promise<void> {
     if (!this.reloginPromise) {
       const done = () => { this.reloginPromise = undefined; };
-      this.reloginPromise = this.adtClient.login().then(done, (e: unknown) => { done(); throw e; });
+      this.reloginPromise = this.adtClient.login().then(() => {
+        // Handles from the previous session are void - drop them rather than
+        // keeping entries that can only fail.
+        if (lockRegistry.count() > 0) {
+          console.error(`[session] dropping ${lockRegistry.count()} lock handle(s) invalidated by the re-login`);
+          lockRegistry.clear();
+        }
+        done();
+      }, (e: unknown) => { done(); throw e; });
     }
     return this.reloginPromise;
   }
@@ -637,6 +647,21 @@ export class AbapAdtServer extends Server {
     return result;
   }
 
+  /**
+   * Release whatever this process still holds before it goes away. A lock left
+   * behind blocks the object for everyone else until the SAP session times out,
+   * and nothing in the old shutdown path did anything about it.
+   */
+  private async releaseLocksOnShutdown(): Promise<void> {
+    if (lockRegistry.count() === 0) return;
+    console.error(`[locks] releasing ${lockRegistry.count()} lock(s) before shutdown`);
+    try {
+      await this.objectLockHandlers.handle('unlockAll', {});
+    } catch (error) {
+      console.error('[locks] releasing locks failed:', describeAdtError(error).error);
+    }
+  }
+
   async run() {
     const transport = new StdioServerTransport();
     await this.connect(transport);
@@ -644,15 +669,17 @@ export class AbapAdtServer extends Server {
     
     // Handle shutdown
     process.on('SIGINT', async () => {
+      await this.releaseLocksOnShutdown();
       await this.close();
       process.exit(0);
     });
-    
+
     process.on('SIGTERM', async () => {
+      await this.releaseLocksOnShutdown();
       await this.close();
       process.exit(0);
     });
-    
+
     // Handle errors
     this.onerror = (error) => {
       console.error('[MCP Error]', error);
