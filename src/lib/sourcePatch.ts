@@ -44,6 +44,12 @@ export interface ResolvedEdit {
   /** 1-based line range the edit covers in the original source. */
   firstLine: number;
   lastLine: number;
+  /**
+   * Whether the edit covers whole lines. A line replacement or deletion
+   * does; an anchor edit changes part of a line, and its character range is
+   * the only accurate description of what it removes.
+   */
+  wholeLines: boolean;
   describe: string;
 }
 
@@ -129,6 +135,7 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
         text: edit.replacement.replace(/\r?\n/g, nl),
         firstLine: first,
         lastLine: last,
+        wholeLines: true,
         describe: first === last ? `line ${first}` : `lines ${first}-${last}`
       });
       continue;
@@ -155,6 +162,7 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
         text: (needsLeadingNl ? nl : '') + body + (atEnd ? '' : nl),
         firstLine: after === 0 ? 1 : after,
         lastLine: after === 0 ? 1 : after,
+        wholeLines: false,
         describe: after === 0 ? 'before line 1' : `after line ${after}`
       });
       continue;
@@ -191,6 +199,7 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
         text: edit.replacement.replace(/\r?\n/g, nl),
         firstLine: lineOfOffset(offsets, start),
         lastLine: lineOfOffset(offsets, Math.max(start, end - 1)),
+        wholeLines: false,
         describe: `anchor at line ${lineOfOffset(offsets, start)}`
       });
       continue;
@@ -234,9 +243,30 @@ export function buildDiff(
   const before = source.split(nl);
   const hunks: string[] = [];
 
+  /**
+   * Lines of a chunk of text, without the phantom empty element that split()
+   * leaves when the text ends with a newline. An insertion carries its own
+   * trailing newline and a deletion swallows one, so without this the diff
+   * showed an added or removed blank line that never existed - which makes the
+   * whole diff untrustworthy, and the hunk counts wrong with it.
+   */
+  const chunkLines = (text: string): string[] => {
+    const parts = text.split(nl);
+    if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  };
+
   for (const edit of resolved) {
-    const removed = source.slice(edit.start, edit.end).split(nl);
-    const added = edit.text.length > 0 ? edit.text.split(nl) : [];
+    // A deletion swallows a newline - the one after the range, or the one
+    // before it for the last line of the file - so the character range is a
+    // poor description of which lines went away. For whole-line edits take
+    // the lines themselves.
+    const removed = edit.end <= edit.start
+      ? []
+      : edit.wholeLines
+        ? before.slice(edit.firstLine - 1, edit.lastLine)
+        : chunkLines(source.slice(edit.start, edit.end));
+    const added = edit.text.length > 0 ? chunkLines(edit.text) : [];
     const from = Math.max(1, edit.firstLine - context);
     const to = Math.min(before.length, edit.lastLine + context);
 
@@ -244,7 +274,7 @@ export function buildDiff(
       `@@ -${edit.firstLine},${removed.length} +${edit.firstLine},${added.length} @@ ${edit.describe}`
     ];
     for (let i = from; i < edit.firstLine; i++) lines.push(` ${before[i - 1]}`);
-    for (const line of removed) if (line.length > 0 || removed.length > 1) lines.push(`-${line}`);
+    for (const line of removed) lines.push(`-${line}`);
     for (const line of added) lines.push(`+${line}`);
     for (let i = edit.lastLine + 1; i <= to; i++) lines.push(` ${before[i - 1]}`);
     hunks.push(lines.join('\n'));

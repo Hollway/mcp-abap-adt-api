@@ -56,6 +56,17 @@ describe('insertions', () => {
   it('inserts at the end of a source with no trailing newline', () => {
     expect(patch('a\nb', [{ insertAfterLine: 2, insertion: 'c' }])).toBe('a\nb\nc');
   });
+
+  /**
+   * The case this whole tool exists for: one comment at the end of a method,
+   * which is how it was first used on a live class.
+   */
+  it('adds exactly one line when inserting before ENDMETHOD', () => {
+    const out = patch(CRLF, [{ insertAfterLine: 12, insertion: '    " comment' }]);
+    expect(lines(out)).toHaveLength(lines(CRLF).length + 1);
+    expect(lines(out)[12]).toBe('    " comment');
+    expect(lines(out)[13]).toBe('  ENDMETHOD.');
+  });
 });
 
 describe('anchor edits', () => {
@@ -112,6 +123,50 @@ describe('line endings', () => {
 });
 
 describe('buildDiff', () => {
+  const diffOf = (edits: any[]) => buildDiff(CRLF, resolveEdits(CRLF, edits));
+  const marks = (diff: string, sign: string) =>
+    diff.split('\n').filter(line => line.startsWith(sign));
+
+  /**
+   * An insertion carries its own trailing newline and a deletion swallows one,
+   * so splitting those chunks naively used to put a phantom blank line into the
+   * diff, and into the hunk counts with it. Seen for real on a live class: one
+   * comment inserted, two "+" lines reported.
+   */
+  it('shows exactly the lines an insertion adds', () => {
+    const diff = diffOf([{ insertAfterLine: 4, insertion: '    METHODS three.' }]);
+    expect(marks(diff, '+')).toEqual(['+    METHODS three.']);
+    expect(marks(diff, '-')).toEqual([]);
+    expect(diff).toMatch(/^@@ -4,0 \+4,1 @@/m);
+  });
+
+  it('shows exactly the lines a deletion removes', () => {
+    const diff = diffOf([{ startLine: 4, replacement: '' }]);
+    expect(marks(diff, '-')).toEqual(['-    METHODS two.']);
+    expect(marks(diff, '+')).toEqual([]);
+    expect(diff).toMatch(/^@@ -4,1 \+4,0 @@/m);
+  });
+
+  it('counts a multi-line replacement correctly', () => {
+    const diff = diffOf([{ startLine: 8, endLine: 10, replacement: '  METHOD one.\r\n  ENDMETHOD.' }]);
+    expect(marks(diff, '-')).toEqual(['-  METHOD one.', '-    WRITE 1.', '-  ENDMETHOD.']);
+    expect(marks(diff, '+')).toEqual(['+  METHOD one.', '+  ENDMETHOD.']);
+    expect(diff).toMatch(/^@@ -8,3 \+8,2 @@/m);
+  });
+
+  it('describes a deletion of the last line without a phantom line', () => {
+    const src = 'a\nb\nc';
+    const diff = buildDiff(src, resolveEdits(src, [{ startLine: 3, replacement: '' }]));
+    expect(marks(diff, '-')).toEqual(['-c']);
+    expect(marks(diff, '+')).toEqual([]);
+  });
+
+  it('keeps an anchor edit described by its own text, not by whole lines', () => {
+    const diff = diffOf([{ anchor: 'METHODS two', replacement: 'METHODS deux' }]);
+    expect(marks(diff, '-')).toEqual(['-METHODS two']);
+    expect(marks(diff, '+')).toEqual(['+METHODS deux']);
+  });
+
   it('shows the removal, the addition and the context', () => {
     const diff = buildDiff(CRLF, resolveEdits(CRLF, [{ startLine: 9, replacement: '    WRITE 42.' }]));
     expect(diff).toContain('-    WRITE 1.');
