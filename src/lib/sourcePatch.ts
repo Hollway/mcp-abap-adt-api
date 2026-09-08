@@ -144,12 +144,15 @@ export function resolveEdits(source: string, edits: SourceEdit[]): ResolvedEdit[
       }
       const at = after === 0 ? 0 : lineEndExclusive(after);
       const body = edit.insertion.replace(/\r?\n/g, nl);
-      // Insertion at the very end of a file with no trailing newline needs one.
-      const needsLeadingNl = after > 0 && at === source.length && !source.endsWith(nl);
+      // At the end of a file that does not end with a newline, the insertion
+      // needs one in front of it; nothing is ever appended after it, or the
+      // file would grow a trailing empty line.
+      const atEnd = at === source.length;
+      const needsLeadingNl = after > 0 && atEnd && !source.endsWith(nl);
       resolved.push({
         start: at,
         end: at,
-        text: (needsLeadingNl ? nl : '') + body + (at === source.length && !needsLeadingNl ? '' : nl),
+        text: (needsLeadingNl ? nl : '') + body + (atEnd ? '' : nl),
         firstLine: after === 0 ? 1 : after,
         lastLine: after === 0 ? 1 : after,
         describe: after === 0 ? 'before line 1' : `after line ${after}`
