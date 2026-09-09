@@ -31,6 +31,11 @@ const PACKAGE_NAME = (process.env.SMOKE_PACKAGE || 'SABAPDEMOS').toUpperCase();
 const ENHANCED_CLASS = (process.env.SMOKE_ENHANCED || 'CL_FEBAN_ALV_GRID').toLowerCase();
 // A function module every system has, for the by-name lookup.
 const FUNCTION_MODULE = (process.env.SMOKE_FUNCTION || 'GUI_UPLOAD').toUpperCase();
+// One with a mandatory parameter that can be filled with anything, for the
+// generated call. The dry run never executes it, but the values are checked
+// against the signature before that, so they have to be complete.
+const CALL_FUNCTION = (process.env.SMOKE_CALL_FUNCTION || 'DATE_CHECK_PLAUSIBILITY').toUpperCase();
+const CALL_VALUES = JSON.parse(process.env.SMOKE_CALL_VALUES || '{"DATE":"20260101"}');
 const CLASS_URL = `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}/source/main`;
 const server = path.resolve(__dirname, '..', 'dist', 'index.js');
 
@@ -114,7 +119,8 @@ const check = (label, condition, detail) => {
                       'changePackagePreview', 'rapGenIsAvailable',
                       'compareRevisions', 'impactOf', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
-                      'runSnippet']) {
+                      'runSnippet', 'callFunction', 'callMethod',
+                      'tableFields', 'tableIndexes', 'tableKeys']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
   check('read-only tools are annotated as such',
@@ -558,6 +564,76 @@ const check = (label, condition, detail) => {
   check('runSnippet asks for some code',
     snippetEmpty.isError === true && /Pass code/.test(JSON.stringify(snippetEmpty.payload)),
     snippetEmpty.payload);
+
+  // Calling something with values: only the dry run and the refusals, because
+  // a real call executes code on the system.
+  const callDry = await call('callFunction', {
+    name: CALL_FUNCTION, values: CALL_VALUES, dryRun: true
+  });
+  check('callFunction generates the call without touching the system',
+    callDry.payload.dryRun === true && /CALL FUNCTION/.test(callDry.payload.source || ''),
+    callDry.payload);
+  check('callFunction rolls a call back unless it is told otherwise',
+    callDry.payload.rolledBack === true && /ROLLBACK WORK/.test(callDry.payload.source || ''),
+    callDry.payload);
+  check('callFunction reports what it had to substitute for a generic type',
+    callDry.payload.typeSubstitutions === undefined ||
+    typeof callDry.payload.typeSubstitutions === 'object',
+    callDry.payload);
+
+  const callUnknown = await call('callFunction', {
+    name: CALL_FUNCTION, values: { Z_SMOKE_NO_SUCH_PARAMETER: '1' }
+  });
+  check('callFunction refuses a parameter the module does not have',
+    callUnknown.isError === true && /no parameter/.test(JSON.stringify(callUnknown.payload)),
+    callUnknown.payload);
+
+  const methodNoName = await call('callMethod', { className: CLASS_NAME });
+  check('callMethod asks which method',
+    methodNoName.isError === true && /Pass className and methodName/.test(JSON.stringify(methodNoName.payload)),
+    methodNoName.payload);
+
+  const methodUnknown = await call('callMethod', { className: CLASS_NAME, methodName: 'Z_SMOKE_NEVER' });
+  check('callMethod answers an unknown method with the ones the class has',
+    methodUnknown.isError === true && /does not declare/.test(JSON.stringify(methodUnknown.payload)),
+    methodUnknown.payload);
+
+  // The dictionary, read whole.
+  const fields = await call('tableFields', { name: STRUCTURE_NAME });
+  check('tableFields reads the fields of a table',
+    fields.payload.status === 'success' && fields.payload.fieldCount > 0, fields.payload);
+  check('tableFields reports what kind of table it is',
+    typeof fields.payload.tableClass === 'string', fields.payload);
+  check('tableFields names the data element of a field',
+    (fields.payload.fields || []).some(field => !!field.dataElement), fields.payload);
+  check('tableFields marks the key fields',
+    (fields.payload.fields || []).some(field => field.key === true), fields.payload);
+
+  const keysOnly = await call('tableFields', { name: STRUCTURE_NAME, keysOnly: true });
+  check('tableFields keeps the full count when it narrows the list',
+    keysOnly.payload.fieldCount === fields.payload.fieldCount &&
+    (keysOnly.payload.fields || []).every(field => field.key === true),
+    keysOnly.payload);
+
+  const noTable = await call('tableFields', { name: 'ZSMOKE_NO_SUCH_TABLE' });
+  check('tableFields says a name that is not a table is not one',
+    noTable.payload.status === 'error' && /not a table or structure/.test(JSON.stringify(noTable.payload)),
+    noTable.payload);
+
+  const badTable = await call('tableFields', { name: "T000' OR '1'='1" });
+  check('tableFields refuses a name that could carry SQL',
+    badTable.isError === true && /not a valid/.test(JSON.stringify(badTable.payload)),
+    badTable.payload);
+
+  const indexes = await call('tableIndexes', { name: STRUCTURE_NAME });
+  check('tableIndexes answers with a list, empty or not',
+    indexes.payload.status === 'success' && Array.isArray(indexes.payload.indexes),
+    indexes.payload);
+
+  const foreign = await call('tableKeys', { name: STRUCTURE_NAME });
+  check('tableKeys answers with a list, empty or not',
+    foreign.payload.status === 'success' && Array.isArray(foreign.payload.foreignKeys),
+    foreign.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
