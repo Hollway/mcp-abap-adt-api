@@ -44,6 +44,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   // DDIC contents
   'createDomain',
   'createDataElement',
+  'createStructure',
   'setDomainProperties',
   'setDataElementProperties',
   // text elements

@@ -141,8 +141,12 @@ describe('createAndWrite', () => {
     const { handlers, calls } = handler();
     await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, objtype: 'PROG/I', name: 'ZR_X_F01' }))
       .rejects.toThrow(/needs mainProgram/);
-    await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, objtype: 'TABL/DT' }))
+    await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, objtype: 'ENQU/DL' }))
       .rejects.toThrow(/does not know where the source/);
+    // A transparent table is refused for its own reason: the collection the
+    // library would post to does not exist on a classic ERP system.
+    await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, objtype: 'TABL/DT' }))
+      .rejects.toThrow(/no ddic\/tables collection/);
     expect(calls).toEqual([]);
   });
 

@@ -25,7 +25,20 @@ const SOURCE_URLS: Record<string, (name: string, parentName: string) => string> 
   'FUGR/FF': (name, parentName) =>
     `/sap/bc/adt/functions/groups/${parentName}/fmodules/${name}/source/main`,
   'FUGR/I': (name, parentName) =>
-    `/sap/bc/adt/functions/groups/${parentName}/includes/${name}/source/main`
+    `/sap/bc/adt/functions/groups/${parentName}/includes/${name}/source/main`,
+  'DDLS/DF': name => `/sap/bc/adt/ddic/ddl/sources/${name}/source/main`,
+  'TABL/DS': name => `/sap/bc/adt/ddic/structures/${name}/source/main`
+};
+
+/**
+ * Types the backend cannot create, with the reason worth reading.
+ *
+ * A transparent table is the one that costs the most time to discover: the
+ * type map inside abap-adt-api points at /sap/bc/adt/ddic/tables, a collection
+ * a classic ERP system does not have at all.
+ */
+const UNCREATABLE: Record<string, string> = {
+  'TABL/DT': 'A transparent table cannot be created over ADT on this kind of system: there is no ddic/tables collection, so the creation answers "Resource /sap/bc/adt/ddic/tables does not exist". Its technical settings - delivery class, buffering, size category - are not in the source form either, so it could not be finished here anyway. Create it in SE11; createStructure covers TABL/DS, and getStructureSource reads either.'
 };
 
 const encodedName = (name: string): string => {
@@ -288,6 +301,9 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     const source = args?.source;
 
     const buildSourceUrl = SOURCE_URLS[objtype];
+    if (UNCREATABLE[objtype]) {
+      throw new McpError(ErrorCode.InvalidParams, UNCREATABLE[objtype]);
+    }
     if (!buildSourceUrl) {
       throw new McpError(
         ErrorCode.InvalidParams,
