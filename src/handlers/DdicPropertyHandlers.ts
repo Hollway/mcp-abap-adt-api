@@ -7,6 +7,7 @@ import type { ObjectVersion } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
 import { activateAndVerify } from '../lib/activation';
 import { releaseLock, takeLock } from '../lib/lockCycle';
+import { readValidation } from '../lib/newObjectValidation';
 import { describeAdtError } from '../lib/adtError';
 import {
   dataElementUrl,
@@ -681,15 +682,22 @@ export class DdicPropertyHandlers extends BaseHandler {
           : `Failed to validate the new ${what} ${name}`
       );
     }
-    steps.push({ step: 'validate', ...validation });
-    if (validation && validation.success === false) {
+    // An answer that carries no verdict at all is not a refusal - see
+    // lib/newObjectValidation for the endpoint that answers like that.
+    const verdict = readValidation(validation);
+    steps.push({
+      step: 'validate',
+      ...validation,
+      ...(verdict.silent ? { note: 'The backend answered without a verdict. Taken as no objection.' } : {})
+    });
+    if (verdict.objection) {
       return this.answer({
         status: 'error',
         created: false,
         objectUrl: url,
         name,
         steps,
-        hint: `The system refused the name: ${validation.SHORT_TEXT || 'see the validate step'}. Nothing was created.`
+        hint: `The system refused the name: ${verdict.objection} Nothing was created.`
       });
     }
 
