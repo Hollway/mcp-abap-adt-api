@@ -12,7 +12,7 @@ export class AtcHandlers extends BaseHandler {
         return [
             {
                 name: 'atcCustomizing',
-                description: 'Retrieves ATC customizing information.',
+                description: 'How ATC is set up on this system: the check variants and their priorities - what atcCheck runs against by default.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -101,7 +101,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcWorklists',
-                description: 'Retrieves ATC worklists.',
+                description: 'An existing ATC worklist by id, with the findings it holds. Prefer atcCheck, which opens a worklist, runs the checks and reports them in one call.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -127,7 +127,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcUsers',
-                description: 'Retrieves a list of ATC users.',
+                description: 'The users ATC knows for exemption approval - who can be named as an approver.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -149,7 +149,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcExemptProposal',
-                description: 'Retrieves an ATC exemption proposal.',
+                description: 'The exemption proposal for an ATC finding: what would be requested, before requesting it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -163,7 +163,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcRequestExemption',
-                description: 'Requests an ATC exemption.',
+                description: 'Ask for an ATC finding to be exempted, with a reason - it goes to an approver, it is not granted here.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -177,7 +177,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'isProposalMessage',
-                description: 'Checks if a given object is a proposal message.',
+                description: 'Whether a message from a check is an ATC proposal rather than a plain finding - which decides whether an exemption can be requested for it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -191,7 +191,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcContactUri',
-                description: 'Retrieves the contact URI for an ATC finding.',
+                description: 'The contact URI of an ATC finding - who is responsible for it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -205,7 +205,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcChangeContact',
-                description: 'Changes the contact for an ATC finding.',
+                description: 'Change who is responsible for an ATC finding - it moves the finding into another worklist.',
                 inputSchema: {
                     type: 'object',
                     properties: {

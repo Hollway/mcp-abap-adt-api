@@ -9,7 +9,7 @@ export class GitHandlers extends BaseHandler {
         return [
             {
                 name: 'gitRepos',
-                description: 'Retrieves a list of Git repositories.',
+                description: 'The abapGit repositories linked on this system, with their packages, branches and state.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -17,7 +17,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'gitExternalRepoInfo',
-                description: 'Retrieves information about an external Git repository.',
+                description: 'Whether an external git repository can be reached with these credentials, and which branches it offers - the check before linking it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -39,7 +39,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'gitCreateRepo',
-                description: 'Creates a new Git repository.',
+                description: 'Link a package to an abapGit repository and pull it. This WRITES the objects of that repository into the package - the largest write in this server.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -73,7 +73,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'gitPullRepo',
-                description: 'Pulls changes from a Git repository.',
+                description: 'Pull an abapGit repository into its package. This WRITES every object the repository carries, overwriting what is there, and needs a transport outside $TMP.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -103,7 +103,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'gitUnlinkRepo',
-                description: 'Unlinks a Git repository.',
+                description: 'Disconnect a package from its abapGit repository. The objects stay; the link and its state go, and reconnecting means setting it up again.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -117,7 +117,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'stageRepo',
-                description: 'Stages changes in a Git repository.',
+                description: 'Stage the local changes of an abapGit repository for a commit: which objects would go, with their state.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -139,7 +139,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'pushRepo',
-                description: 'Pushes changes to a Git repository.',
+                description: 'Push staged changes of an abapGit repository to the remote. Outward-facing: it writes to the git remote under the credentials configured there.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -165,7 +165,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'checkRepo',
-                description: 'Checks a Git repository.',
+                description: 'Check an abapGit repository before pulling: what would change, and whether anything local stands in the way.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -187,7 +187,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'remoteRepoInfo',
-                description: 'Retrieves information about a remote Git repository.',
+                description: 'What a remote abapGit repository holds: its branches and their heads, read with the credentials passed in.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -209,7 +209,7 @@ export class GitHandlers extends BaseHandler {
             },
             {
                 name: 'switchRepoBranch',
-                description: 'Switches the branch of a Git repository.',
+                description: 'Switch an abapGit repository to another branch. It changes what the next pull would write, and a pull after it can rewrite the whole package.',
                 inputSchema: {
                     type: 'object',
                     properties: {

@@ -9,7 +9,7 @@ export class FeedHandlers extends BaseHandler {
         return [
             {
                 name: 'feeds',
-                description: 'Retrieves a list of feeds.',
+                description: 'The ADT feeds this system publishes (dumps, system messages) with their URLs - the index behind dumps.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -17,7 +17,7 @@ export class FeedHandlers extends BaseHandler {
             },
             {
                 name: 'dumps',
-                description: 'Retrieves a list of dumps.',
+                description: 'Short dumps from ST22, newest first, as the HTML page ST22 itself shows. The header of one carries the runtime error, the exception and the program that died.',
                 inputSchema: {
                     type: 'object',
                     properties: {

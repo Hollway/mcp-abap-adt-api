@@ -9,7 +9,7 @@ export class TraceHandlers extends BaseHandler {
         return [
             {
                 name: 'tracesList',
-                description: 'Retrieves a list of traces.',
+                description: 'Traces recorded for this user, newest first, with their ids - the way into tracesHitList, tracesStatements and tracesDbAccess.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -22,7 +22,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesListRequests',
-                description: 'Retrieves a list of trace requests.',
+                description: 'The recorded requests of a trace - one per unit of work measured. The entry point into a trace before its statements.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -35,7 +35,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesHitList',
-                description: 'Retrieves the hit list for a trace.',
+                description: 'The hit list of a trace: what was called how often and for how long, heaviest first - the fastest read of where the time went.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -53,7 +53,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesDbAccess',
-                description: 'Retrieves database access information for a trace.',
+                description: 'The database accesses of one trace: which tables, how many rows, how long - where a slow run met the database.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -71,7 +71,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesStatements',
-                description: 'Retrieves statements for a trace.',
+                description: 'The statements of one trace, with their times - where a run spent itself. Takes a trace id from tracesList.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -89,7 +89,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesSetParameters',
-                description: 'Sets trace parameters.',
+                description: 'Set what the next trace records: statements, database access, aggregation. It applies to traces started afterwards, not to one already recorded.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -103,7 +103,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesCreateConfiguration',
-                description: 'Creates a trace configuration.',
+                description: 'Create a trace configuration: which user and which process to record, and for how long. Recording starts when that user next runs something.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -117,7 +117,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesDeleteConfiguration',
-                description: 'Deletes a trace configuration.',
+                description: 'Delete a trace configuration, so nothing more is recorded under it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -131,7 +131,7 @@ export class TraceHandlers extends BaseHandler {
             },
             {
                 name: 'tracesDelete',
-                description: 'Deletes a trace.',
+                description: 'Delete a recorded trace. Final, and the measurement cannot be taken again from the same run.',
                 inputSchema: {
                     type: 'object',
                     properties: {

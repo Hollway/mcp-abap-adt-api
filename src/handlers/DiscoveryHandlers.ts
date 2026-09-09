@@ -8,7 +8,7 @@ export class DiscoveryHandlers extends BaseHandler {
         return [
             {
                 name: 'featureDetails',
-                description: 'Retrieves details for a given feature.',
+                description: 'What one discovery feature offers, by title - the capabilities behind a collection.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -22,7 +22,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'collectionFeatureDetails',
-                description: 'Retrieves details for a given collection feature.',
+                description: 'What one collection of the discovery document offers: its capabilities, its supported types and its versions.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -36,7 +36,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'findCollectionByUrl',
-                description: 'Finds a collection by its URL.',
+                description: 'Which discovery collection serves a given URL - the reverse lookup of adtDiscovery, for when an address is in hand and its capabilities are not.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -50,7 +50,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'loadTypes',
-                description: 'Loads object types.',
+                description: 'The object types the creation endpoints accept, with the templates behind them - what a wrong objtype is checked against.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -58,7 +58,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'adtDiscovery',
-                description: 'Performs ADT discovery.',
+                description: 'The ADT service document: every collection this system offers, with its URL and the object types it serves. This is where the address of an unfamiliar collection comes from.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -66,7 +66,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'adtCoreDiscovery',
-                description: 'Performs ADT core discovery.',
+                description: 'The core discovery document of the ADT service - what healthcheck calls to prove the connection is alive.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -74,7 +74,7 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'adtCompatibiliyGraph',
-                description: 'Retrieves the ADT compatibility graph.',
+                description: 'The ADT compatibility graph of this system: which protocol versions its collections speak. Diagnostic, for a call refused as an unsupported version.',
                 inputSchema: {
                     type: 'object',
                     properties: {}

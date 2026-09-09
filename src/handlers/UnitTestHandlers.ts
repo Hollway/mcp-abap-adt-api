@@ -82,7 +82,7 @@ export class UnitTestHandlers extends BaseHandler {
             },
             {
                 name: 'unitTestEvaluation',
-                description: 'Evaluates unit test results.',
+                description: 'The evaluation behind a unit-test run, for the alerts a run reported. Prefer runTests, which activates first and reports each failure with its assert message.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -108,7 +108,7 @@ export class UnitTestHandlers extends BaseHandler {
             },
             {
                 name: 'unitTestOccurrenceMarkers',
-                description: 'Retrieves unit test occurrence markers.',
+                description: 'The markers ADT draws next to code covered by a unit test - which lines a run touched.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -126,7 +126,7 @@ export class UnitTestHandlers extends BaseHandler {
             },
             {
                 name: 'createTestInclude',
-                description: 'Creates a test include for a class.',
+                description: 'Create the test include of a class - the place ABAP Unit tests live, which a new class does not have. It writes an empty include; runTests then runs what is put in it.',
                 inputSchema: {
                     type: 'object',
                     properties: {

@@ -9,7 +9,7 @@ export class DdicHandlers extends BaseHandler {
         return [
             {
                 name: 'annotationDefinitions',
-                description: 'Retrieves annotation definitions.',
+                description: 'The CDS annotations this system defines, with their value ranges - what may be written in a DDLS source before an activation refuses it.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -17,7 +17,7 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'ddicElement',
-                description: 'Retrieves information about a DDIC element.',
+                description: 'A dictionary element as the DDIC sees it: a data element, a domain or a type, with its properties. For a table or structure with its fields use getStructureSource.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -43,7 +43,7 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'ddicRepositoryAccess',
-                description: 'Accesses the DDIC repository.',
+                description: 'Read dictionary metadata through the DDIC repository access endpoint - types, fields and domains as the dictionary itself sees them.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -57,7 +57,7 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'packageSearchHelp',
-                description: 'Performs a package search help.',
+                description: 'Search help for package names, as the input help in ADT offers them - a name check before a creation that would fail on the package.',
                 inputSchema: {
                     type: 'object',
                     properties: {

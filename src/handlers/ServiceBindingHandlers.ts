@@ -9,7 +9,7 @@ export class ServiceBindingHandlers extends BaseHandler {
         return [
             {
                 name: 'publishServiceBinding',
-                description: 'Publishes a service binding.',
+                description: 'Publish a service binding, which makes its service reachable on this system. Outward-facing: the endpoint goes live for anyone who can reach the host.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -27,7 +27,7 @@ export class ServiceBindingHandlers extends BaseHandler {
             },
             {
                 name: 'unPublishServiceBinding',
-                description: 'Unpublishes a service binding.',
+                description: 'Take a published service offline. Outward-facing and immediate: anything calling that endpoint stops working.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -45,7 +45,7 @@ export class ServiceBindingHandlers extends BaseHandler {
             },
             {
                 name: 'bindingDetails',
-                description: 'Retrieves details of a service binding.',
+                description: 'What a service binding exposes: its services, versions and the entities behind them - read before publishing or unpublishing one.',
                 inputSchema: {
                     type: 'object',
                     properties: {

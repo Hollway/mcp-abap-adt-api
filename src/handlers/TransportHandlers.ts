@@ -58,7 +58,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'hasTransportConfig',
-                description: 'Check if transport configuration exists',
+                description: 'Whether this system has transport configurations at all - the check before offering the organizer tools.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -66,7 +66,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportConfigurations',
-                description: 'Retrieves transport configurations.',
+                description: 'The transport configurations available in the organizer, with their ids - what transportsByConfig takes.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -74,7 +74,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'getTransportConfiguration',
-                description: 'Retrieves a specific transport configuration.',
+                description: 'One transport configuration by URI, with everything it defines.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -88,7 +88,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'setTransportsConfig',
-                description: 'Sets transport configurations.',
+                description: 'Change a transport configuration - which requests a user sees in the transport organizer. It is shared setup, not a per-call filter.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -110,7 +110,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'createTransportsConfig',
-                description: 'Creates transport configurations.',
+                description: 'Create a transport configuration for the organizer. Shared setup; most work needs only createTransport.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -191,7 +191,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportsByConfig',
-                description: 'Retrieves transports by configuration.',
+                description: 'Transport requests of one organizer configuration, filtered as that configuration defines. For your own open requests use userTransports, which filters and shortens.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -281,7 +281,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'systemUsers',
-                description: 'Retrieves a list of system users.',
+                description: 'The users of this system, as the transport tools offer them - who a request can be handed to or shared with.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -289,7 +289,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportReference',
-                description: 'Retrieves a transport reference.',
+                description: 'What a transport reference points at: the object behind one entry of a request.',
                 inputSchema: {
                     type: 'object',
                     properties: {
