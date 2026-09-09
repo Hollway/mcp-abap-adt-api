@@ -24,6 +24,8 @@ if (missing.length) {
 }
 
 const CLASS_NAME = (process.env.SMOKE_CLASS || 'CL_SALV_TABLE').toUpperCase();
+const STRUCTURE_NAME = (process.env.SMOKE_STRUCTURE || 'T000').toUpperCase();
+const PACKAGE_NAME = (process.env.SMOKE_PACKAGE || 'SABAPDEMOS').toUpperCase();
 const CLASS_URL = `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}/source/main`;
 const server = path.resolve(__dirname, '..', 'dist', 'index.js');
 
@@ -102,6 +104,8 @@ const check = (label, condition, detail) => {
                       'getDomainProperties', 'transportDetails', 'typeHierarchy', 'whereUsedMethod',
                       'objectEnhancements', 'getTextElements', 'atcDocumentation',
                       'getMessages', 'getMessageLongtext', 'setMessages', 'createMessageClass',
+                      'getStructureSource', 'createStructure',
+                      'packageTree', 'readSources', 'searchInPackage',
                       'changePackagePreview', 'rapGenIsAvailable']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
@@ -247,6 +251,72 @@ const check = (label, condition, detail) => {
     (texts.isError === true && /does not serve text elements/.test(JSON.stringify(texts.payload))),
     texts.payload);
 
+  // A package walk. SMOKE_PACKAGE should be a package that holds objects;
+  // ZMM_BASE on the system this was written against holds 906.
+  const tree = await call('packageTree', { packageName: PACKAGE_NAME, maxDepth: 1, maxObjects: 50 });
+  check('packageTree lists a package and resolves source locations',
+    tree.payload.status === 'success' && tree.payload.objectCount > 0 &&
+    tree.payload.objects.some(o => typeof o.sourceUrl === 'string'),
+    { count: tree.payload.objectCount, types: tree.payload.countsByType });
+
+  const unknownPackage = await call('packageTree', { packageName: 'ZSMOKE_NO_SUCH_PACKAGE' });
+  check('packageTree tells an unknown package from an empty one',
+    unknownPackage.payload.exists === false,
+    unknownPackage.payload);
+
+  const readable = (tree.payload.objects || []).filter(o => o.sourceUrl).slice(0, 2)
+    .map(o => ({ name: o.name, objectType: o.objectType }));
+  if (readable.length) {
+    const many = await call('readSources', { objects: readable, maxLinesPerObject: 10 });
+    check('readSources reads several objects in one call',
+      many.payload.read === readable.length &&
+      many.payload.sources.every(s => s.totalLines > 0),
+      { read: many.payload.read, failed: many.payload.failed });
+  }
+
+  const unreadable = await call('readSources', {
+    objects: [{ name: 'ZSMOKE_ANY', objectType: 'DTEL/DE' }]
+  });
+  check('readSources says which types ADT serves no source for',
+    /serves no source/.test(JSON.stringify(unreadable.payload)),
+    unreadable.payload);
+
+  const inPackage = await call('searchInPackage', {
+    packageName: PACKAGE_NAME, pattern: 'REPORT', objectTypes: ['PROG/P'], maxDepth: 1, maxObjects: 5
+  });
+  check('searchInPackage walks and scans sources',
+    inPackage.payload.status === 'success' && inPackage.payload.objectsScanned > 0,
+    { scanned: inPackage.payload.objectsScanned, matches: inPackage.payload.totalMatches });
+
+  // Tables and structures come from one endpoint, and the source form is the
+  // only place their fields can be read: searchObject answers a table with a
+  // SAPGUI bridge URI and objectStructure shows no field at all.
+  const structureSource = await call('getStructureSource', { name: STRUCTURE_NAME });
+  check('getStructureSource reads a table and parses its fields',
+    structureSource.payload.status === 'success' &&
+    structureSource.payload.fieldCount > 0 &&
+    typeof structureSource.payload.source === 'string',
+    structureSource.payload);
+  check('getStructureSource marks the key fields',
+    structureSource.payload.fields.some(f => f.keyField === true),
+    structureSource.payload.fields);
+
+  const noStructure = await call('getStructureSource', { name: 'ZSMOKE_NO_SUCH_TABLE' });
+  check('getStructureSource says an unknown name is neither table nor structure',
+    noStructure.isError === true &&
+    /No table or structure/.test(JSON.stringify(noStructure.payload)),
+    noStructure.payload);
+
+  const structureDryRun = await call('createStructure', {
+    name: 'ZSMOKE_STRUC', packageName: '$TMP', description: 'smoke',
+    fields: [{ name: 'WERKS', type: 'WERKS_D', keyField: true }], dryRun: true
+  });
+  check('createStructure builds the DDL on a dry run without creating anything',
+    structureDryRun.payload.status === 'success' &&
+    structureDryRun.payload.created === false &&
+    /key werks : werks_d not null;/.test(String(structureDryRun.payload.source)),
+    structureDryRun.payload);
+
   // Message classes. Class 00 is on every system and is the size that makes
   // the filters matter: 875 messages in one 478 KB document.
   const messages = await call('getMessages', { className: '00', fromNumber: '001', toNumber: '005' });
@@ -291,13 +361,23 @@ const check = (label, condition, detail) => {
     noTransport.payload);
 
   const unplaceable = await call('createAndWrite', {
-    objtype: 'TABL/DT', name: 'ZSMOKE_TABLE', description: 'smoke',
+    objtype: 'ENQU/DL', name: 'ZSMOKE_LOCK', description: 'smoke',
     packageName: '$TMP', source: 'nothing'
   });
   check('createAndWrite refuses a type whose source it cannot place',
     unplaceable.isError === true &&
     /does not know where the source/.test(JSON.stringify(unplaceable.payload)),
     unplaceable.payload);
+
+  // Not a policy of this server: the type map inside abap-adt-api points at a
+  // ddic/tables collection that a classic ERP system does not have.
+  const table = await call('createAndWrite', {
+    objtype: 'TABL/DT', name: 'ZSMOKE_TABLE', description: 'smoke',
+    packageName: '$TMP', source: 'define type zsmoke_table { a : abap.char(1); }'
+  });
+  check('createAndWrite explains why a transparent table cannot be created',
+    table.isError === true && /no ddic\/tables collection/.test(JSON.stringify(table.payload)),
+    table.payload);
 
   const noMessages = await call('setMessages', { className: '00', messages: [] });
   check('setMessages asks for messages',
@@ -311,6 +391,16 @@ const check = (label, condition, detail) => {
     messageClassNoTransport.isError === true &&
     /transport request/.test(JSON.stringify(messageClassNoTransport.payload)),
     messageClassNoTransport.payload);
+
+  const noPattern = await call('searchInPackage', { packageName: PACKAGE_NAME });
+  check('searchInPackage asks what to look for',
+    noPattern.isError === true && /Pass pattern/.test(JSON.stringify(noPattern.payload)),
+    noPattern.payload);
+
+  const nothingToRead = await call('readSources', {});
+  check('readSources asks what to read',
+    nothingToRead.isError === true && /Pass objects/.test(JSON.stringify(nothingToRead.payload)),
+    nothingToRead.payload);
 
   const noObject = await call('runTests', {});
   check('runTests asks which object', noObject.isError === true, noObject.payload);

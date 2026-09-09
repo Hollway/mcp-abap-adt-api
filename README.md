@@ -21,6 +21,7 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 - **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools.
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC (with `atcDocumentation` for the rule text), traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it.
+- **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
 - **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
 - **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
@@ -250,6 +251,25 @@ work while domains answer 404 for every path including validation - the tools
 say so instead of looking like a wrong name, and the domain has to be
 maintained in SE11.
 
+**Working on a package**
+
+`packageTree` walks a package and its sub-packages breadth-first and answers
+with every object, its type, the package it sits in and the URL that serves
+its source. That last part is the point: `nodeContents` answers one level and
+gives most objects a SAPGUI bridge URI
+(/sap/bc/adt/vit/wb/object_type/tabldt/object_name/ZFOO) which serves
+properties and no content. A limit reached leaves the upper levels complete
+and names the packages it did not open. An unknown package is told apart from
+an empty one - both answer with an empty node list, so existence is checked
+separately.
+
+`readSources` reads many objects in one call, by name and type or by URL, each
+reported on its own so one unreadable object does not lose the rest.
+`searchInPackage` searches every source in a package for text or a regular
+expression - one call instead of a listing plus a read and a search per
+object. It reads what it walks, so narrow a large package with objectTypes and
+maxObjects.
+
 **Messages**
 
 `getMessages` reads the messages of a message class: number, text, whether the
@@ -329,7 +349,8 @@ SAP systems contain vast amounts of data.  It's crucial to write ABAP code that 
 
 When working with ABAP objects, you may encounter errors related to unknown field names or incorrect table usage. Use the following tools to inspect DDIC (Data Dictionary) objects:
 
-*   **`objectStructure`:** Retrieves the structure/metadata of an ABAP object (including DDIC tables and structures) from its object URI. Use `searchObject` first to resolve the object name to a URI.
+*   **`getStructureSource`:** The definition of a table or structure as DDL text, plus the parsed field list with types and key flags. This is the one that shows the fields; both TABL/DT and TABL/DS come from the same endpoint.
+*   **`objectStructure`:** Retrieves the structure/metadata of an ABAP object (including DDIC tables and structures) from its object URI. Use `searchObject` first to resolve the object name to a URI. For a table it answers metadata only - no fields.
 *   **`ddicElement`:** Retrieves details of a DDIC element (e.g. a data element or domain).
 *   **`ddicRepositoryAccess`:** Reads DDIC repository information for a given path.
 *   **`tableContents`:** Retrieves the *contents* (rows) of a table, not its definition. Use `runQuery` for ad-hoc `SELECT`s.

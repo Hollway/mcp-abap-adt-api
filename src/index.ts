@@ -33,6 +33,7 @@ import { EnhancementHandlers } from './handlers/EnhancementHandlers.js';
 import { TextElementHandlers } from './handlers/TextElementHandlers.js';
 import { MessageClassHandlers } from './handlers/MessageClassHandlers.js';
 import { DdicStructureHandlers } from './handlers/DdicStructureHandlers.js';
+import { PackageHandlers } from './handlers/PackageHandlers.js';
 import { RapHandlers } from './handlers/RapHandlers.js';
 import { ServiceBindingHandlers } from './handlers/ServiceBindingHandlers.js';
 import { QueryHandlers } from './handlers/QueryHandlers.js';
@@ -103,6 +104,7 @@ export class AbapAdtServer extends Server {
     private textElementHandlers: TextElementHandlers;
     private messageClassHandlers: MessageClassHandlers;
     private ddicStructureHandlers: DdicStructureHandlers;
+    private packageHandlers: PackageHandlers;
     private rapHandlers: RapHandlers;
     private serviceBindingHandlers: ServiceBindingHandlers;
     private queryHandlers: QueryHandlers;
@@ -169,6 +171,7 @@ export class AbapAdtServer extends Server {
     this.textElementHandlers = new TextElementHandlers(this.adtClient);
     this.messageClassHandlers = new MessageClassHandlers(this.adtClient);
     this.ddicStructureHandlers = new DdicStructureHandlers(this.adtClient);
+    this.packageHandlers = new PackageHandlers(this.adtClient);
     this.rapHandlers = new RapHandlers(this.adtClient);
     this.serviceBindingHandlers = new ServiceBindingHandlers(this.adtClient);
     this.queryHandlers = new QueryHandlers(this.adtClient);
@@ -477,6 +480,11 @@ export class AbapAdtServer extends Server {
             case 'createStructure':
                 result = await this.ddicStructureHandlers.handle(toolName, args);
                 break;
+            case 'packageTree':
+            case 'readSources':
+            case 'searchInPackage':
+                result = await this.packageHandlers.handle(toolName, args);
+                break;
             case 'rapGenIsAvailable':
                 result = await this.rapHandlers.handle(toolName, args);
                 break;
@@ -592,6 +600,7 @@ export class AbapAdtServer extends Server {
       { group: 'textElement', tools: this.textElementHandlers.getTools() },
       { group: 'messageClass', tools: this.messageClassHandlers.getTools() },
       { group: 'ddic', tools: this.ddicStructureHandlers.getTools() },
+      { group: 'package', tools: this.packageHandlers.getTools() },
       { group: 'rap', tools: this.rapHandlers.getTools() },
       { group: 'serviceBinding', tools: this.serviceBindingHandlers.getTools() },
       { group: 'query', tools: this.queryHandlers.getTools() },
