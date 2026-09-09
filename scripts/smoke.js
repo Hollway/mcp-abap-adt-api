@@ -29,6 +29,8 @@ const PACKAGE_NAME = (process.env.SMOKE_PACKAGE || 'SABAPDEMOS').toUpperCase();
 // An object that carries a source enhancement. Find one on another system with
 // SELECT ENHNAME, PROGRAMNAME FROM ENHINCINX WHERE VERSION = 'A' AND ENHMODE = 'S'.
 const ENHANCED_CLASS = (process.env.SMOKE_ENHANCED || 'CL_FEBAN_ALV_GRID').toLowerCase();
+// A function module every system has, for the by-name lookup.
+const FUNCTION_MODULE = (process.env.SMOKE_FUNCTION || 'GUI_UPLOAD').toUpperCase();
 const CLASS_URL = `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}/source/main`;
 const server = path.resolve(__dirname, '..', 'dist', 'index.js');
 
@@ -109,7 +111,10 @@ const check = (label, condition, detail) => {
                       'getMessages', 'getMessageLongtext', 'setMessages', 'createMessageClass',
                       'getStructureSource', 'createStructure',
                       'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
-                      'changePackagePreview', 'rapGenIsAvailable']) {
+                      'changePackagePreview', 'rapGenIsAvailable',
+                      'compareRevisions', 'impactOf', 'addMethod', 'deleteMethod', 'addAttribute',
+                      'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
+                      'runSnippet']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
   check('read-only tools are annotated as such',
@@ -447,6 +452,112 @@ const check = (label, condition, detail) => {
 
   const noObject = await call('runTests', {});
   check('runTests asks which object', noObject.isError === true, noObject.payload);
+
+  // Revisions and what changed between two of them. The class is read-only
+  // here; the history of a standard class is long enough to test the cap.
+  const history = await call('revisions', { objectName: CLASS_NAME, limit: 3 });
+  check(`revisions reads the history of ${CLASS_NAME}`,
+    history.payload.status === 'success' && Array.isArray(history.payload.revisions),
+    history.payload);
+  check('revisions caps the list',
+    history.payload.returned <= 3 && history.payload.total >= history.payload.returned,
+    history.payload);
+  check('a revision carries its number and its transport',
+    history.payload.returned === 0 ||
+    (typeof history.payload.revisions[0].revision === 'string' &&
+     'transport' in history.payload.revisions[0]),
+    history.payload.revisions && history.payload.revisions[0]);
+
+  const noSuchSide = await call('compareRevisions', {
+    objectName: CLASS_NAME, to: 'ZZ_NO_SUCH_REQUEST'
+  });
+  check('compareRevisions refuses a side that is in no version',
+    noSuchSide.isError === true &&
+    /neither a revision number nor a transport/.test(JSON.stringify(noSuchSide.payload)),
+    noSuchSide.payload);
+
+  const sameVersion = await call('compareRevisions', {
+    objectName: CLASS_NAME, from: 'active', to: 'active'
+  });
+  check('compareRevisions calls a version identical to itself identical',
+    sameVersion.payload.status === 'success' && sameVersion.payload.summary.identical === true,
+    sameVersion.payload);
+
+  // Impact: the roll-up of a where-used answer, which raw is past the cap.
+  const impact = await call('impactOf', { objectName: CLASS_NAME, maxObjects: 5 });
+  check(`impactOf rolls up the usages of ${CLASS_NAME}`,
+    impact.payload.status === 'success' && typeof impact.payload.summary.objects === 'number',
+    impact.payload);
+  check('impactOf reports how many rows the backend sent',
+    typeof impact.payload.rowsFromBackend === 'number', impact.payload);
+  check('impactOf lists no more objects than asked for',
+    (impact.payload.usedBy || []).length <= 5, impact.payload);
+
+  const impactNothing = await call('impactOf', {});
+  check('impactOf asks what to check',
+    impactNothing.isError === true && /Pass objectName/.test(JSON.stringify(impactNothing.payload)),
+    impactNothing.payload);
+
+  // Function modules by name alone, and the group they live in.
+  const fm = await call('getFunctionModule', { name: FUNCTION_MODULE });
+  check(`getFunctionModule finds ${FUNCTION_MODULE} without being told its group`,
+    fm.payload.status === 'success' && !!fm.payload.functionGroup, fm.payload);
+  check('getFunctionModule answers with a signature as data',
+    !!fm.payload.signature && Array.isArray(fm.payload.signature.importing), fm.payload);
+  check('getFunctionModule leaves the body out unless asked',
+    fm.payload.body === undefined && typeof fm.payload.bodyLines === 'number', fm.payload);
+
+  const noFm = await call('getFunctionModule', { name: 'Z_SMOKE_NO_SUCH_FM' });
+  check('getFunctionModule says a module is not there',
+    noFm.isError === true && /No function module/.test(JSON.stringify(noFm.payload)),
+    noFm.payload);
+
+  const group = await call('listFunctionGroup', { functionGroup: fm.payload.functionGroup });
+  check('listFunctionGroup lists the modules of that group',
+    group.payload.status === 'success' && group.payload.counts.modules > 0, group.payload);
+  check('listFunctionGroup leaves out the SAPGUI padding',
+    !/OBJECT_VIT_URI/.test(JSON.stringify(group.payload)), group.payload);
+
+  const noGroup = await call('listFunctionGroup', { functionGroup: 'ZSMOKE_NO_SUCH_FG' });
+  check('listFunctionGroup tells an unknown group from an empty one',
+    noGroup.payload.status === 'error' && /No function group/.test(JSON.stringify(noGroup.payload)),
+    noGroup.payload);
+
+  const fmNoGroup = await call('createFunctionModule', {
+    name: 'Z_SMOKE_NEVER', functionGroup: 'ZSMOKE_NO_SUCH_FG', description: 'smoke'
+  });
+  check('createFunctionModule refuses a group that is not there',
+    fmNoGroup.isError === true && /No function group/.test(JSON.stringify(fmNoGroup.payload)),
+    fmNoGroup.payload);
+
+  // Class members and the snippet runner: only their dry runs and refusals,
+  // because everything else here writes.
+  const memberDry = await call('addMethod', {
+    className: CLASS_NAME, methodName: 'Z_SMOKE_NEVER', dryRun: true
+  });
+  check('addMethod computes the edits without writing',
+    memberDry.payload.dryRun === true && !!memberDry.payload.patch, memberDry.payload);
+
+  const memberTwice = await call('addMethod', { className: CLASS_NAME, methodName: 'CONSTRUCTOR' });
+  check('addMethod refuses a member that is already there',
+    memberTwice.isError === true && /already there/.test(JSON.stringify(memberTwice.payload)),
+    memberTwice.payload);
+
+  const memberNoName = await call('deleteMethod', { className: CLASS_NAME });
+  check('deleteMethod asks which method',
+    memberNoName.isError === true && /Pass methodName/.test(JSON.stringify(memberNoName.payload)),
+    memberNoName.payload);
+
+  const snippetDry = await call('runSnippet', { code: ['out->write( 1 ).'], dryRun: true });
+  check('runSnippet builds a class that implements the run interface',
+    snippetDry.payload.dryRun === true &&
+    /INTERFACES if_oo_adt_classrun/.test(snippetDry.payload.source || ''),
+    snippetDry.payload);
+
+  const snippetEmpty = await call('runSnippet', { code: [] });
+  check('runSnippet asks for some code',
+    snippetEmpty.isError === true && /Pass code/.test(JSON.stringify(snippetEmpty.payload)),
+    snippetEmpty.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
