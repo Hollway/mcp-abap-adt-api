@@ -101,6 +101,7 @@ const check = (label, condition, detail) => {
                       'createDataElement', 'createDomain', 'getDataElementProperties',
                       'getDomainProperties', 'transportDetails', 'typeHierarchy', 'whereUsedMethod',
                       'objectEnhancements', 'getTextElements', 'atcDocumentation',
+                      'getMessages', 'getMessageLongtext', 'setMessages', 'createMessageClass',
                       'changePackagePreview', 'rapGenIsAvailable']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
@@ -246,6 +247,32 @@ const check = (label, condition, detail) => {
     (texts.isError === true && /does not serve text elements/.test(JSON.stringify(texts.payload))),
     texts.payload);
 
+  // Message classes. Class 00 is on every system and is the size that makes
+  // the filters matter: 875 messages in one 478 KB document.
+  const messages = await call('getMessages', { className: '00', fromNumber: '001', toNumber: '005' });
+  check('getMessages narrows a standard class down to a range',
+    messages.payload.status === 'success' && messages.payload.matched === 5 &&
+    messages.payload.totalMessages > 100,
+    messages.payload);
+  check('getMessages unescapes the placeholders of a message text',
+    messages.payload.messages.some(m => m.text.includes('&1')),
+    messages.payload.messages);
+
+  const cappedMessages = await call('getMessages', { className: '00', maxMessages: 3 });
+  check('getMessages caps the answer and says it was cut',
+    cappedMessages.payload.truncated === true && cappedMessages.payload.messages.length === 3,
+    cappedMessages.payload.messages && cappedMessages.payload.messages.length);
+
+  const longtext = await call('getMessageLongtext', { className: '00', number: '2', language: 'E' });
+  check('getMessageLongtext reads the documentation of a standard message',
+    longtext.payload.status === 'success' && String(longtext.payload.longtext).length > 10,
+    longtext.payload);
+
+  const unknownClass = await call('getMessages', { className: 'ZSMOKE_NO_SUCH_CLASS' });
+  check('getMessages says an unknown class does not exist',
+    unknownClass.isError === true && /does not exist/.test(JSON.stringify(unknownClass.payload)),
+    unknownClass.payload);
+
   // Refusals that never reach the backend
   const bothTypes = await call('createDataElement', {
     name: 'ZSMOKE_DTEL', description: 'smoke', packageName: '$TMP',
@@ -271,6 +298,19 @@ const check = (label, condition, detail) => {
     unplaceable.isError === true &&
     /does not know where the source/.test(JSON.stringify(unplaceable.payload)),
     unplaceable.payload);
+
+  const noMessages = await call('setMessages', { className: '00', messages: [] });
+  check('setMessages asks for messages',
+    noMessages.isError === true && /Pass messages/.test(JSON.stringify(noMessages.payload)),
+    noMessages.payload);
+
+  const messageClassNoTransport = await call('createMessageClass', {
+    name: 'ZSMOKE_MSG_NEVER', packageName: 'ZSMOKE_PACKAGE', description: 'smoke'
+  });
+  check('createMessageClass refuses a real package without a transport',
+    messageClassNoTransport.isError === true &&
+    /transport request/.test(JSON.stringify(messageClassNoTransport.payload)),
+    messageClassNoTransport.payload);
 
   const noObject = await call('runTests', {});
   check('runTests asks which object', noObject.isError === true, noObject.payload);

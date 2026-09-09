@@ -21,6 +21,7 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 - **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools.
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC (with `atcDocumentation` for the rule text), traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it.
+- **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
 - **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
 - **Guardrails**: a read-only mode, tool profiles, per-tool read-only/destructive annotations and a cap on oversized answers.
@@ -248,6 +249,30 @@ Not every release serves these over ADT. On a classic ERP system data elements
 work while domains answer 404 for every path including validation - the tools
 say so instead of looking like a wrong name, and the domain has to be
 maintained in SE11.
+
+**Messages**
+
+`getMessages` reads the messages of a message class: number, text, whether the
+message is self-explanatory and whether it has a long text. They live inside
+the class document and nowhere else - `objectStructure` on the same class asks
+the very endpoint that carries them and keeps only the metadata. Standard
+classes are big (class 00 holds 875 messages in one 478 KB document), so
+narrow the answer with numbers, fromNumber/toNumber or search.
+`getMessageLongtext` reads the cause and procedure of one message; the text is
+stored per language with no fallback.
+
+`setMessages` adds or changes messages, `createMessageClass` creates the class
+and fills it in one call. Only the messages passed are touched - the backend
+upserts by number - and a field left out keeps its current value. The class
+description is read first and carried over, because the write replaces the
+class header. Text is capped at 73 characters, what T100 holds, and the answer
+says what was cut. No activation is involved: the message is in T100 as soon
+as the call returns.
+
+Two things the backend does not allow, and neither is worked around here: a
+message cannot be removed (a PUT or DELETE on the per-message resource is
+refused whatever lock handle it is given), and a long text cannot be written
+(that resource has no PUT). Both need SE91.
 
 **Tests**
 
