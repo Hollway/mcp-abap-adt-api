@@ -41,6 +41,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'createTransportsConfig',
   // code execution
   'runClass',
+  'runSnippet',
   'unitTestRun',
   'runTests',
   // refactorings that write

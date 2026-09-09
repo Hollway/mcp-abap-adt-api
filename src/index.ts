@@ -47,6 +47,7 @@ import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
 import { ImpactHandlers } from './handlers/ImpactHandlers.js';
 import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
+import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
@@ -121,6 +122,7 @@ export class AbapAdtServer extends Server {
     private classMemberHandlers: ClassMemberHandlers;
     private impactHandlers: ImpactHandlers;
     private functionModuleHandlers: FunctionModuleHandlers;
+    private snippetHandlers: SnippetHandlers;
 
     constructor() {
     super(
@@ -191,6 +193,7 @@ export class AbapAdtServer extends Server {
     this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
     this.impactHandlers = new ImpactHandlers(this.adtClient);
     this.functionModuleHandlers = new FunctionModuleHandlers(this.adtClient);
+    this.snippetHandlers = new SnippetHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -573,6 +576,9 @@ export class AbapAdtServer extends Server {
             case 'compareRevisions':
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
+            case 'runSnippet':
+                result = await this.snippetHandlers.handle(toolName, args);
+                break;
             case 'getFunctionModule':
             case 'listFunctionGroup':
             case 'createFunctionModule':
@@ -638,6 +644,7 @@ export class AbapAdtServer extends Server {
       { group: 'source', tools: this.classMemberHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.impactHandlers.getTools() },
       { group: 'registration', tools: this.functionModuleHandlers.getTools() },
+      { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }
