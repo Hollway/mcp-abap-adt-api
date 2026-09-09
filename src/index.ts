@@ -529,6 +529,7 @@ export class AbapAdtServer extends Server {
             case 'renameExecute':
                 result = await this.renameHandlers.handle(toolName, args);
                 break;
+            case 'atcCheck':
             case 'atcCustomizing':
             case 'atcCheckVariant':
             case 'createAtcRun':

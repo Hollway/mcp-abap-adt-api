@@ -19,7 +19,7 @@ The server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.co
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
 - **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools.
-- **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC (with `atcDocumentation` for the rule text), traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
+- **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC - `atcCheck` runs the checks over an object or a package and reports the findings, `atcDocumentation` gives the rule text - traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it.
 - **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
 - **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
@@ -303,6 +303,22 @@ passed, and each failure with its class, method and ABAP Unit message.
 `unitTestRun` returning an empty result does NOT mean the tests passed - it
 means none ran. The answer explains why: the object is inactive, or the test
 include does not compile. Fix that and run it again.
+
+**ATC**
+
+`atcCheck` is the one to use: it takes the check variant from the system
+customizing, opens a worklist, starts the run and reads the findings back -
+each with its priority (1 is the worst), the check that raised it, the message
+and the source line it points at. Narrow a large answer with minPriority and
+maxFindings, and read the rule behind a finding with `atcDocumentation` and the
+documentationUri the report carries.
+
+The steps by hand are a trap worth knowing about. `createAtcRun` wants a
+WORKLIST ID in the parameter the library calls `variant`; given a variant name
+it answers 500 with nothing to go on. The id comes from `atcCheckVariant`,
+which - despite its name - opens a worklist rather than describing a variant.
+A package is checked through its SAPGUI bridge URI, because
+/sap/bc/adt/packages/ZFOO is refused with "No URI-Mapping defined for URI".
 
 **Transports**
 

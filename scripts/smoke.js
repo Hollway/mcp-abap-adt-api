@@ -105,7 +105,7 @@ const check = (label, condition, detail) => {
                       'objectEnhancements', 'getTextElements', 'atcDocumentation',
                       'getMessages', 'getMessageLongtext', 'setMessages', 'createMessageClass',
                       'getStructureSource', 'createStructure',
-                      'packageTree', 'readSources', 'searchInPackage',
+                      'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
                       'changePackagePreview', 'rapGenIsAvailable']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
@@ -250,6 +250,29 @@ const check = (label, condition, detail) => {
     (texts.payload.status === 'success' && Array.isArray(texts.payload.textElements)) ||
     (texts.isError === true && /does not serve text elements/.test(JSON.stringify(texts.payload))),
     texts.payload);
+
+  // ATC. The whole sequence, because the run needs a worklist id where the
+  // library asks for a check variant - a variant name there answers 500.
+  const atc = await call('atcCheck', { objectName: CLASS_NAME, objectType: 'CLAS/OC', maxFindings: 5 });
+  check('atcCheck runs the checks and reports findings, or reports none',
+    atc.payload.status === 'success' && typeof atc.payload.totalFindings === 'number' &&
+    typeof atc.payload.variant === 'string',
+    { variant: atc.payload.variant, total: atc.payload.totalFindings });
+  if (atc.payload.totalFindings > 0) {
+    const finding = atc.payload.objects[0].findings[0];
+    check('a finding carries the check, the message and the line it points at',
+      !!finding.check && !!finding.message && typeof finding.line === 'number', finding);
+    if (finding.documentationUri) {
+      const rule = await call('atcDocumentation', { docUri: finding.documentationUri });
+      check('atcDocumentation reads the rule behind a finding',
+        !rule.isError && String(JSON.stringify(rule.payload)).length > 100, rule.payload);
+    }
+  }
+
+  const atcNothing = await call('atcCheck', {});
+  check('atcCheck asks what to check',
+    atcNothing.isError === true && /What should be checked/.test(JSON.stringify(atcNothing.payload)),
+    atcNothing.payload);
 
   // A package walk. SMOKE_PACKAGE should be a package that holds objects;
   // ZMM_BASE on the system this was written against holds 906.
