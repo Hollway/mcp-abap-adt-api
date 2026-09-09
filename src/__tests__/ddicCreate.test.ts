@@ -247,3 +247,87 @@ describe('createDataElement', () => {
     expect(calls).toEqual([]);
   });
 });
+
+/**
+ * Changing an existing definition used to demand a lock handle of its own and
+ * refuse without one, pointing at createDomain - which is no help when the
+ * object already exists. The lock is taken and given back here now, unless it
+ * belongs to somebody else.
+ */
+describe('setDomainProperties and setDataElementProperties: the lock', () => {
+  it('takes the lock, writes and gives it back', async () => {
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleSetDomainProperties({
+      name: 'ZMM_TEST', description: 'Edited'
+    }));
+
+    expect(calls).toEqual(['lock', 'read', 'write', 'unlock']);
+    expect(result.status).toBe('success');
+    expect(result.written).toBe(true);
+    expect(result.lockHandleFrom).toBe('takenHere');
+    expect(result.activated).toBe(false);
+    expect(result.hint).toMatch(/lock is back off/);
+  });
+
+  it('reads what the system holds only once the lock is ours', async () => {
+    const { handlers, calls } = handler();
+    await handlers.handleSetDataElementProperties({ name: 'ZMM_TEST', label: 'Status' });
+    expect(calls.indexOf('lock')).toBeLessThan(calls.indexOf('read'));
+  });
+
+  it('leaves a caller\'s own handle alone', async () => {
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleSetDomainProperties({
+      name: 'ZMM_TEST', description: 'Edited', lockHandle: 'THEIRS'
+    }));
+
+    expect(calls).toEqual(['read', 'write']);
+    expect(result.lockHandleFrom).toBe('argument');
+    expect(result.hint).toMatch(/lock is the one you hold/);
+  });
+
+  it('reuses a lock this process already holds, and does not release it', async () => {
+    lockRegistry.remember(DOMAIN_URL, 'OUTER', undefined);
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleSetDomainProperties({
+      name: 'ZMM_TEST', description: 'Edited'
+    }));
+
+    expect(calls).toEqual(['read', 'write']);
+    expect(result.lockHandleFrom).toBe('lockRegistry');
+  });
+
+  it('activates when asked, and only after the lock is off', async () => {
+    const { handlers, calls } = handler();
+    const result = answer(await handlers.handleSetDomainProperties({
+      name: 'ZMM_TEST', description: 'Edited', activate: true
+    }));
+
+    expect(calls).toEqual(['lock', 'read', 'write', 'unlock', 'inactiveObjects', 'activate', 'inactiveObjects']);
+    expect(calls.indexOf('unlock')).toBeLessThan(calls.indexOf('activate'));
+    expect(result.activated).toBe(true);
+    expect(result.status).toBe('success');
+  });
+
+  it('gives the lock back when the write is refused', async () => {
+    const { handlers, calls } = handler({
+      setDomainProperties: async () => { throw new Error('type not allowed'); }
+    });
+    await expect(handlers.handleSetDomainProperties({ name: 'ZMM_TEST', datatype: 'NOPE' }))
+      .rejects.toThrow(/type not allowed/);
+    expect(calls).toContain('unlock');
+  });
+
+  it('does not activate on a lock that would not come off', async () => {
+    const { handlers } = handler({
+      unLock: async () => { throw new Error('lock is not yours'); }
+    });
+    const result = answer(await handlers.handleSetDataElementProperties({
+      name: 'ZMM_TEST', label: 'Status', activate: true
+    }));
+
+    expect(result.written).toBe(true);
+    expect(result.activated).toBe(false);
+    expect(result.hint).toMatch(/would not come off/);
+  });
+});

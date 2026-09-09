@@ -84,7 +84,7 @@ export class DdicPropertyHandlers extends BaseHandler {
       },
       {
         name: 'setDomainProperties',
-        description: 'Change the definition of an existing DDIC domain. The backend PUT replaces the whole definition, so anything not passed here is kept as the system currently has it - read, merge, write happens on this side. Needs a lock (taken with lock, or already recorded by this server) and, outside $TMP, a transport request. Writes the inactive version: activate with activateSafe afterwards.',
+        description: 'Change the definition of an existing DDIC domain. The backend PUT replaces the whole definition, so anything not passed here is kept as the system currently has it - read, merge, write happens on this side. The lock is taken and released here unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Writes the inactive version - pass activate to finish the job, or run activateSafe afterwards.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -124,7 +124,11 @@ export class DdicPropertyHandlers extends BaseHandler {
             },
             lockHandle: {
               type: 'string',
-              description: 'Lock handle; omit to use the one this server recorded for the object.'
+              description: 'Lock handle. Omit it: the one this server holds for the object is used, and with none held the lock is taken and released here.'
+            },
+            activate: {
+              type: 'boolean',
+              description: 'Activate after the write (default false). Only possible when this tool took the lock itself - activation is refused while a session holds one.'
             },
             transport: {
               type: 'string',
@@ -157,7 +161,7 @@ export class DdicPropertyHandlers extends BaseHandler {
       },
       {
         name: 'setDataElementProperties',
-        description: 'Change the definition of an existing DDIC data element. The backend PUT replaces the whole definition, so anything not passed is kept as the system has it. The type is either a domain or a built-in ABAP type, not both. Needs a lock and, outside $TMP, a transport request; writes the inactive version, so activate with activateSafe afterwards.',
+        description: 'Change the definition of an existing DDIC data element. The backend PUT replaces the whole definition, so anything not passed is kept as the system has it. The type is either a domain or a built-in ABAP type, not both. The lock is taken and released here unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Writes the inactive version - pass activate to finish the job, or run activateSafe afterwards.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -200,7 +204,11 @@ export class DdicPropertyHandlers extends BaseHandler {
             },
             lockHandle: {
               type: 'string',
-              description: 'Lock handle; omit to use the one this server recorded for the object.'
+              description: 'Lock handle. Omit it: the one this server holds for the object is used, and with none held the lock is taken and released here.'
+            },
+            activate: {
+              type: 'boolean',
+              description: 'Activate after the write (default false). Only possible when this tool took the lock itself - activation is refused while a session holds one.'
             },
             transport: {
               type: 'string',
@@ -340,20 +348,100 @@ export class DdicPropertyHandlers extends BaseHandler {
   }
 
   /**
-   * The lock handle to write with: the caller's, or the one this server took
-   * for the object earlier. A missing lock is worth saying plainly - the
-   * backend answer to a PUT without one reads like a permission problem.
+   * The lock to write with.
+   *
+   * A handle the caller passed, or one this process already holds, is used as
+   * it stands and left alone - it belongs to whoever took it. With neither,
+   * the lock is taken here and released again after the write: demanding a
+   * separate lock call made a one-field change a three-call sequence, and the
+   * message about the missing handle pointed at createDomain, which is no help
+   * at all when the object already exists.
    */
-  protected lockHandleFor(objectUrl: string, args: any): { lockHandle: string; from: string } {
+  protected async lockFor(
+    objectUrl: string,
+    args: any
+  ): Promise<{ lockHandle: string; from: string; taken: boolean }> {
     if (typeof args?.lockHandle === 'string' && args.lockHandle.trim()) {
-      return { lockHandle: args.lockHandle.trim(), from: 'argument' };
+      return { lockHandle: args.lockHandle.trim(), from: 'argument', taken: false };
     }
     const held = lockRegistry.forUrl(objectUrl);
-    if (held) return { lockHandle: held.lockHandle, from: 'lockRegistry' };
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `No lockHandle given and none recorded for ${objectUrl}. Call lock on that URL first, or use createDomain / createDataElement, which take the lock themselves.`
+    if (held) return { lockHandle: held.lockHandle, from: 'lockRegistry', taken: false };
+
+    const lock = await takeLock(
+      this.adtclient,
+      objectUrl,
+      undefined,
+      (start, ok) => this.trackRequest(start, ok)
     );
+    return { lockHandle: lock.lockHandle, from: 'takenHere', taken: lock.taken };
+  }
+
+  /**
+   * Finish a properties write: give back a lock this tool took, and activate
+   * when asked. Activation only makes sense once the lock is off - the backend
+   * refuses it while the session still holds one.
+   */
+  protected async finishWrite(spec: {
+    objectUrl: string;
+    lockHandle: string;
+    taken: boolean;
+    activate: boolean;
+    name: string;
+  }): Promise<Record<string, unknown>> {
+    const steps: Record<string, unknown>[] = [];
+    let released = !spec.taken;
+    if (spec.taken) {
+      const unlock = await releaseLock(
+        this.adtclient,
+        spec.objectUrl,
+        spec.lockHandle,
+        (start, ok) => this.trackRequest(start, ok)
+      );
+      released = unlock.released;
+      steps.push({ step: 'unlock', ...unlock });
+    }
+
+    if (!spec.activate) {
+      return {
+        activated: false,
+        ...(steps.length ? { steps } : {}),
+        hint: spec.taken
+          ? 'Written to the inactive version and the lock is back off. Activate with activateSafe, then read it back with version="active".'
+          : 'Written to the inactive version. The lock is the one you hold, so release it before activating with activateSafe.'
+      };
+    }
+    if (!released) {
+      return {
+        activated: false,
+        steps,
+        hint: 'Written, but the lock would not come off and activation fails while it is held. Release it (unlockAll) and run activateSafe.'
+      };
+    }
+
+    const startTime = performance.now();
+    try {
+      const outcome = await activateAndVerify(this.adtclient, {
+        objectUrl: spec.objectUrl,
+        objectName: spec.name
+      });
+      this.trackRequest(startTime, true);
+      steps.push({ step: 'activate', ...outcome });
+      return {
+        activated: outcome.success,
+        steps,
+        hint: outcome.success
+          ? 'Active. Read it back with version="active" for the proof.'
+          : 'Written but not active, so nothing uses the change yet. Correct it and run activateSafe.'
+      };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      steps.push({ step: 'activate', error: describeAdtError(error).error });
+      return {
+        activated: false,
+        steps,
+        hint: 'Written but not active. Nothing was rolled back; run activateSafe.'
+      };
+    }
   }
 
   async handleGetDomainProperties(args: any): Promise<any> {
@@ -401,7 +489,9 @@ export class DdicPropertyHandlers extends BaseHandler {
 
   async handleSetDomainProperties(args: any): Promise<any> {
     const url = this.urlOf(args, 'domainUrl', domainUrl, 'domain');
-    const { lockHandle, from } = this.lockHandleFor(url, args);
+    const { lockHandle, from, taken } = await this.lockFor(url, args);
+    // Read what the system holds while the lock is ours: the patch is applied
+    // to that, and reading it before the lock would patch a different moment.
     const state = await this.domainDocument(url, args);
 
     const startTime = performance.now();
@@ -415,16 +505,26 @@ export class DdicPropertyHandlers extends BaseHandler {
         args?.transport
       );
       this.trackRequest(startTime, true);
+      const finish = await this.finishWrite({
+        objectUrl: url,
+        lockHandle,
+        taken,
+        activate: args?.activate === true,
+        name: ddicNameOf(url)
+      });
       return this.answer({
-        status: 'success',
+        status: finish.activated === false && args?.activate === true ? 'error' : 'success',
         written: true,
         domainUrl: url,
         lockHandleFrom: from,
         ...state,
-        hint: 'Written to the inactive version. Activate with activateSafe, then read it back with version="active".'
+        ...finish
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
+      if (taken) {
+        await releaseLock(this.adtclient, url, lockHandle, (start, ok) => this.trackRequest(start, ok));
+      }
       const missing = domainEndpointHint(error);
       throw wrapAdtError(
         error,
@@ -437,7 +537,7 @@ export class DdicPropertyHandlers extends BaseHandler {
 
   async handleSetDataElementProperties(args: any): Promise<any> {
     const url = this.urlOf(args, 'dataElementUrl', dataElementUrl, 'data element');
-    const { lockHandle, from } = this.lockHandleFor(url, args);
+    const { lockHandle, from, taken } = await this.lockFor(url, args);
     const { state, truncated } = await this.dataElementDocument(url, args);
 
     const startTime = performance.now();
@@ -451,18 +551,28 @@ export class DdicPropertyHandlers extends BaseHandler {
         args?.transport
       );
       this.trackRequest(startTime, true);
+      const finish = await this.finishWrite({
+        objectUrl: url,
+        lockHandle,
+        taken,
+        activate: args?.activate === true,
+        name: ddicNameOf(url)
+      });
       return this.answer({
-        status: 'success',
+        status: finish.activated === false && args?.activate === true ? 'error' : 'success',
         written: true,
         dataElementUrl: url,
         lockHandleFrom: from,
         typeKind: state.properties.typeName ? 'domain' : 'predefinedAbapType',
         ...state,
         ...(truncated.length ? { truncatedLabels: truncated } : {}),
-        hint: 'Written to the inactive version. Activate with activateSafe, then read it back with version="active".'
+        ...finish
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
+      if (taken) {
+        await releaseLock(this.adtclient, url, lockHandle, (start, ok) => this.trackRequest(start, ok));
+      }
       throw wrapAdtError(error, `Failed to write the properties of data element ${ddicNameOf(url)}`);
     }
   }
