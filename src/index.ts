@@ -561,6 +561,7 @@ export class AbapAdtServer extends Server {
                 result = await this.refactorHandlers.handle(toolName, args);
                 break;
             case 'revisions':
+            case 'compareRevisions':
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
             case 'healthcheck':
