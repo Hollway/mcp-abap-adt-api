@@ -110,6 +110,19 @@ describe('source locations', () => {
       .toBe('/sap/bc/adt/ddic/ddl/sources/zi_view/source/main');
     // Tables and structures come from the same one.
     expect(sourceUrlFor('TABL/DT', 'ZMMSTEP')).toBe(sourceUrlFor('TABL/DS', 'ZMMSTEP'));
+    expect(sourceUrlFor('INTF/OI', 'ZIF_MM_C'))
+      .toBe('/sap/bc/adt/oo/interfaces/zif_mm_c/source/main');
+    // A function group's own text - its includes are PROG/I under the group.
+    expect(sourceUrlFor('FUGR/F', 'ZMM_UTILS'))
+      .toBe('/sap/bc/adt/functions/groups/zmm_utils/source/main');
+  });
+
+  // The one address in this map that no read has ever confirmed: no DCLS object
+  // exists on any of the systems this was built against, so it comes from
+  // discovery. The test pins the shape, not the behaviour of the backend.
+  it('addresses an access control from the collection discovery lists', () => {
+    expect(sourceUrlFor('DCLS/DL', 'ZI_VIEW_ACC'))
+      .toBe('/sap/bc/adt/acm/dcl/sources/zi_view_acc/source/main');
   });
 
   it('encodes a namespaced name', () => {

@@ -154,12 +154,10 @@ export async function walkPackage(
     level = next;
   }
 
-  // Anything the depth limit left unopened is worth naming, so the caller can
-  // ask for it instead of wondering whether the package was empty.
-  for (const packageName of level) {
-    if (!notWalked.includes(packageName)) notWalked.push(packageName);
-  }
-
+  // Nothing is swept up here. A sub-package seen at the depth limit is put on
+  // notWalked at the point it is seen, and one seen before the limit goes on
+  // `next` and is opened - so the level this loop ends on is always empty. A
+  // pass over it only looked like it named the packages that were skipped.
   return { objects, packages, notWalked, truncated, deepestLevel };
 }
 
