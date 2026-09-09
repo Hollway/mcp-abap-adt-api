@@ -6,6 +6,8 @@ import { session_types, textElementsUrl } from 'abap-adt-api';
 import type { TextElement, TextElementCategory } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
 import { describeAdtError } from '../lib/adtError';
+import { takeLock, releaseLock } from '../lib/lockCycle';
+import { activateAndVerify } from '../lib/activation';
 
 /**
  * Not every release serves text elements over REST.
@@ -65,7 +67,7 @@ export class TextElementHandlers extends BaseHandler {
       },
       {
         name: 'setTextElements',
-        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements. Needs a lock on the object (taken with lock, or already recorded here) and, outside $TMP, a transport request; activate afterwards.',
+        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements. The lock is taken on the text elements resource - not on the object - and released again, unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Pass activate to finish the job, or run activateSafe afterwards: a text write leaves both the object and its text pool inactive.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -98,11 +100,15 @@ export class TextElementHandlers extends BaseHandler {
             },
             objectUrl: {
               type: 'string',
-              description: 'Object URL the lock was taken on; derived from objectName and objectType when omitted.'
+              description: 'Object URL, used for the activation; derived from objectName and objectType when omitted. The lock is not taken on this - it goes on the text elements resource.'
             },
             lockHandle: {
               type: 'string',
-              description: 'Lock handle; omit to use the one this server recorded for the object.'
+              description: 'Lock handle. Omit it: the one this server holds for the object is used, and with none held the lock is taken and released here.'
+            },
+            activate: {
+              type: 'boolean',
+              description: 'Activate the object after the write (default false). Only possible when this tool took the lock itself - activation is refused while a session holds one.'
             },
             transport: {
               type: 'string',
@@ -212,33 +218,24 @@ export class TextElementHandlers extends BaseHandler {
       throw new McpError(ErrorCode.InvalidParams, 'elements must be an array of {id, text}.');
     }
 
+    // The lock goes on the text elements resource itself, not on the object.
+    // That is the opposite of what this handler assumed for as long as no
+    // system served the endpoint: with a lock on the program, the write is
+    // refused with 423 "Resource REPT ZFOO is not locked (invalid lock
+    // handle)", naming REPT - the text pool - rather than the program.
     const objectUrl = this.objectUrl(args, objectType);
-    const held = lockRegistry.forUrl(objectUrl);
-    const lockHandle = args?.lockHandle || held?.lockHandle;
-    if (!lockHandle) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `No lockHandle given and none recorded for ${objectUrl}. Call lock on that URL first - text elements have their own URL, but the lock belongs to the object.`
-      );
-    }
+    const { lockHandle, from, taken } = await this.lockFor(url, args);
 
     const startTime = performance.now();
     try {
       this.adtclient.stateful = session_types.stateful;
       await this.adtclient.setTextElements(url, category, elements, lockHandle, args?.transport);
       this.trackRequest(startTime, true);
-      return this.answer({
-        status: 'success',
-        written: true,
-        url,
-        objectUrl,
-        category,
-        count: elements.length,
-        lockHandleFrom: args?.lockHandle ? 'argument' : 'lockRegistry',
-        hint: 'The whole set for this category was replaced. Release the lock with unLock and activate the object.'
-      });
     } catch (error: any) {
       this.trackRequest(startTime, false);
+      if (taken) {
+        await releaseLock(this.adtclient, url, lockHandle, (start, ok) => this.trackRequest(start, ok));
+      }
       const missing = missingEndpointHint(error);
       throw wrapAdtError(
         error,
@@ -247,5 +244,109 @@ export class TextElementHandlers extends BaseHandler {
           : `Failed to write the ${category} of ${url}`
       );
     }
+
+    const steps: Record<string, unknown>[] = [];
+    let released = !taken;
+    if (taken) {
+      const unlock = await releaseLock(
+        this.adtclient,
+        url,
+        lockHandle,
+        (start, ok) => this.trackRequest(start, ok)
+      );
+      released = unlock.released;
+      steps.push({ step: 'unlock', ...unlock });
+    }
+
+    const common = {
+      written: true,
+      url,
+      objectUrl,
+      category,
+      count: elements.length,
+      lockHandleFrom: from
+    };
+
+    if (args?.activate !== true) {
+      return this.answer({
+        status: 'success',
+        ...common,
+        activated: false,
+        ...(steps.length ? { steps } : {}),
+        hint: taken
+          ? `The whole set of ${category} was replaced and the lock is back off. Activate the object with activateSafe.`
+          : `The whole set of ${category} was replaced. The lock is the one you hold, so release it before activating with activateSafe.`
+      });
+    }
+    if (!released) {
+      return this.answer({
+        status: 'error',
+        ...common,
+        activated: false,
+        steps,
+        hint: 'Written, but the lock would not come off and activation fails while it is held. Release it (unlockAll) and run activateSafe.'
+      });
+    }
+
+    const activateStart = performance.now();
+    try {
+      // A text write leaves TWO rows inactive: the object (PROG/P) and its text
+      // pool (PROG/PX). Activating by name catches both, which activating the
+      // object URL alone would not.
+      const outcome = await activateAndVerify(this.adtclient, {
+        objectUrl,
+        objectName: String(args?.objectName || '').trim().toUpperCase() || undefined
+      });
+      this.trackRequest(activateStart, true);
+      steps.push({ step: 'activate', ...outcome });
+      return this.answer({
+        status: outcome.success ? 'success' : 'error',
+        ...common,
+        activated: outcome.success,
+        steps,
+        hint: outcome.success
+          ? `The whole set of ${category} was replaced and the object is active.`
+          : 'Written but not active, so the texts are not the ones in use yet. Run activateSafe.'
+      });
+    } catch (error: any) {
+      this.trackRequest(activateStart, false);
+      steps.push({ step: 'activate', error: describeAdtError(error).error });
+      return this.answer({
+        status: 'error',
+        ...common,
+        activated: false,
+        steps,
+        hint: 'Written but not active. Nothing was rolled back; run activateSafe.'
+      });
+    }
+  }
+
+  /**
+   * The lock to write with, taken on the text elements resource.
+   *
+   * A handle the caller passed, or one this process holds for that resource, is
+   * used as it stands and left alone. With neither, the lock is taken here and
+   * given back after the write - demanding a separate lock call made writing
+   * one selection text a three-call sequence, and the URL it has to be taken on
+   * is not the object's, which is exactly the mistake this handler used to make
+   * itself.
+   */
+  private async lockFor(
+    objectUrl: string,
+    args: any
+  ): Promise<{ lockHandle: string; from: string; taken: boolean }> {
+    if (typeof args?.lockHandle === 'string' && args.lockHandle.trim()) {
+      return { lockHandle: args.lockHandle.trim(), from: 'argument', taken: false };
+    }
+    const held = lockRegistry.forUrl(objectUrl);
+    if (held) return { lockHandle: held.lockHandle, from: 'lockRegistry', taken: false };
+
+    const lock = await takeLock(
+      this.adtclient,
+      objectUrl,
+      undefined,
+      (start, ok) => this.trackRequest(start, ok)
+    );
+    return { lockHandle: lock.lockHandle, from: 'takenHere', taken: lock.taken };
   }
 }
