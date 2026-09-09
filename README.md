@@ -416,6 +416,11 @@ new version section at the top of `CHANGELOG.md` with its date, its commit
 range, how the tool and test counts moved, and what it changed - so the history
 shows what each round brought rather than only where things ended up.
 
+Up to `[0.6.0]` that file was kept in two languages, the English one on a
+branch prepared for a pull request upstream. That is not planned, so the
+changelog is now kept in one language and the branch is left as a snapshot of
+where it stood.
+
 ## Contributing
 
 Contributions are welcome! Please follow these steps to contribute:
