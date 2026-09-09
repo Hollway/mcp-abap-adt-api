@@ -33,6 +33,27 @@ export const sourceCache = {
   delete(url: string): void {
     cache.delete(url);
   },
+  /**
+   * Forget everything cached for one object: its main source, the versions
+   * stored under their own keys, and the includes of a class, which hang below
+   * the class URL. Answers how many entries went.
+   *
+   * Deleting an object is the one event that makes the cache lie rather than
+   * just go stale - a later syntaxCheckCode would happily check the text of an
+   * object that is no longer there, and report it as fine.
+   */
+  forgetUnder(objectUrl: string): number {
+    if (typeof objectUrl !== 'string' || objectUrl.length === 0) return 0;
+    const prefix = objectUrl.replace(/\/+$/, '');
+    let dropped = 0;
+    for (const key of [...cache.keys()]) {
+      if (key === prefix || key.startsWith(`${prefix}/`) || key.startsWith(`${prefix}?`)) {
+        cache.delete(key);
+        dropped++;
+      }
+    }
+    return dropped;
+  },
   clear(): void {
     cache.clear();
   }

@@ -1,5 +1,6 @@
 import { ObjectDeletionHandlers } from '../handlers/ObjectDeletionHandlers';
 import { lockRegistry } from '../lib/lockRegistry';
+import { sourceCache } from '../lib/sourceCache';
 
 /**
  * Deleting an object does not release its lock - seen on a live system: after
@@ -24,6 +25,7 @@ const answer = (result: any) => JSON.parse(result.content[0].text);
 beforeEach(() => {
   lockRegistry.clear();
   lockRegistry.remember(URL, 'HANDLE');
+  sourceCache.clear();
 });
 
 describe('deleteObject', () => {
@@ -49,6 +51,26 @@ describe('deleteObject', () => {
     });
     // the object is gone either way, so the entry must not linger
     expect(lockRegistry.count()).toBe(0);
+  });
+
+  // Without this, a syntax check reusing the cached text would report an
+  // object that is no longer in the system as fine.
+  it('forgets the source it had cached for the object', async () => {
+    sourceCache.set(`${URL}/source/main`, 'REPORT zkri_test.');
+    const { handlers } = handler();
+    const result = answer(await handlers.handleDeleteObject({ objectUrl: URL, lockHandle: 'HANDLE' }));
+    expect(result.sourceCacheDropped).toBe(1);
+    expect(sourceCache.has(`${URL}/source/main`)).toBe(false);
+  });
+
+  it('keeps the cached source when the deletion fails', async () => {
+    sourceCache.set(`${URL}/source/main`, 'REPORT zkri_test.');
+    const { handlers } = handler({
+      deleteObject: async () => { throw new Error('object is used elsewhere'); }
+    });
+    await expect(handlers.handleDeleteObject({ objectUrl: URL, lockHandle: 'HANDLE' }))
+      .rejects.toThrow(/object is used elsewhere/);
+    expect(sourceCache.has(`${URL}/source/main`)).toBe(true);
   });
 
   it('keeps the lock when the deletion itself fails', async () => {

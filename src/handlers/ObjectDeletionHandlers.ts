@@ -2,6 +2,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError, describeAdtError } from '../lib/adtError';
 import { lockRegistry } from '../lib/lockRegistry';
+import { sourceCache } from '../lib/sourceCache';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 
@@ -78,6 +79,10 @@ export class ObjectDeletionHandlers extends BaseHandler {
         lockError = describeAdtError(unlockError).error;
       }
       lockRegistry.forget(args.objectUrl);
+      // The source cache would otherwise still hold the text of the object -
+      // and a syntax check reusing that text reports an object that no longer
+      // exists as fine.
+      const sourceCacheDropped = sourceCache.forgetUnder(args.objectUrl);
 
       this.trackRequest(startTime, true);
       return {
@@ -89,6 +94,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
               result,
               lockReleased,
               ...(lockError ? { lockError } : {}),
+              ...(sourceCacheDropped ? { sourceCacheDropped } : {}),
               locksHeld: lockRegistry.count(),
               message: 'Object deleted successfully'
             }, null, 2)
