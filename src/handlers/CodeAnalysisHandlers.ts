@@ -36,7 +36,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'syntaxCheckCdsUrl',
-                description: 'Perform ABAP syntax check with CDS URL',
+                description: 'Syntax check for a CDS object, which is addressed differently from ABAP: the DDL source URL goes in as the main URL. For ordinary ABAP use syntaxCheckCode.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -47,7 +47,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletion',
-                description: 'Get code completion suggestions',
+                description: 'Completion proposals for a cursor position: what may be written at line/column of this source. Needs the source and the position, exactly like the editor, so it is worth having when composing a call against an unfamiliar interface; codeCompletionFull adds the insert text and codeCompletionElement the details of one proposal.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -61,7 +61,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'findDefinition',
-                description: 'Find symbol definition',
+                description: 'Where the symbol under a cursor position is defined - the F3 of ADT. Takes the source URL with a line and column, and answers with the object and position of the declaration, so it needs the source read first to count the position. To go the other way, use usageReferences or impactOf.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -78,7 +78,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'usageReferences',
-                description: 'Find symbol references',
+                description: 'Where-used for the symbol at a cursor position, or for the whole object when no position is given. The answer is a flat list that is really a tree - one row per package, per object, and per place inside it - so it is large: a widely used class answers with hundreds of rows and over a hundred thousand characters, past the response cap. Prefer impactOf, which asks this and rolls it up; use whereUsedMethod for one method by name.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -166,7 +166,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'syntaxCheckTypes',
-                description: 'Retrieves syntax check types.',
+                description: 'Which syntax-check flavours this system offers, as the check endpoint understands them. Diagnostic; syntaxCheckCode picks the right one itself.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -174,7 +174,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletionFull',
-                description: 'Performs full code completion.',
+                description: 'Completion proposals with the text to insert and the position to insert it at, for a cursor position in a source. The fuller form of codeCompletion.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -189,7 +189,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'runClass',
-                description: 'Runs a class.',
+                description: 'Execute a class that implements IF_OO_ADT_CLASSRUN - the F9 of an ADT editor - and return its console output. The class has to exist and implement that interface; to run a piece of ABAP that does not, use runSnippet, which wraps it in such a class for you. This EXECUTES CODE on the system as the connected user, so it counts as a writing tool and read-only mode refuses it. A runtime error comes back as a bare 500; the reason is in ST22 (runSnippet reads the dump for you).',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -200,7 +200,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletionElement',
-                description: 'Retrieves code completion element information.',
+                description: 'The details behind one completion proposal: its type, its documentation, where it comes from. Follows codeCompletion for the entry you want to know more about.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -214,7 +214,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'usageReferenceSnippets',
-                description: 'Retrieves usage reference snippets.',
+                description: 'The source lines around each usage, for references you already have from usageReferences - pass those rows back in. One more backend call and a much larger answer, so ask for it when the call site itself matters.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -225,7 +225,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'fixProposals',
-                description: 'Retrieves fix proposals.',
+                description: 'Quick-fix proposals the system offers for a position in a source - the same list as the light bulb in ADT (create the missing method, add the missing variable). What comes back is passed to fixEdits to get the actual edits.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -239,7 +239,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'fixEdits',
-                description: 'Applies fix edits.',
+                description: 'Turn one proposal from fixProposals into concrete edits: the ranges and the replacement text. It computes them and does NOT write - apply them with patchObjectSource or editObject.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -276,7 +276,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'abapDocumentation',
-                description: 'Retrieves ABAP documentation.',
+                description: 'The ABAP keyword or object documentation for a position in a source - the F1 of ADT. Answers with the help text as it is written for that release, which is worth reading before guessing at a statement variant.',
                 inputSchema: {
                     type: 'object',
                     properties: {

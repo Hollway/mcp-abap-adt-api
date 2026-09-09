@@ -52,7 +52,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     return [
       {
         name: 'objectRegistrationInfo',
-        description: 'Get registration information for an ABAP object',
+        description: 'The workbench registration of an object: which transport layer and package it belongs to, and whether it can be changed here. This is what says an object is foreign or read-only before a lock fails on it.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -63,7 +63,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       },
       {
         name: 'validateNewObject',
-        description: 'Validate parameters for a new ABAP object',
+        description: 'Ask the system whether a new object may be created under this name, in this package, with this description - the check ADT runs before a creation dialog is accepted. It answers with the reason a name is refused (already taken, reserved, wrong namespace). Careful with the answer: some collections reply 200 with an empty body, which the library reads as failure, so a free name can look refused; createObject and createAndWrite handle that themselves.',
         inputSchema: {
           type: 'object',
           properties: {

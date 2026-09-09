@@ -15,7 +15,7 @@ export class ObjectManagementHandlers extends BaseHandler {
     return [
       {
         name: 'activateObjects',
-        description: 'Activate ABAP objects using object references',
+        description: 'Activate the objects you name, as rows shaped like the ones inactiveObjects returns. Prefer activateSafe, which activates and then proves it: this call can answer success:true while the object stays inactive, and activating only the class row leaves changed method fragments behind, so the old implementation keeps running under an already-active signature. Every row needs a non-empty adtcore:parentUri, which the inactive list leaves empty for programs.',
         inputSchema: {
           type: 'object',
           properties: {

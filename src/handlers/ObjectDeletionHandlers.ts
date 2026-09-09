@@ -11,7 +11,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
     return [
       {
         name: 'deleteObject',
-        description: 'Deletes an ABAP object from the system',
+        description: 'Delete an object. It needs an edit lock (this server passes the handle it holds, so lock the object first) and, outside $TMP, a transport request. Deleting does not release the lock - the backend leaves it, pointing at an object that no longer exists - so this releases it and forgets it, and drops the cached source with it. Not undoable from here: the object is gone and only a transport of the deletion travels on.',
         inputSchema: {
           type: 'object',
           properties: {

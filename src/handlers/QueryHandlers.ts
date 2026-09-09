@@ -8,7 +8,7 @@ export class QueryHandlers extends BaseHandler {
         return [
             {
                 name: 'tableContents',
-                description: 'Retrieves the contents of an ABAP table.',
+                description: 'Read rows of one table or view by name, with an optional WHERE clause - the quickest look at data when you know the table. Reading only: ADT serves no write here. For a join, an aggregate or anything over more than one table use runQuery; to see what FIELDS a table has use getStructureSource, because this answers with data and not with a definition. There is no offset in the backend, so paging fetches offset+rowNumber rows and returns the tail - pass an ORDER BY to make the window stable.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -38,7 +38,7 @@ export class QueryHandlers extends BaseHandler {
             },
             {
                 name: 'runQuery',
-                description: 'Runs a SQL query on the target system.',
+                description: 'Run an Open SQL SELECT and get the rows back - joins, aggregates, GROUP BY, whatever the ABAP SQL console accepts. Reading only, and only SELECT: the endpoint refuses anything that writes, and for logic around the data (call a function module, compute, loop) use runSnippet. Row limits are the ones the backend applies, so ask for what you need with UP TO n ROWS.',
                 inputSchema: {
                     type: 'object',
                     properties: {

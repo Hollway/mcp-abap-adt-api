@@ -9,7 +9,7 @@ export class ObjectLockHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [{
       name: 'lock',
-      description: 'Lock an object',
+      description: 'Take an edit lock on an object, which every write needs. The handle it returns is what setObjectSource, patchObjectSource and deleteObject take - and it lives and dies with the ADT session, so a lost session voids it and the object has to be locked again. This server remembers the handle per object, so the write tools find it themselves and listLocks shows what is held. The lock must be RELEASED BEFORE ACTIVATING: activation refuses to run while the same session holds it. Prefer editObject, which takes and releases the lock around the change for you.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -26,7 +26,7 @@ export class ObjectLockHandlers extends BaseHandler {
       }
     }, {
       name: 'unLock',
-      description: 'Unlock an object',
+      description: 'Release an edit lock. Pass the handle, or leave it out and the one this server recorded for that object is used (see listLocks). Do it before activating - activation refuses while the session still holds the lock - and remember that deleting an object does NOT release its lock, so deleteObject releases it for you.',
       inputSchema: {
         type: 'object',
         properties: {
