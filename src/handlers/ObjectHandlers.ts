@@ -9,7 +9,7 @@ export class ObjectHandlers extends BaseHandler {
         return [
             {
                 name: 'objectStructure',
-                description: 'Get object structure details',
+                description: 'The metadata of one object: its name, type, package, who changed it when, its master language, and the links ADT offers for it - among them the source URL, which is how the address of an unfamiliar type is found. It does NOT return content: a class answers with its includes, a table with its properties (getStructureSource has the fields), and a message class with the metadata after the messages have been discarded (getMessages has those).',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -27,7 +27,7 @@ export class ObjectHandlers extends BaseHandler {
             },
             {
                 name: 'searchObject',
-                description: 'Search for objects',
+                description: 'Find objects by name in the repository, with * as a wildcard - the quickest way from a name to a URI, a type and a package. The objType filter is the quick-search filter of the backend and does not take every sub-type: FUGR/FF answers with an empty list while the unfiltered search returns the module. So when a filter comes back empty, search without it and pick the type from the rows.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -49,7 +49,7 @@ export class ObjectHandlers extends BaseHandler {
             },
             {
                 name: 'findObjectPath',
-                description: 'Find path for an object',
+                description: 'The workbench path of an object, from the package down to the object itself. That is where the package of an object comes from - its own metadata does not carry it - which is why activation uses this to fill in the parent URI the inactive list leaves empty.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -63,7 +63,7 @@ export class ObjectHandlers extends BaseHandler {
             },
             {
                 name: 'objectTypes',
-                description: 'Retrieves object types.',
+                description: 'The object types this system knows, as ADT names them. Diagnostic: useful when a type code is in doubt, since a wrong one is refused with a 404 that says nothing.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -71,7 +71,7 @@ export class ObjectHandlers extends BaseHandler {
             },
             {
                 name: 'reentranceTicket',
-                description: 'Retrieves a reentrance ticket.',
+                description: 'A single-use ticket for opening SAPGUI on this system without logging on again - what ADT uses when it hands an object to the GUI. It is a credential: it stands for your session, so treat it like one.',
                 inputSchema: {
                     type: 'object',
                     properties: {}

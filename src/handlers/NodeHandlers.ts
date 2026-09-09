@@ -9,7 +9,7 @@ export class NodeHandlers extends BaseHandler {
         return [
             {
                 name: 'nodeContents',
-                description: 'Retrieves the contents of a node in the ABAP repository tree.',
+                description: 'One level of the repository tree: what is directly inside a package, or inside a function group. Two things to know. Most rows hand back a SAPGUI bridge URI that serves properties and no content, so it is not the way to read sources - packageTree resolves the real source URLs, and listFunctionGroup does it for a group. And an unknown package answers exactly like an empty one, with no nodes at all, so only a repository search tells them apart.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -43,7 +43,7 @@ export class NodeHandlers extends BaseHandler {
             },
             {
                 name: 'mainPrograms',
-                description: 'Retrieves the main programs for a given include.',
+                description: 'Which programs an include belongs to - the question a report include cannot answer about itself. It is needed to create or syntax-check an include, both of which want the main program, and an include used by several reports answers with all of them.',
                 inputSchema: {
                     type: 'object',
                     properties: {

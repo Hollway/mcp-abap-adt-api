@@ -9,7 +9,7 @@ export class ClassHandlers extends BaseHandler {
         return [
             {
                 name: 'classIncludes',
-                description: 'Get class includes structure',
+                description: 'The includes a class is made of - definitions, implementations, macros, test classes - with the URL of each. That is how the test class of a class is read or written separately from its main source, and which include names revisions and getTextElements take.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -23,7 +23,7 @@ export class ClassHandlers extends BaseHandler {
             },
             {
                 name: 'classComponents',
-                description: 'List class components',
+                description: 'What a class is made of: its methods with their visibility, its attributes, its types and its interfaces - read from the class rather than from its source. This is the cheap answer to "what can this class do"; the source of one method is then found with fragmentMappings or read whole with getObjectSource.',
                 inputSchema: {
                     type: 'object',
                     properties: {

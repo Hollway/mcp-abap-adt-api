@@ -9,7 +9,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
         return [
             {
                 name: 'prettyPrinterSetting',
-                description: 'Retrieves the pretty printer settings.',
+                description: 'How pretty-printing is set for this user: whether keywords go upper or lower case, and how identifiers are treated. Worth reading before formatting a source that is not yours, because the setting decides what the reformat does to every line.',
                 inputSchema: {
                     type: 'object',
                     properties: {}
@@ -17,7 +17,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
             },
             {
                 name: 'setPrettyPrinterSetting',
-                description: 'Sets the pretty printer settings.',
+                description: 'Change the pretty-printer setting for this user - it is a user setting and stays until changed back. It decides what prettyPrinter does to keywords and identifiers, so changing it changes how every later reformat looks.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -35,7 +35,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
             },
             {
                 name: 'prettyPrinter',
-                description: 'Formats ABAP code using the pretty printer.',
+                description: 'Reformat a source the way the ADT pretty printer would, following the setting of this user. It answers with the formatted text and writes nothing - the write is yours to make. It does not fix indentation of continuation lines the way a person would: aligning parameters to a column is not something it does.',
                 inputSchema: {
                     type: 'object',
                     properties: {

@@ -48,7 +48,7 @@ export class RefactorHandlers extends BaseHandler {
             },
             {
                 name: 'extractMethodEvaluate',
-                description: 'Evaluates an extract method refactoring.',
+                description: 'First of the three steps that pull a range of lines out into a method: it asks the system whether the range CAN be extracted and what the new method would need - which variables come in, which go out. Nothing is written. Then extractMethodPreview, then extractMethodExecute.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -66,7 +66,7 @@ export class RefactorHandlers extends BaseHandler {
             },
             {
                 name: 'extractMethodPreview',
-                description: 'Previews an extract method refactoring.',
+                description: 'Second step of extract-method: the edits the refactoring would make, from the evaluation you pass back in. Still nothing written - this is where the new signature and the changed call site can be read before agreeing to them.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -80,7 +80,7 @@ export class RefactorHandlers extends BaseHandler {
             },
             {
                 name: 'extractMethodExecute',
-                description: 'Executes an extract method refactoring.',
+                description: 'Third step of extract-method: apply what the preview showed. This WRITES the object, so it needs the object unlocked by anything else and, outside $TMP, a transport request. Nothing is rolled back if the activation afterwards fails.',
                 inputSchema: {
                     type: 'object',
                     properties: {
