@@ -48,6 +48,9 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'setDataElementProperties',
   // text elements
   'setTextElements',
+  // message classes
+  'setMessages',
+  'createMessageClass',
   // settings
   'setPrettyPrinterSetting',
   // abapGit
