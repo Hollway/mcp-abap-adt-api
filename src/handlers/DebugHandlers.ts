@@ -9,7 +9,7 @@ export class DebugHandlers extends BaseHandler {
         return [
             {
                 name: 'debuggerListeners',
-                description: 'Retrieves a list of debugger listeners.',
+                description: 'Which debug listeners exist for this user and terminal - who would catch a breakpoint right now. Read this before starting one: a second listener for the same user is refused, and an old one left behind is the usual reason a debug session cannot be started.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -39,7 +39,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerListen',
-                description: 'Listens for debugging events.',
+                description: 'Start listening for a breakpoint and WAIT until something hits one - the call does not return until a process stops, or the wait times out. That is the shape of the whole debugger here: set breakpoints, start listening, then run the program from somewhere else (SAPGUI, a job, a service call), and this returns when it stops. Nothing in this server can trigger the program for you, so a listener with nothing to trigger it just waits. It occupies the session; delete the listener when you are done.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -73,7 +73,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerDeleteListener',
-                description: 'Stops a debug listener.',
+                description: 'Stop listening for breakpoints and free the session. Do it when a debug session is over or abandoned - a listener left behind blocks the next one for the same user.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -99,7 +99,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSetBreakpoints',
-                description: 'Sets breakpoints.',
+                description: 'Set breakpoints on lines of a source, or on a statement, for the debug session that follows. They belong to the user and survive until deleted, so they will also stop a colleague running the same code with your user. Set them BEFORE debuggerListen; the ids that come back are what deletes them again.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -149,7 +149,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerDeleteBreakpoints',
-                description: 'Deletes breakpoints.',
+                description: 'Remove breakpoints that were set earlier - the ids come from debuggerSetBreakpoints. Worth doing even after a failed session: a forgotten breakpoint stops a productive program the next time it runs.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -183,7 +183,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerAttach',
-                description: 'Attaches the debugger.',
+                description: 'Attach to the process that has stopped at a breakpoint, which is what debuggerListen reported. Only after this do the stack and the variables mean anything; the attachment holds the stopped process, so let it go (debuggerStep with terminate, or delete the listener) rather than leaving a work process frozen.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -209,7 +209,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSaveSettings',
-                description: 'Saves debugger settings.',
+                description: 'Change how the debugger behaves for this user: system debugging, update debugging, how much of a table it reads. They are user settings and stay until changed back.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -223,7 +223,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerStackTrace',
-                description: 'Retrieves the debugger stack trace.',
+                description: 'The call stack of the process stopped at a breakpoint: which programs and methods it came through, with the line each is on. Needs an attached session (debuggerAttach); use debuggerGoToStack to look at variables from a frame further up.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -236,7 +236,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerVariables',
-                description: 'Retrieves debugger variables.',
+                description: 'The variables visible in the current stack frame, with their values. Needs an attached session. A structure or a table comes back as a node to open with debuggerChildVariables rather than as its contents.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -250,7 +250,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerChildVariables',
-                description: 'Retrieves child variables of a debugger variable.',
+                description: 'Open one variable that has parts: the fields of a structure, the rows of an internal table, what a reference points at. Takes the variable id from debuggerVariables.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -263,7 +263,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerStep',
-                description: 'Performs a debugger step.',
+                description: 'Step the stopped process: into, over, out, to a line, or terminate it. Each step answers with where it now stands, so the stack and the variables have to be read again. Terminating ends the debugged program - which is how a stopped work process is let go when the session is over.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -281,7 +281,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerGoToStack',
-                description: 'Navigates to a specific stack entry in the debugger.',
+                description: 'Move the debugger view to another frame of the stack, so that debuggerVariables shows what is visible THERE. It changes the view, not the position of the program - the process still stands where it stopped.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -295,7 +295,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSetVariableValue',
-                description: 'Sets the value of a debugger variable.',
+                description: 'Change a variable in the stopped process, as the debugger lets you. The program then carries on with the new value, which is a way to reach a branch that the data would not otherwise reach - and a way to make a productive program do something it never would. Only for a session you are deliberately steering.',
                 inputSchema: {
                     type: 'object',
                     properties: {

@@ -10,7 +10,7 @@ export class TransportHandlers extends BaseHandler {
         return [
             {
                 name: 'transportInfo',
-                description: 'Get transport information for an object source',
+                description: 'Which transport request a change to this object would go into, and which ones are available for it - what ADT asks before it opens the transport dialog. Worth calling before a write outside $TMP, because a write with no request fails at the last step. Mind the difference the backend does not spell out: a REQUEST is what a write takes, a task inside it is refused with "not a change request".',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -32,7 +32,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'createTransport',
-                description: 'Create a new transport request',
+                description: 'Create a workbench request. It becomes yours and stays open until it is released, so create one per piece of work rather than per object, and reuse the number for every write that belongs together. Ask first if the user has a request in mind - an unwanted request is visible to the whole team and has to be deleted by hand.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -209,7 +209,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportDelete',
-                description: 'Deletes a transport.',
+                description: 'Delete a transport request or a task inside it. Only works while it is still open and empty of anything you want to keep: the objects in it stay as they are, only the request goes. Released requests cannot be deleted at all. Not undoable - ask before doing it to a request you did not create.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -223,7 +223,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportRelease',
-                description: 'Releases a transport.',
+                description: 'Release a request, which sends its objects on to the next system. Not undoable: a released request cannot be reopened, and the only way back is another request. It fails while any task inside it is still open, and while the objects have syntax errors. Ask before releasing anything - this is the step that changes another system.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -245,7 +245,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportSetOwner',
-                description: 'Sets the owner of a transport.',
+                description: 'Hand a request over to another user. The new owner sees it in their list and yours loses it; the objects and tasks inside stay as they are. Only an open request can change hands.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -263,7 +263,7 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportAddUser',
-                description: 'Adds a user to a transport.',
+                description: 'Add a developer task for another user inside a request, so their changes can travel in it. Their objects then sit in their own task under the same request number.',
                 inputSchema: {
                     type: 'object',
                     properties: {
