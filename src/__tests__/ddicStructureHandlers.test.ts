@@ -223,6 +223,20 @@ describe('createAndWrite and the DDIC types', () => {
     })).rejects.toThrow(/no ddic\/tables collection/);
   });
 
+  // Reading, validating and creating a package all answer 404 here: only
+  // /sap/bc/adt/packages/settings is served.
+  it('refuses a package with the reason, from either creation tool', async () => {
+    await expect(registration().handleCreateAndWrite({
+      objtype: 'DEVC/K', name: 'ZKRI_MCP_PKG', description: 'x', packageName: '$TMP', source: 'x'
+    })).rejects.toThrow(/packages is not served at all/);
+    await expect(registration().handleCreateObject({
+      objtype: 'DEVC/K', name: 'ZKRI_MCP_PKG', description: 'x', parentName: '$TMP'
+    })).rejects.toThrow(/packages is not served at all/);
+    await expect(registration().handleCreateObject({
+      objtype: 'TABL/DT', name: 'ZKRI_MCP_TAB', description: 'x', parentName: '$TMP'
+    })).rejects.toThrow(/no ddic\/tables collection/);
+  });
+
   it('knows where a CDS view and a structure keep their source', async () => {
     const cds = JSON.parse((await registration().handleCreateAndWrite({
       objtype: 'DDLS/DF', name: 'ZKRI_MCP_CDS', description: 'x', packageName: '$TMP',

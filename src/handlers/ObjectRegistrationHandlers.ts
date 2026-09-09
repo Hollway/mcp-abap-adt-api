@@ -38,7 +38,8 @@ const SOURCE_URLS: Record<string, (name: string, parentName: string) => string> 
  * a classic ERP system does not have at all.
  */
 const UNCREATABLE: Record<string, string> = {
-  'TABL/DT': 'A transparent table cannot be created over ADT on this kind of system: there is no ddic/tables collection, so the creation answers "Resource /sap/bc/adt/ddic/tables does not exist". Its technical settings - delivery class, buffering, size category - are not in the source form either, so it could not be finished here anyway. Create it in SE11; createStructure covers TABL/DS, and getStructureSource reads either.'
+  'TABL/DT': 'A transparent table cannot be created over ADT on this kind of system: there is no ddic/tables collection, so the creation answers "Resource /sap/bc/adt/ddic/tables does not exist". Its technical settings - delivery class, buffering, size category - are not in the source form either, so it could not be finished here anyway. Create it in SE11; createStructure covers TABL/DS, and getStructureSource reads either.',
+  'DEVC/K': 'A package cannot be created over ADT on this kind of system: /sap/bc/adt/packages is not served at all - only /sap/bc/adt/packages/settings is - so the creation, the name validation and even reading an existing package all answer 404. Create it in SE80 or SE21. nodeContents lists what is in a package, and changePackagePreview shows what moving an object into one would mean.'
 };
 
 const encodedName = (name: string): string => {
@@ -607,7 +608,13 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       // without the reference to the main program, so the backend answers 400
       // or 500 whatever is passed. Failing on the spot with the way out beats
       // a backend error that reads like a wrong package or a name collision.
-      if (String(args?.objtype || '').trim().toUpperCase() === 'PROG/I') {
+      // Types this backend cannot create at all, refused with the reason
+      // rather than with the 404 the collection answers.
+      const requested = String(args?.objtype || '').trim().toUpperCase();
+      if (UNCREATABLE[requested]) {
+        throw new McpError(ErrorCode.InvalidParams, UNCREATABLE[requested]);
+      }
+      if (requested === 'PROG/I') {
         throw new McpError(
           ErrorCode.InvalidParams,
           'createObject cannot create a report include (PROG/I): the creation document it builds carries no reference to the main program, ' +
