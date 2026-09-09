@@ -156,6 +156,22 @@ export class CallHandlers extends BaseHandler {
     return parsed;
   }
 
+  /**
+   * The types the interface asked for that a variable cannot have.
+   *
+   * Worth saying out loud rather than hiding: a CLIKE parameter was passed as
+   * a string, so a module whose behaviour depends on the length of the field
+   * it was given - the ALPHA conversions do - may answer differently than it
+   * would from typed code.
+   */
+  private substitutionReport(generated: GeneratedCall): Record<string, unknown> {
+    if (!generated.substitutions) return {};
+    return {
+      typeSubstitutions: generated.substitutions,
+      substitutionHint: 'The interface types these parameters generically, and a variable cannot be declared that way, so a concrete type was used. A module whose result depends on the length of the field it was handed may answer differently than it would from typed code.'
+    };
+  }
+
   private generate(build: () => GeneratedCall): GeneratedCall {
     try {
       return build();
@@ -189,6 +205,7 @@ export class CallHandlers extends BaseHandler {
         rolledBack: generated.rolledBack,
         supplied: generated.supplied,
         returns: generated.results,
+        ...this.substitutionReport(generated),
         source: buildSnippetClass({
           className,
           code: generated.code,
@@ -264,6 +281,7 @@ export class CallHandlers extends BaseHandler {
       ran: true,
       rolledBack: generated.rolledBack,
       supplied: generated.supplied,
+      ...this.substitutionReport(generated),
       subrc: outcome.subrc,
       ...(outcome.exceptionRaised ? { exceptionRaised: outcome.exceptionRaised } : {}),
       ...(outcome.exceptionClass ? { exceptionClass: outcome.exceptionClass } : {}),

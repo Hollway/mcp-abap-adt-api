@@ -168,26 +168,21 @@ const finish = (children: Element[], text: string): Element[] =>
 function toValue(element: Element): AsXmlValue {
   if (element.children.length === 0) return unescapeXml(element.text);
 
-  // A table is written as repeated <item> children. Repetition is what marks
-  // it, not the name alone: a structure with one component called ITEM would
-  // otherwise turn into a table of one.
+  // A table is written as repeated children of one name - and that name is
+  // the row type when the table has a named one, not <item>: DDIF_FIELDINFO_GET
+  // answers its DFIES_TAB as <DFIES_TAB><DFIES>..</DFIES><DFIES>..</DFIES>.
+  // So repetition is what marks a table, whatever the name; <item> marks one
+  // even unrepeated, since a row type without a name is never a component.
   const names = new Set(element.children.map(child => child.name));
-  if (names.size === 1 && element.children.length > 0) {
+  if (names.size === 1) {
     const only = [...names][0];
-    if (only.toLowerCase() === 'item') return element.children.map(toValue);
+    if (element.children.length > 1 || only.toLowerCase() === 'item') {
+      return element.children.map(toValue);
+    }
   }
 
   const structure: { [name: string]: AsXmlValue } = {};
-  for (const child of element.children) {
-    const value = toValue(child);
-    if (child.name in structure) {
-      // Repeated names that are not <item>: keep both rather than lose one.
-      const existing = structure[child.name];
-      structure[child.name] = Array.isArray(existing) ? [...existing, value] : [existing, value];
-    } else {
-      structure[child.name] = value;
-    }
-  }
+  for (const child of element.children) structure[child.name] = toValue(child);
   return structure;
 }
 

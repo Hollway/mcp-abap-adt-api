@@ -52,6 +52,8 @@ export interface GeneratedCall {
   exceptions: Record<number, string>;
   /** Parameters that were filled from the passed values. */
   supplied: string[];
+  /** Parameters whose declared type a variable cannot have, and what was used. */
+  substitutions?: Record<string, string>;
   rolledBack: boolean;
   maxRows: number;
 }
@@ -80,7 +82,8 @@ export const CONTROL_BINDINGS = {
   subrc: 'MCP_SUBRC',
   exception: 'MCP_EXCEPTION',
   message: 'MCP_MESSAGE',
-  rows: 'MCP_ROWS'
+  rows: 'MCP_ROWS',
+  tables: 'MCP_TABLES'
 } as const;
 
 /** OTHERS gets a number of its own, out of the way of the declared ones. */
@@ -158,18 +161,95 @@ function componentList(record: Record<string, unknown>, path: string): string {
 }
 
 /**
+ * A type a variable can actually be declared with.
+ *
+ * An interface is allowed to type a parameter generically, and a good half of
+ * the standard function modules do: CONVERSION_EXIT_ALPHA_INPUT takes CLIKE.
+ * A generic type is exactly what DATA refuses - "CLIKE has a generic type,
+ * usable only for typing field symbols and formal parameters" - so a concrete
+ * one is put in its place and the substitution is reported, because it is not
+ * what the interface asked for.
+ *
+ * The unspecified elementary types are substituted too, and for a worse
+ * reason: DATA x TYPE c compiles and means C(1), so a three-character value
+ * passed into it would be quietly cut down to one.
+ */
+const GENERIC_TYPES: Record<string, string> = {
+  any: 'string',
+  data: 'string',
+  clike: 'string',
+  csequence: 'string',
+  simple: 'string',
+  xsequence: 'xstring',
+  numeric: 'decfloat34',
+  object: 'REF TO object',
+  c: 'c LENGTH 255',
+  n: 'n LENGTH 255',
+  x: 'x LENGTH 255',
+  p: 'p LENGTH 16 DECIMALS 4'
+};
+
+/** Generic table types: nothing says what a row of one looks like. */
+const GENERIC_TABLES = new Set([
+  'table', 'any table', 'index table', 'standard table', 'sorted table', 'hashed table'
+]);
+
+export interface ConcreteType {
+  type: string;
+  /** Set when the interface asked for something a variable cannot have. */
+  substituted?: string;
+}
+
+export function concreteType(text: string, parameter: string): ConcreteType {
+  const asked = String(text || '').trim();
+  const key = asked.toLowerCase().replace(/\s+/g, ' ');
+  if (GENERIC_TABLES.has(key)) {
+    throw new CallGenError(
+      `Parameter ${parameter} is typed ${asked.toUpperCase()}, a generic table type: nothing in the interface ` +
+      'says what a row of it looks like, so no variable can be declared for it. Call it from runSnippet with a table of your own.'
+    );
+  }
+  const concrete = GENERIC_TYPES[key];
+  return concrete ? { type: concrete, substituted: `${asked.toUpperCase()} -> ${concrete}` } : { type: asked };
+}
+
+/**
  * The declaration of one parameter variable.
  *
  * A parameter with no type at all cannot be declared, and there is no way
  * around it: the interface says nothing about what the caller must supply. It
  * is named here rather than left to fail as a syntax error nobody can read.
+ *
+ * Two things the interface text does not say outright:
+ *  - a TABLES parameter takes an internal table, and STRUCTURE or LIKE there
+ *    names the row rather than the table (TYPE there already names a table
+ *    type, so it is passed through);
+ *  - LIKE becomes TYPE. An interface references dictionary objects, and a
+ *    dictionary type cannot be reached with LIKE: "references with LIKE or
+ *    STRUCTURE are not allowed for ABAP Dictionary types, only with TYPE".
  */
-function declare(variable: string, parameter: FunctionParameter, kind: SectionKind): string {
-  if (parameter.type) return `DATA ${variable} TYPE ${parameter.type}.`;
-  if (parameter.structure) {
-    return `DATA ${variable} TYPE STANDARD TABLE OF ${parameter.structure} WITH DEFAULT KEY.`;
+function declare(
+  variable: string,
+  parameter: FunctionParameter,
+  kind: SectionKind
+): { line: string; substituted?: string } {
+  if (kind === 'tables') {
+    if (parameter.type) return { line: `DATA ${variable} TYPE ${parameter.type}.` };
+    const row = parameter.structure || parameter.like;
+    if (row) return { line: `DATA ${variable} TYPE STANDARD TABLE OF ${row} WITH DEFAULT KEY.` };
+  } else {
+    if (parameter.structure) {
+      return { line: `DATA ${variable} TYPE STANDARD TABLE OF ${parameter.structure} WITH DEFAULT KEY.` };
+    }
+    const reference = parameter.type || parameter.like;
+    if (reference) {
+      const concrete = concreteType(reference, parameter.name.toUpperCase());
+      return {
+        line: `DATA ${variable} TYPE ${concrete.type}.`,
+        ...(concrete.substituted ? { substituted: concrete.substituted } : {})
+      };
+    }
   }
-  if (parameter.like) return `DATA ${variable} LIKE ${parameter.like}.`;
   throw new CallGenError(
     `Parameter ${parameter.name} (${kind}) has no type in the interface, so nothing can be declared for it. ` +
     'Such a parameter can only be passed from code that already has a matching data object.'
@@ -191,6 +271,7 @@ interface Bound {
 
 interface Shaped {
   declarations: string[];
+  substitutions: Record<string, string>;
   fill: string[];
   results: ResultBinding[];
   variables: Map<string, string>;
@@ -259,6 +340,7 @@ function shape(what: string, signature: CallableSignature, values: Record<string
   const variables = new Map<string, string>();
   const rowBlocks: string[] = [];
   const supplied: string[] = [];
+  const substitutions: Record<string, string> = {};
   let index = 0;
 
   for (const section of sections) {
@@ -275,7 +357,9 @@ function shape(what: string, signature: CallableSignature, values: Record<string
       const variable = variableFor(parameter.name, ++index);
       list.push({ parameter, variable, ...(entry ? { key: entry.key } : {}) });
 
-      declarations.push(declare(variable, parameter, section.kind));
+      const declared = declare(variable, parameter, section.kind);
+      declarations.push(declared.line);
+      if (declared.substituted) substitutions[upper] = declared.substituted;
       if (entry) {
         supplied.push(upper);
         fill.push(`${variable} = ${abapValue(entry.value, upper)}.`);
@@ -283,10 +367,16 @@ function shape(what: string, signature: CallableSignature, values: Record<string
       if (section.kind !== 'importing') {
         results.push({ binding: upper, parameter: upper, kind: section.kind });
         variables.set(upper, variable);
-        // A TABLES parameter is a table for certain, so its rows can be
-        // counted and cut in ABAP. Anything else has to be asked at runtime.
-        const staticTable = section.kind === 'tables' && !!(parameter.structure || parameter.type);
-        rowBlocks.push(...rowLines(upper, variable, maxRows, staticTable));
+        // A TABLES parameter is a table for certain - declare( ) makes one out
+        // of every form the interface can write, TYPE, STRUCTURE and LIKE
+        // alike - so its rows can be counted and cut in ABAP. Nothing else can
+        // be, at compile time or at runtime, so those are counted and capped
+        // in the answer instead.
+        if (section.kind === 'tables') {
+          rowBlocks.push(...rowLines(upper, variable, maxRows));
+        } else {
+          rowBlocks.push(...kindLines(upper, variable));
+        }
       }
     }
     bound.set(section.kind, list);
@@ -318,29 +408,42 @@ function shape(what: string, signature: CallableSignature, values: Record<string
     ];
   };
 
-  return { declarations, fill, results, variables, rowBlocks, exceptions, supplied, block, maxRows };
+  return { declarations, substitutions, fill, results, variables, rowBlocks, exceptions, supplied, block, maxRows };
 }
 
-/** The lines that count the rows of a table result, and cut a TABLES one short. */
-const rowLines = (binding: string, variable: string, maxRows: number, staticTable: boolean): string[] =>
-  staticTable
-    ? [
-      `APPEND VALUE #( name = \`${binding}\` rows = lines( ${variable} ) ) TO lt_mcp_rows.`,
-      `IF lines( ${variable} ) > ${maxRows}.`,
-      `  DELETE ${variable} FROM ${maxRows + 1}.`,
-      'ENDIF.'
-    ]
-    // Whether an exporting parameter is a table is not knowable from its type
-    // name, and lines( ) on something else would not compile. Assigning to a
-    // generically typed field symbol answers it at runtime instead: sy-subrc
-    // says whether it matched. Nothing is cut here - the row cap is applied to
-    // the answer rather than to the data on the way out.
-    : [
-      `ASSIGN ${variable} TO <mcp_tab>.`,
-      'IF sy-subrc = 0.',
-      `  APPEND VALUE #( name = \`${binding}\` rows = lines( <mcp_tab> ) ) TO lt_mcp_rows.`,
-      'ENDIF.'
-    ];
+/**
+ * The lines that count the rows of a TABLES result and cut it short.
+ *
+ * Only a TABLES parameter gets this. Whether an EXPORTING parameter is a table
+ * is not knowable from its type name, and neither way of asking the system at
+ * runtime survives the compiler: lines( ) on something that is not a table is
+ * a syntax error, and so is ASSIGN of one to a field symbol typed ANY TABLE -
+ * "P_OUTPUT is not type-compatible with <MCP_TAB>". It is not needed either:
+ * nothing outside TABLES is cut on the way out, so the length of what arrives
+ * is the true count.
+ */
+const rowLines = (binding: string, variable: string, maxRows: number): string[] => [
+  `APPEND VALUE #( name = \`${binding}\` rows = lines( ${variable} ) ) TO lt_mcp_rows.`,
+  `IF lines( ${variable} ) > ${maxRows}.`,
+  `  DELETE ${variable} FROM ${maxRows + 1}.`,
+  'ENDIF.'
+];
+
+/**
+ * Say whether a result is a table, for the answer to read it as one.
+ *
+ * The payload cannot be trusted to show it: a table is serialised as repeated
+ * children named after its row type, so a one-row table of a named type -
+ * <ET_X><ZMM_ROW>..</ZMM_ROW></ET_X> - is indistinguishable from a structure
+ * with one component. RTTI knows, and describe_by_data takes any data object,
+ * so this compiles where lines( ) and ASSIGN to a table field symbol do not.
+ */
+const kindLines = (binding: string, variable: string): string[] => [
+  `lo_mcp_type = cl_abap_typedescr=>describe_by_data( ${variable} ).`,
+  'IF lo_mcp_type->kind = cl_abap_typedescr=>kind_table.',
+  `  APPEND \`${binding}\` TO lt_mcp_tables.`,
+  'ENDIF.'
+];
 
 /** The declarations every generated call needs at class level. */
 export const CALL_DECLARATIONS: string[] = [
@@ -348,7 +451,8 @@ export const CALL_DECLARATIONS: string[] = [
   '         name TYPE string,',
   '         rows TYPE i,',
   '       END OF ts_mcp_rows.',
-  'TYPES tt_mcp_rows TYPE STANDARD TABLE OF ts_mcp_rows WITH EMPTY KEY.'
+  'TYPES tt_mcp_rows TYPE STANDARD TABLE OF ts_mcp_rows WITH EMPTY KEY.',
+  'TYPES tt_mcp_names TYPE STANDARD TABLE OF string WITH EMPTY KEY.'
 ];
 
 /** The locals the fixed part of the body works with. */
@@ -357,11 +461,12 @@ const fixedLocals = (): string[] => [
   'DATA lv_mcp_exception TYPE string.',
   'DATA lv_mcp_message TYPE string.',
   'DATA lt_mcp_rows TYPE tt_mcp_rows.',
+  'DATA lt_mcp_tables TYPE tt_mcp_names.',
+  'DATA lo_mcp_type TYPE REF TO cl_abap_typedescr.',
   'DATA lt_mcp_bind TYPE abap_trans_srcbind_tab.',
   'DATA lv_mcp_xml TYPE xstring.',
   'DATA lv_mcp_payload TYPE string.',
-  'DATA lo_mcp_error TYPE REF TO cx_root.',
-  'FIELD-SYMBOLS <mcp_tab> TYPE ANY TABLE.'
+  'DATA lo_mcp_error TYPE REF TO cx_root.'
 ];
 
 /**
@@ -398,6 +503,7 @@ const serialise = (results: ResultBinding[], variables: Map<string, string>): st
     ['MCP_EXCEPTION', 'lv_mcp_exception'],
     ['MCP_MESSAGE', 'lv_mcp_message'],
     ['MCP_ROWS', 'lt_mcp_rows'],
+    ['MCP_TABLES', 'lt_mcp_tables'],
     ...results.map(result => [result.binding, variables.get(result.binding) as string])
   ];
   return [
@@ -442,6 +548,7 @@ function assemble(shaped: Shaped, call: string[], options: CallOptions): Generat
     results: shaped.results,
     exceptions: shaped.exceptions,
     supplied: shaped.supplied,
+    ...(Object.keys(shaped.substitutions).length ? { substitutions: shaped.substitutions } : {}),
     rolledBack: options.rollback !== false,
     maxRows: shaped.maxRows
   };
@@ -542,6 +649,26 @@ const rowCounts = (value: unknown): Record<string, number> => {
 };
 
 /**
+ * The rows of something the system says is a table.
+ *
+ * asXML names the row elements after the row type when the table has a named
+ * one, so a table arrives as an object keyed by that name; with one row it is
+ * that row alone, and an empty table is an empty element.
+ */
+const tableRows = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) return value;
+  if (value === '' || value === undefined || value === null) return [];
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 1) {
+      const inner = (value as Record<string, unknown>)[keys[0]];
+      return Array.isArray(inner) ? inner : [inner];
+    }
+  }
+  return [value];
+};
+
+/**
  * Read the payload of a generated call back into an answer.
  *
  * The control bindings are taken out of the values: what the caller asked for
@@ -557,15 +684,32 @@ export function interpretCall(
   const message = asText(payload[CONTROL_BINDINGS.message]);
   const rows = rowCounts(payload[CONTROL_BINDINGS.rows]);
 
+  const isTable = new Set(
+    (Array.isArray(payload[CONTROL_BINDINGS.tables])
+      ? payload[CONTROL_BINDINGS.tables] as unknown[]
+      : [payload[CONTROL_BINDINGS.tables]])
+      .map(name => asText(name).toUpperCase())
+      .filter(name => name.length > 0)
+  );
+
   const values: Record<string, unknown> = {};
   const truncated: string[] = [];
   for (const result of generated.results) {
-    const value = payload[result.binding];
-    if (value === undefined) continue;
+    const raw = payload[result.binding];
+    if (raw === undefined) continue;
+    // A TABLES parameter counted its own rows, and RTTI named every other
+    // result that turned out to be a table - so what the payload made look
+    // like a structure is put back into rows here.
+    const value = rows[result.binding] !== undefined || isTable.has(result.binding)
+      ? tableRows(raw)
+      : raw;
     if (Array.isArray(value)) {
+      // A TABLES parameter was already cut in ABAP and reported its own count;
+      // anything else arrived whole, so what came is what there is.
       const total = rows[result.binding] ?? value.length;
+      rows[result.binding] = total;
       values[result.parameter] = value.slice(0, generated.maxRows);
-      if (total > generated.maxRows || value.length > generated.maxRows) truncated.push(result.parameter);
+      if (total > generated.maxRows) truncated.push(result.parameter);
     } else {
       values[result.parameter] = value;
     }

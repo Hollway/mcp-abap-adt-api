@@ -5,6 +5,7 @@ import {
   interpretCall,
   variableFor,
   checkObjectName,
+  concreteType,
   CallGenError,
   OTHERS_SUBRC
 } from '../lib/callGen';
@@ -169,14 +170,6 @@ describe('buildFunctionCall', () => {
     expect(text).toContain('      CHANGING\n        cv_x = p_cv_x');
   });
 
-  it('declares a LIKE parameter with LIKE', () => {
-    const call = buildFunctionCall(
-      signature({ importing: [{ name: 'IV_D', like: 'sy-datum' }] }),
-      { IV_D: '20260909' }
-    );
-    expect(body(call.code)).toContain('DATA p_iv_d LIKE sy-datum.');
-  });
-
   it('refuses a parameter the interface never typed', () => {
     expect(() => buildFunctionCall(
       signature({ exporting: [{ name: 'EV_ANY' }] }),
@@ -219,7 +212,7 @@ describe('buildFunctionCall', () => {
     expect(text).toContain('lv_mcp_exception = cl_abap_classdescr=>get_class_name( lo_mcp_error ).');
   });
 
-  it('counts and cuts a TABLES result in ABAP, and only counts anything else', () => {
+  it('counts and cuts a TABLES result in ABAP, and leaves anything else alone', () => {
     const call = buildFunctionCall(
       signature({
         tables: [{ name: 'ET_ROWS', structure: 'MARA' }],
@@ -231,7 +224,11 @@ describe('buildFunctionCall', () => {
     const text = body(call.code);
     expect(text).toContain('APPEND VALUE #( name = `ET_ROWS` rows = lines( p_et_rows ) ) TO lt_mcp_rows.');
     expect(text).toContain('DELETE p_et_rows FROM 6.');
-    expect(text).toContain('ASSIGN p_et_other TO <mcp_tab>.');
+    // An exporting parameter cannot be asked whether it is a table: lines( )
+    // on a non-table is a syntax error, and so is ASSIGN of one to a field
+    // symbol typed ANY TABLE. It arrives whole and is capped in the answer.
+    expect(text).not.toContain('p_et_other TO <mcp_tab>');
+    expect(text).not.toContain('lines( p_et_other )');
     expect(text).not.toContain('DELETE p_et_other');
     expect(call.maxRows).toBe(5);
   });
@@ -351,5 +348,187 @@ describe('interpretCall', () => {
   it('says nothing about rows when a table came back whole', () => {
     const outcome = interpretCall({ MCP_SUBRC: '0', ET_ROWS: [{ M: '1' }] }, generated);
     expect(outcome.truncated).toBeUndefined();
+  });
+});
+
+describe('concreteType', () => {
+  it('puts a concrete type in place of a generic one', () => {
+    expect(concreteType('CLIKE', 'INPUT')).toEqual({ type: 'string', substituted: 'CLIKE -> string' });
+    expect(concreteType('any', 'IV_X')).toMatchObject({ type: 'string' });
+    expect(concreteType('XSEQUENCE', 'IV_X')).toMatchObject({ type: 'xstring' });
+    expect(concreteType('NUMERIC', 'IV_X')).toMatchObject({ type: 'decfloat34' });
+    expect(concreteType('OBJECT', 'IO_X')).toMatchObject({ type: 'REF TO object' });
+  });
+
+  it('widens an elementary type with no length, which would otherwise cut the value down', () => {
+    expect(concreteType('C', 'IV_X')).toEqual({ type: 'c LENGTH 255', substituted: 'C -> c LENGTH 255' });
+    expect(concreteType('p', 'IV_X')).toMatchObject({ type: 'p LENGTH 16 DECIMALS 4' });
+  });
+
+  it('leaves a concrete type exactly as the interface wrote it', () => {
+    expect(concreteType('MATNR', 'IV_X')).toEqual({ type: 'MATNR' });
+    expect(concreteType('DFIES-FIELDNAME', 'IV_X')).toEqual({ type: 'DFIES-FIELDNAME' });
+    expect(concreteType('REF TO cl_x', 'IO_X')).toEqual({ type: 'REF TO cl_x' });
+    expect(concreteType('string', 'IV_X')).toEqual({ type: 'string' });
+  });
+
+  it('refuses a generic table type, which says nothing about its rows', () => {
+    expect(() => concreteType('STANDARD TABLE', 'IT_X')).toThrow(/generic table type/);
+    expect(() => concreteType('any  table', 'IT_X')).toThrow(CallGenError);
+  });
+});
+
+describe('declaring a parameter the interface typed awkwardly', () => {
+  it('declares a generic parameter concretely and reports the substitution', () => {
+    const call = buildFunctionCall(
+      signature({
+        name: 'CONVERSION_EXIT_ALPHA_INPUT',
+        importing: [{ name: 'INPUT', type: 'CLIKE', byValue: true }],
+        exporting: [{ name: 'OUTPUT', type: 'CLIKE', byValue: true }]
+      }),
+      { INPUT: '123' }
+    );
+    expect(body(call.code)).toContain('DATA p_input TYPE string.');
+    expect(call.substitutions).toEqual({
+      INPUT: 'CLIKE -> string',
+      OUTPUT: 'CLIKE -> string'
+    });
+  });
+
+  it('makes a TABLES parameter a table of the row the interface names', () => {
+    const call = buildFunctionCall(
+      signature({
+        name: 'DDIF_FIELDINFO_GET',
+        importing: [{ name: 'TABNAME', type: 'DDOBJNAME' }],
+        tables: [
+          { name: 'DFIES_TAB', like: 'DFIES', optional: true },
+          { name: 'FIXED_VALUES', type: 'DDFIXVALUES', optional: true }
+        ]
+      }),
+      { TABNAME: 'T000' }
+    );
+    const text = body(call.code);
+    // LIKE DFIES names the row: a dictionary type cannot be reached with LIKE,
+    // and a TABLES parameter needs the table rather than the structure.
+    expect(text).toContain('DATA p_dfies_tab TYPE STANDARD TABLE OF DFIES WITH DEFAULT KEY.');
+    // TYPE there already names a table type, so it stands as written.
+    expect(text).toContain('DATA p_fixed_values TYPE DDFIXVALUES.');
+    expect(text).not.toContain('LIKE');
+  });
+
+  it('turns a LIKE outside TABLES into TYPE', () => {
+    const call = buildFunctionCall(
+      signature({ importing: [{ name: 'IV_D', like: 'sy-datum' }] }),
+      { IV_D: '20260909' }
+    );
+    expect(body(call.code)).toContain('DATA p_iv_d TYPE sy-datum.');
+  });
+
+  it('says which parameter it cannot declare at all', () => {
+    expect(() => buildFunctionCall(
+      signature({ tables: [{ name: 'IT_ANY' }] }),
+      {}
+    )).toThrow(/IT_ANY \(tables\) has no type/);
+  });
+});
+
+describe('counting the rows of a TABLES parameter', () => {
+  it('counts and cuts one declared with LIKE, the way DDIF_FIELDINFO_GET writes it', () => {
+    const call = buildFunctionCall(
+      signature({ tables: [{ name: 'DFIES_TAB', like: 'DFIES', optional: true }] }),
+      {},
+      { maxRows: 3 }
+    );
+    const text = body(call.code);
+    expect(text).toContain('APPEND VALUE #( name = `DFIES_TAB` rows = lines( p_dfies_tab ) ) TO lt_mcp_rows.');
+    expect(text).toContain('DELETE p_dfies_tab FROM 4.');
+  });
+
+  it('counts every form a TABLES parameter can be declared in', () => {
+    const call = buildFunctionCall(
+      signature({
+        tables: [
+          { name: 'BY_TYPE', type: 'DDFIXVALUES' },
+          { name: 'BY_STRUCTURE', structure: 'MARA' },
+          { name: 'BY_LIKE', like: 'DFIES' }
+        ]
+      }),
+      {}
+    );
+    const text = body(call.code);
+    for (const name of ['p_by_type', 'p_by_structure', 'p_by_like']) {
+      expect(text).toContain(`rows = lines( ${name} )`);
+    }
+  });
+});
+
+describe('telling a table from a structure', () => {
+  const generated = buildFunctionCall(
+    signature({
+      exporting: [{ name: 'ET_ROWS', type: 'ZTT' }, { name: 'ES_HEAD', type: 'ZS_HEAD' }],
+      tables: [{ name: 'DFIES_TAB', like: 'DFIES' }]
+    }),
+    {},
+    { maxRows: 5 }
+  );
+
+  it('asks RTTI about every result that is not a TABLES parameter', () => {
+    const text = body(generated.code);
+    expect(text).toContain('lo_mcp_type = cl_abap_typedescr=>describe_by_data( p_et_rows ).');
+    expect(text).toContain('IF lo_mcp_type->kind = cl_abap_typedescr=>kind_table.');
+    expect(text).toContain('APPEND `ET_ROWS` TO lt_mcp_tables.');
+    expect(text).toContain('( name = `MCP_TABLES` value = REF #( lt_mcp_tables ) )');
+    // A TABLES parameter is known to be one and is counted instead.
+    expect(text).not.toContain('describe_by_data( p_dfies_tab )');
+  });
+
+  it('puts a named row type back into rows', () => {
+    // asXML writes <DFIES_TAB><DFIES>..</DFIES><DFIES>..</DFIES>, which the
+    // reader can only give back as one component holding two values.
+    const outcome = interpretCall(
+      {
+        MCP_SUBRC: '0',
+        MCP_ROWS: [{ NAME: 'DFIES_TAB', ROWS: '19' }],
+        DFIES_TAB: { DFIES: [{ FIELDNAME: 'A' }, { FIELDNAME: 'B' }] }
+      },
+      generated
+    );
+    expect(outcome.values.DFIES_TAB).toEqual([{ FIELDNAME: 'A' }, { FIELDNAME: 'B' }]);
+    expect(outcome.rows).toMatchObject({ DFIES_TAB: 19 });
+    expect(outcome.truncated).toEqual(['DFIES_TAB']);
+  });
+
+  it('reads a one-row table of a named type as a table of one', () => {
+    const outcome = interpretCall(
+      { MCP_SUBRC: '0', MCP_TABLES: ['ET_ROWS'], ET_ROWS: { ZMM_ROW: { MATNR: '1' } } },
+      generated
+    );
+    expect(outcome.values.ET_ROWS).toEqual([{ MATNR: '1' }]);
+    expect(outcome.rows).toMatchObject({ ET_ROWS: 1 });
+  });
+
+  it('reads an empty table as no rows', () => {
+    const outcome = interpretCall(
+      { MCP_SUBRC: '0', MCP_TABLES: ['ET_ROWS'], ET_ROWS: '' },
+      generated
+    );
+    expect(outcome.values.ET_ROWS).toEqual([]);
+    expect(outcome.rows).toMatchObject({ ET_ROWS: 0 });
+  });
+
+  it('leaves a structure a structure when nothing called it a table', () => {
+    const outcome = interpretCall(
+      { MCP_SUBRC: '0', MCP_TABLES: ['ET_ROWS'], ES_HEAD: { WERKS: '1000', MATNR: '1' } },
+      generated
+    );
+    expect(outcome.values.ES_HEAD).toEqual({ WERKS: '1000', MATNR: '1' });
+  });
+
+  it('reads the table list whether it arrived as one name or several', () => {
+    const single = interpretCall(
+      { MCP_SUBRC: '0', MCP_TABLES: 'ET_ROWS', ET_ROWS: { ZMM_ROW: { MATNR: '1' } } },
+      generated
+    );
+    expect(single.values.ET_ROWS).toEqual([{ MATNR: '1' }]);
   });
 });
