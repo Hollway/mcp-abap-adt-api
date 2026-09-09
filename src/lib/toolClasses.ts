@@ -42,6 +42,8 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   // code execution
   'runClass',
   'runSnippet',
+  'callFunction',
+  'callMethod',
   'unitTestRun',
   'runTests',
   // refactorings that write
