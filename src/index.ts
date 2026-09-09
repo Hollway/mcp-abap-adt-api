@@ -45,6 +45,7 @@ import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
+import { ImpactHandlers } from './handlers/ImpactHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
@@ -117,6 +118,7 @@ export class AbapAdtServer extends Server {
     private refactorHandlers: RefactorHandlers;
     private revisionHandlers: RevisionHandlers;
     private classMemberHandlers: ClassMemberHandlers;
+    private impactHandlers: ImpactHandlers;
 
     constructor() {
     super(
@@ -185,6 +187,7 @@ export class AbapAdtServer extends Server {
     this.refactorHandlers = new RefactorHandlers(this.adtClient);
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
     this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
+    this.impactHandlers = new ImpactHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -567,6 +570,9 @@ export class AbapAdtServer extends Server {
             case 'compareRevisions':
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
+            case 'impactOf':
+                result = await this.impactHandlers.handle(toolName, args);
+                break;
             case 'addMethod':
             case 'deleteMethod':
             case 'addAttribute':
@@ -622,6 +628,7 @@ export class AbapAdtServer extends Server {
       { group: 'refactor', tools: this.refactorHandlers.getTools() },
       { group: 'revision', tools: this.revisionHandlers.getTools() },
       { group: 'source', tools: this.classMemberHandlers.getTools() },
+      { group: 'codeAnalysis', tools: this.impactHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }
