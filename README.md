@@ -244,12 +244,16 @@ of a data element comes either from a domain or from a built-in ABAP type, not
 both, and the four field labels are cut to the lengths SAP allows (10/20/40/55)
 with the answer saying which were cut. `setDataElementProperties` and
 `setDomainProperties` change an existing one: the backend PUT replaces the
-whole definition, so anything not passed is kept as the system has it.
+whole definition, so anything not passed is kept as the system has it. They
+take the lock themselves and give it back, and `activate` finishes the job -
+demanding a separate `lock` call made a one-field change a three-call sequence.
 
 Not every release serves these over ADT. On a classic ERP system data elements
 work while domains answer 404 for every path including validation - the tools
 say so instead of looking like a wrong name, and the domain has to be
-maintained in SE11.
+maintained in SE11. On S/4 both work, and the whole cycle - create with fixed
+values, patch the description, patch the values, build a data element on the
+domain - was verified there.
 
 **Working on a package**
 
