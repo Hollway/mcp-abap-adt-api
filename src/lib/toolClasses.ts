@@ -22,6 +22,10 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'createInclude',
   'createAndWrite',
   'createTestInclude',
+  // class members - one lock/write/activate cycle each
+  'addMethod',
+  'deleteMethod',
+  'addAttribute',
   // activation
   'activateObjects',
   'activateByName',
@@ -91,6 +95,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  */
 export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
   'deleteObject',
+  'deleteMethod',
   'transportDelete',
   'transportRelease',
   'gitUnlinkRepo',

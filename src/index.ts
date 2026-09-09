@@ -44,6 +44,7 @@ import { AtcHandlers } from './handlers/AtcHandlers.js';
 import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
+import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
@@ -115,6 +116,7 @@ export class AbapAdtServer extends Server {
     private traceHandlers: TraceHandlers;
     private refactorHandlers: RefactorHandlers;
     private revisionHandlers: RevisionHandlers;
+    private classMemberHandlers: ClassMemberHandlers;
 
     constructor() {
     super(
@@ -182,6 +184,7 @@ export class AbapAdtServer extends Server {
     this.traceHandlers = new TraceHandlers(this.adtClient);
     this.refactorHandlers = new RefactorHandlers(this.adtClient);
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
+    this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -564,6 +567,11 @@ export class AbapAdtServer extends Server {
             case 'compareRevisions':
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
+            case 'addMethod':
+            case 'deleteMethod':
+            case 'addAttribute':
+                result = await this.classMemberHandlers.handle(toolName, args);
+                break;
             case 'healthcheck':
                 result = await this.healthcheck();
                 break;
@@ -613,6 +621,7 @@ export class AbapAdtServer extends Server {
       { group: 'traces', tools: this.traceHandlers.getTools() },
       { group: 'refactor', tools: this.refactorHandlers.getTools() },
       { group: 'revision', tools: this.revisionHandlers.getTools() },
+      { group: 'source', tools: this.classMemberHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }
