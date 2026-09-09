@@ -69,7 +69,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       },
       {
         name: 'inactiveObjects',
-        description: 'Get list of inactive objects',
+        description: 'The objects that are written but not activated. Read in the session this server does its writing in, because the sessions disagree: a read from elsewhere can still report an object as inactive after it has been activated. Use it as the proof that an edit went live - an empty list for your object is that proof.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -221,7 +221,10 @@ export class ObjectManagementHandlers extends BaseHandler {
     objectUrl?: string
   ): Promise<ObjectRef[] | undefined> {
     try {
-      const after: InactiveObjectRecord[] = await this.readClient.inactiveObjects();
+      // Deliberately the stateful client - see handleInactiveObjects: the two
+      // sessions answer differently, and only the one that did the editing
+      // answers about it.
+      const after: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
       return selectInactive(after, objectName, objectUrl)
         .map(e => ({ name: e['adtcore:name'], type: e['adtcore:type'] }));
     } catch (error: any) {
@@ -280,10 +283,22 @@ export class ObjectManagementHandlers extends BaseHandler {
     }
   }
 
+  /**
+   * The inactive list, read in the session that does the editing.
+   *
+   * This is a read, and every other read here goes through the stateless
+   * clone - but this one must not. The two sessions disagree: after a text
+   * element write and its activation, the writing session reports nothing
+   * inactive while the clone kept reporting the program as inactive, three
+   * consecutive reads apart and with the object provably active (it deleted
+   * without complaint, and the activation verified itself as clean). Answering
+   * from the clone turns a finished edit into "still inactive", which is the
+   * one thing this list is asked for.
+   */
   async handleInactiveObjects(args: any): Promise<any> {
     const startTime = performance.now();
     try {
-      const result: InactiveObjectRecord[] = await this.readClient.inactiveObjects();
+      const result: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
       this.trackRequest(startTime, true);
       return {
         content: [{
