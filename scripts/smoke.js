@@ -26,6 +26,9 @@ if (missing.length) {
 const CLASS_NAME = (process.env.SMOKE_CLASS || 'CL_SALV_TABLE').toUpperCase();
 const STRUCTURE_NAME = (process.env.SMOKE_STRUCTURE || 'T000').toUpperCase();
 const PACKAGE_NAME = (process.env.SMOKE_PACKAGE || 'SABAPDEMOS').toUpperCase();
+// An object that carries a source enhancement. Find one on another system with
+// SELECT ENHNAME, PROGRAMNAME FROM ENHINCINX WHERE VERSION = 'A' AND ENHMODE = 'S'.
+const ENHANCED_CLASS = (process.env.SMOKE_ENHANCED || 'CL_FEBAN_ALV_GRID').toLowerCase();
 const CLASS_URL = `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}/source/main`;
 const server = path.resolve(__dirname, '..', 'dist', 'index.js');
 
@@ -250,6 +253,23 @@ const check = (label, condition, detail) => {
     (texts.payload.status === 'success' && Array.isArray(texts.payload.textElements)) ||
     (texts.isError === true && /does not serve text elements/.test(JSON.stringify(texts.payload))),
     texts.payload);
+
+  // Enhancements. The answer is an object with an implementations array, and
+  // most objects have none - so this passes either way and only fails if the
+  // endpoint itself is gone.
+  const enhanced = await call('objectEnhancements', {
+    sourceMainPath: `/sap/bc/adt/oo/classes/${ENHANCED_CLASS}/source/main`
+  });
+  check('objectEnhancements answers with the implementations of an object',
+    enhanced.payload.status === 'success' && Array.isArray(enhanced.payload.implementations),
+    enhanced.payload);
+  if (enhanced.payload.count > 0) {
+    const implementation = enhanced.payload.implementations[0];
+    check('an implementation names itself and where it is injected',
+      !!implementation.name && (implementation.elements || []).length > 0 &&
+      typeof implementation.elements[0].position?.startLine === 'number',
+      implementation);
+  }
 
   // ATC. The whole sequence, because the run needs a worklist id where the
   // library asks for a check variant - a variant name there answers 500.

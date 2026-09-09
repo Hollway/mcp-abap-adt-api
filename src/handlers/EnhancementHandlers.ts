@@ -74,7 +74,11 @@ export class EnhancementHandlers extends BaseHandler {
             implementations,
             ...(implementations.length === 0
               ? {
-                note: 'No enhancement implementations came back. For a program include that can also mean the wrong context: pass contextUri with the main program the include belongs to.'
+                note: 'No enhancement implementations came back, which for most objects is simply the truth. ' +
+                  'For a program include it can also mean the wrong context: pass contextUri with the main ' +
+                  'program the include belongs to. To find objects that do carry one, ask runQuery for ' +
+                  "SELECT ENHNAME, PROGRAMNAME, FULL_NAME FROM ENHINCINX WHERE VERSION = 'A' AND ENHMODE = 'S'" +
+                  ' - FULL_NAME says which class, method or form is enhanced.'
               }
               : {})
           })
