@@ -1,6 +1,37 @@
+# Secrets and local configuration - never commit these
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+id_rsa*
+id_ed25519*
+.netrc
+.npmrc
+secrets.json
+credentials.json
+*.credentials
+auth.json
+
+# Build output and dependencies
 dist
+build
 node_modules
-package-lock.json
-*.code-workspace
+
+# Test and tooling output
 coverage
+*.log
+npm-debug.log*
+.jest-cache
+
+# Editor and OS files
+*.code-workspace
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+desktop.ini
