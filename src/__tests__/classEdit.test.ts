@@ -192,6 +192,11 @@ describe('methodImplementation', () => {
       .toEqual(['  METHOD calc.', '    rv_sum = iv_a + iv_b.', '', '    RETURN.', '  ENDMETHOD.']);
   });
 
+  it("keeps the caller's own indentation", () => {
+    expect(methodImplementation({ name: 'X', implementation: ['IF a = 1.', '  b = 2.', 'ENDIF.'] }, '  '))
+      .toEqual(['  METHOD x.', '    IF a = 1.', '      b = 2.', '    ENDIF.', '  ENDMETHOD.']);
+  });
+
   it('leaves a marker when there is no body', () => {
     expect(methodImplementation({ name: 'TODO_LATER' }, '  '))
       .toEqual(['  METHOD todo_later.', '    " TODO: implement todo_later', '  ENDMETHOD.']);

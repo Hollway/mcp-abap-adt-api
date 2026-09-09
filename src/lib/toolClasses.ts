@@ -26,6 +26,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'addMethod',
   'deleteMethod',
   'addAttribute',
+  'createFunctionModule',
   // activation
   'activateObjects',
   'activateByName',

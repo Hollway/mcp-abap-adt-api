@@ -46,6 +46,7 @@ import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
 import { ImpactHandlers } from './handlers/ImpactHandlers.js';
+import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
@@ -119,6 +120,7 @@ export class AbapAdtServer extends Server {
     private revisionHandlers: RevisionHandlers;
     private classMemberHandlers: ClassMemberHandlers;
     private impactHandlers: ImpactHandlers;
+    private functionModuleHandlers: FunctionModuleHandlers;
 
     constructor() {
     super(
@@ -188,6 +190,7 @@ export class AbapAdtServer extends Server {
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
     this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
     this.impactHandlers = new ImpactHandlers(this.adtClient);
+    this.functionModuleHandlers = new FunctionModuleHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -570,6 +573,11 @@ export class AbapAdtServer extends Server {
             case 'compareRevisions':
                 result = await this.revisionHandlers.handle(toolName, args);
                 break;
+            case 'getFunctionModule':
+            case 'listFunctionGroup':
+            case 'createFunctionModule':
+                result = await this.functionModuleHandlers.handle(toolName, args);
+                break;
             case 'impactOf':
                 result = await this.impactHandlers.handle(toolName, args);
                 break;
@@ -629,6 +637,7 @@ export class AbapAdtServer extends Server {
       { group: 'revision', tools: this.revisionHandlers.getTools() },
       { group: 'source', tools: this.classMemberHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.impactHandlers.getTools() },
+      { group: 'registration', tools: this.functionModuleHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }

@@ -218,8 +218,10 @@ export function methodDeclaration(spec: MethodSpec, indent: string): string[] {
 /** The METHOD ... ENDMETHOD block, with the body indented one step in. */
 export function methodImplementation(spec: MethodSpec, indent: string): string[] {
   const name = String(spec.name || '').trim();
+  // Indented one step in, keeping the caller's own indentation: their nesting
+  // is information, and flattening it turns an IF block into a list.
   const body = (spec.implementation || []).length
-    ? spec.implementation!.map(line => (line.trim() === '' ? '' : `${indent}  ${line.replace(/^\s+/, '')}`))
+    ? spec.implementation!.map(line => (line.trim() === '' ? '' : `${indent}  ${line}`))
     : [`${indent}  " TODO: implement ${name.toLowerCase()}`];
   return [`${indent}METHOD ${name.toLowerCase()}.`, ...body, `${indent}ENDMETHOD.`];
 }
