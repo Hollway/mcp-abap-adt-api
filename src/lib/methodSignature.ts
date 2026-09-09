@@ -154,6 +154,12 @@ interface Declaration {
   name: string;
 }
 
+/** The name in CLASS <name> DEFINITION. */
+export const classNameOf = (source: string): string | undefined => {
+  const match = /^\s*class\s+([\w/]+)\s+definition/im.exec(String(source ?? ''));
+  return match ? match[1].toUpperCase() : undefined;
+};
+
 /** Every method declared in the definition part, with the text that declares it. */
 function declarations(source: string): Declaration[] {
   const layout = readClassLayout(source);
@@ -193,9 +199,92 @@ function declarations(source: string): Declaration[] {
   return found;
 }
 
+/**
+ * Types the class declares itself.
+ *
+ * A parameter typed with one of these reads as a bare name in the source -
+ * CHANGING ct_stawn TYPE tt_stawn - and that name means nothing anywhere else:
+ * a snippet declaring DATA ... TYPE tt_stawn is refused with "type TT_STAWN is
+ * unknown". Qualified as ZCL_MM=>TT_STAWN it resolves, which is why they are
+ * collected here.
+ */
+export function listTypes(source: string): string[] {
+  const layout = readClassLayout(source);
+  const names = new Set<string>();
+  // How deep inside a BEGIN OF ... END OF the reader is. The components in
+  // there are not types, and taking them for types would be worse than
+  // missing one: a component called MATNR would turn every parameter typed
+  // MATNR into ZCL_X=>MATNR, which does not exist. The count lives out here
+  // because the block can be one statement per line rather than one chain.
+  let inStructure = 0;
+
+  for (const statement of definitionStatements(layout)) {
+    const lines: string[] = [];
+    for (let line = statement.start; line <= statement.end; line++) {
+      lines.push(code(layout.lines[line - 1]).trim());
+    }
+    const text = lines.join(' ').replace(/\s+/g, ' ').trim();
+    const head = /^types\s*:?\s*/i.exec(text);
+    if (!head) continue;
+
+    const body = text.slice(head[0].length).replace(/\.$/, '');
+    for (const entry of chainEntries(body)) {
+      // BEGIN OF names the structure; END OF closes one already collected.
+      const begin = /^begin\s+of\s+([\w/]+)/i.exec(entry);
+      if (begin) {
+        if (inStructure === 0) names.add(begin[1].toUpperCase());
+        inStructure++;
+        continue;
+      }
+      if (/^end\s+of\b/i.test(entry)) {
+        inStructure = Math.max(0, inStructure - 1);
+        continue;
+      }
+      if (inStructure > 0) continue;
+      const plain = /^([\w/]+)/.exec(entry);
+      if (plain) names.add(plain[1].toUpperCase());
+    }
+  }
+  return [...names];
+}
+
 /** The methods a class declares, without their parameters. */
 export const listMethods = (source: string): MethodEntry[] =>
   declarations(source).map(({ name, isStatic, visibility }) => ({ name, isStatic, visibility }));
+
+/** Every name-shaped token of a type expression. */
+const NAME_TOKEN = /[A-Za-z_/][A-Za-z0-9_/]*/g;
+
+/**
+ * A parameter type as it reads from outside the class.
+ *
+ * The whole type expression is walked rather than matched as a bare name: a
+ * parameter can be typed TYPE STANDARD TABLE OF ts_row or TYPE REF TO
+ * ty_handle, and the name that needs qualifying sits inside it.
+ */
+export function qualifyTypes(
+  parameter: FunctionParameter,
+  owner: string | undefined,
+  local: string[]
+): FunctionParameter {
+  if (!owner || local.length === 0) return parameter;
+  const rewrite = (text: string): string =>
+    text.replace(NAME_TOKEN, (token, offset: number) => {
+      if (!local.some(name => name.toUpperCase() === token.toUpperCase())) return token;
+      // Leave a name that is already reached through something else alone:
+      // zcl_other=>ts_row and zif_x~ts_row are not this class's to qualify.
+      const before = text.slice(0, offset);
+      return before.endsWith('=>') || before.endsWith('~')
+        ? token
+        : `${owner.toLowerCase()}=>${token}`;
+    });
+  return {
+    ...parameter,
+    ...(parameter.type ? { type: rewrite(parameter.type) } : {}),
+    ...(parameter.like ? { like: rewrite(parameter.like) } : {}),
+    ...(parameter.structure ? { structure: rewrite(parameter.structure) } : {})
+  };
+}
 
 /**
  * The signature of one method of a class.
@@ -217,15 +306,19 @@ export function parseMethodSignature(source: string, methodName: string): Method
   }
 
   const parts = sections(declaration.entry);
-  const returning = parameters(parts.RETURNING)[0];
+  const owner = classNameOf(source);
+  const local = owner ? listTypes(source) : [];
+  const qualify = (list: FunctionParameter[]): FunctionParameter[] =>
+    list.map(parameter => qualifyTypes(parameter, owner, local));
+  const returning = qualify(parameters(parts.RETURNING))[0];
 
   return {
     name: declaration.name,
     isStatic: declaration.isStatic,
     ...(declaration.visibility ? { visibility: declaration.visibility } : {}),
-    importing: parameters(parts.IMPORTING),
-    exporting: parameters(parts.EXPORTING),
-    changing: parameters(parts.CHANGING),
+    importing: qualify(parameters(parts.IMPORTING)),
+    exporting: qualify(parameters(parts.EXPORTING)),
+    changing: qualify(parameters(parts.CHANGING)),
     ...(returning ? { returning } : {}),
     exceptions: exceptionNames(parts.EXCEPTIONS),
     raising: exceptionNames(parts.RAISING),

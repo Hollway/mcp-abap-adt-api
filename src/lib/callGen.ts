@@ -170,9 +170,15 @@ function componentList(record: Record<string, unknown>, path: string): string {
  * one is put in its place and the substitution is reported, because it is not
  * what the interface asked for.
  *
- * The unspecified elementary types are substituted too, and for a worse
+ * The unspecified character types are substituted too, and for a worse
  * reason: DATA x TYPE c compiles and means C(1), so a three-character value
  * passed into it would be quietly cut down to one.
+ *
+ * TYPE p is deliberately left alone. Widening it needs a guess about the
+ * decimals, and the guess is wrong either way: DECIMALS 4 made
+ * CL_ABAP_TSTMP=>ADD refuse a timestamp as "parameter TSTMP has an invalid
+ * type", DECIMALS 0 would silently drop the fraction of a quantity. ABAP own
+ * default - P(8) DECIMALS 0 - is at least the documented one.
  */
 const GENERIC_TYPES: Record<string, string> = {
   any: 'string',
@@ -185,8 +191,7 @@ const GENERIC_TYPES: Record<string, string> = {
   object: 'REF TO object',
   c: 'c LENGTH 255',
   n: 'n LENGTH 255',
-  x: 'x LENGTH 255',
-  p: 'p LENGTH 16 DECIMALS 4'
+  x: 'x LENGTH 255'
 };
 
 /** Generic table types: nothing says what a row of one looks like. */
@@ -634,6 +639,19 @@ export interface CallOutcome {
 const asText = (value: unknown): string =>
   typeof value === 'string' ? value.trim() : value === undefined || value === null ? '' : String(value);
 
+/**
+ * The name of an exception class, without the prefix RTTI puts on it.
+ *
+ * cl_abap_classdescr=>get_class_name answers with the absolute type name -
+ * \CLASS=CX_SY_ZERODIVIDE - and only the class name is of any use.
+ */
+const exceptionClassName = (text: string): string => {
+  // The absolute name is a prefix, an equals sign and the class name, and a
+  // class name never carries one - so the tail is the name, prefix or not.
+  const parts = text.split('=');
+  return parts[parts.length - 1].trim();
+};
+
 /** The MCP_ROWS table, whichever case the serialiser wrote its components in. */
 const rowCounts = (value: unknown): Record<string, number> => {
   const counts: Record<string, number> = {};
@@ -680,7 +698,7 @@ export function interpretCall(
   generated: GeneratedCall
 ): CallOutcome {
   const subrc = Number.parseInt(asText(payload[CONTROL_BINDINGS.subrc]), 10) || 0;
-  const exceptionClass = asText(payload[CONTROL_BINDINGS.exception]);
+  const exceptionClass = exceptionClassName(asText(payload[CONTROL_BINDINGS.exception]));
   const message = asText(payload[CONTROL_BINDINGS.message]);
   const rows = rowCounts(payload[CONTROL_BINDINGS.rows]);
 

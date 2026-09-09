@@ -1,4 +1,10 @@
-import { parseMethodSignature, listMethods, MethodSignatureError } from '../lib/methodSignature';
+import {
+  parseMethodSignature,
+  listMethods,
+  listTypes,
+  classNameOf,
+  MethodSignatureError
+} from '../lib/methodSignature';
 
 const classSource = (...definition: string[]) => [
   'CLASS zcl_mm DEFINITION',
@@ -201,5 +207,95 @@ describe('listMethods', () => {
 
   it('lists nothing for a class that declares nothing', () => {
     expect(listMethods(classSource())).toEqual([]);
+  });
+});
+
+describe('listTypes', () => {
+  const source = (...definition: string[]) => [
+    'CLASS zcl_mm DEFINITION PUBLIC FINAL CREATE PUBLIC .',
+    '  PUBLIC SECTION.',
+    ...definition.map(line => `    ${line}`),
+    'ENDCLASS.',
+    'CLASS zcl_mm IMPLEMENTATION.',
+    'ENDCLASS.'
+  ].join('\n');
+
+  it('lists a table type and a plain one', () => {
+    expect(listTypes(source(
+      'TYPES tt_stawn TYPE STANDARD TABLE OF stawn WITH DEFAULT KEY.',
+      'TYPES ty_flag TYPE c LENGTH 1.'
+    ))).toEqual(['TT_STAWN', 'TY_FLAG']);
+  });
+
+  it('lists a structure by its name and not by its components', () => {
+    // A component called MATNR taken for a type would turn every parameter
+    // typed MATNR into ZCL_MM=>MATNR, which does not exist.
+    expect(listTypes(source(
+      'TYPES: BEGIN OF ts_row,',
+      '         matnr TYPE matnr,',
+      '         werks TYPE werks_d,',
+      '       END OF ts_row.',
+      'TYPES tt_row TYPE STANDARD TABLE OF ts_row WITH EMPTY KEY.'
+    ))).toEqual(['TS_ROW', 'TT_ROW']);
+  });
+
+  it('reads a structure declared one statement per line', () => {
+    expect(listTypes(source(
+      'TYPES BEGIN OF ts_row.',
+      'TYPES   matnr TYPE matnr.',
+      'TYPES END OF ts_row.',
+      'TYPES ty_x TYPE i.'
+    ))).toEqual(['TS_ROW', 'TY_X']);
+  });
+
+  it('lists a chain of types', () => {
+    expect(listTypes(source('TYPES: ty_a TYPE i, ty_b TYPE c LENGTH 2, ty_c TYPE string.')))
+      .toEqual(['TY_A', 'TY_B', 'TY_C']);
+  });
+
+  it('lists nothing when the class declares no types', () => {
+    expect(listTypes(source('CLASS-METHODS m IMPORTING iv_a TYPE c.'))).toEqual([]);
+  });
+});
+
+describe('qualifying a type the class declares itself', () => {
+  const withLocalType = [
+    'CLASS zcl_mm DEFINITION PUBLIC FINAL CREATE PUBLIC .',
+    '  PUBLIC SECTION.',
+    '    TYPES tt_stawn TYPE STANDARD TABLE OF stawn WITH DEFAULT KEY.',
+    '    TYPES: BEGIN OF ts_row,',
+    '             matnr TYPE matnr,',
+    '           END OF ts_row.',
+    '    CLASS-METHODS get_stawn CHANGING ct_stawn TYPE tt_stawn.',
+    '    CLASS-METHODS by_row IMPORTING it_rows TYPE STANDARD TABLE OF ts_row',
+    '                                   iv_matnr TYPE matnr.',
+    '    CLASS-METHODS elsewhere IMPORTING is_row TYPE zcl_other=>ts_row.',
+    'ENDCLASS.',
+    'CLASS zcl_mm IMPLEMENTATION.',
+    'ENDCLASS.'
+  ].join('\n');
+
+  it('qualifies a bare local type with the class that declares it', () => {
+    // DATA ... TYPE tt_stawn is refused with "type TT_STAWN is unknown".
+    expect(parseMethodSignature(withLocalType, 'GET_STAWN').changing).toEqual([
+      { name: 'CT_STAWN', type: 'zcl_mm=>tt_stawn' }
+    ]);
+  });
+
+  it('qualifies a local type inside a composite type expression', () => {
+    const importing = parseMethodSignature(withLocalType, 'BY_ROW').importing;
+    expect(importing[0].type).toBe('STANDARD TABLE OF zcl_mm=>ts_row');
+    // A dictionary type is left alone, even when a component shares its name.
+    expect(importing[1].type).toBe('matnr');
+  });
+
+  it('leaves a type that is already reached through another class alone', () => {
+    expect(parseMethodSignature(withLocalType, 'ELSEWHERE').importing[0].type)
+      .toBe('zcl_other=>ts_row');
+  });
+
+  it('reads the class name from the definition', () => {
+    expect(classNameOf(withLocalType)).toBe('ZCL_MM');
+    expect(classNameOf('nothing here')).toBeUndefined();
   });
 });

@@ -360,9 +360,17 @@ describe('concreteType', () => {
     expect(concreteType('OBJECT', 'IO_X')).toMatchObject({ type: 'REF TO object' });
   });
 
-  it('widens an elementary type with no length, which would otherwise cut the value down', () => {
+  it('widens a character type with no length, which would otherwise cut the value down', () => {
     expect(concreteType('C', 'IV_X')).toEqual({ type: 'c LENGTH 255', substituted: 'C -> c LENGTH 255' });
-    expect(concreteType('p', 'IV_X')).toMatchObject({ type: 'p LENGTH 16 DECIMALS 4' });
+    expect(concreteType('n', 'IV_X')).toMatchObject({ type: 'n LENGTH 255' });
+    expect(concreteType('x', 'IV_X')).toMatchObject({ type: 'x LENGTH 255' });
+  });
+
+  it('leaves TYPE p alone, because widening it needs a guess about the decimals', () => {
+    // DECIMALS 4 made CL_ABAP_TSTMP=>ADD refuse a timestamp as an invalid
+    // type; DECIMALS 0 would silently drop the fraction of a quantity. ABAP
+    // own default is at least the documented one.
+    expect(concreteType('P', 'IV_X')).toEqual({ type: 'P' });
   });
 
   it('leaves a concrete type exactly as the interface wrote it', () => {
