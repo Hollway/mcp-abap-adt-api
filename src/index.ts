@@ -49,6 +49,7 @@ import { ImpactHandlers } from './handlers/ImpactHandlers.js';
 import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { CallHandlers } from './handlers/CallHandlers.js';
+import { TableHandlers } from './handlers/TableHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
@@ -125,6 +126,7 @@ export class AbapAdtServer extends Server {
     private functionModuleHandlers: FunctionModuleHandlers;
     private snippetHandlers: SnippetHandlers;
     private callHandlers: CallHandlers;
+    private tableHandlers: TableHandlers;
 
     constructor() {
     super(
@@ -197,6 +199,7 @@ export class AbapAdtServer extends Server {
     this.functionModuleHandlers = new FunctionModuleHandlers(this.adtClient);
     this.snippetHandlers = new SnippetHandlers(this.adtClient);
     this.callHandlers = new CallHandlers(this.adtClient);
+    this.tableHandlers = new TableHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -586,6 +589,11 @@ export class AbapAdtServer extends Server {
             case 'callMethod':
                 result = await this.callHandlers.handle(toolName, args);
                 break;
+            case 'tableFields':
+            case 'tableIndexes':
+            case 'tableKeys':
+                result = await this.tableHandlers.handle(toolName, args);
+                break;
             case 'getFunctionModule':
             case 'listFunctionGroup':
             case 'createFunctionModule':
@@ -653,6 +661,7 @@ export class AbapAdtServer extends Server {
       { group: 'registration', tools: this.functionModuleHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.callHandlers.getTools() },
+      { group: 'ddic', tools: this.tableHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }
