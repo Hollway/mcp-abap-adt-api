@@ -600,6 +600,7 @@ export class AbapAdtServer extends Server {
                 result = await this.functionModuleHandlers.handle(toolName, args);
                 break;
             case 'impactOf':
+            case 'abapPath':
                 result = await this.impactHandlers.handle(toolName, args);
                 break;
             case 'addMethod':

@@ -117,7 +117,7 @@ const check = (label, condition, detail) => {
                       'getStructureSource', 'createStructure',
                       'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
                       'changePackagePreview', 'rapGenIsAvailable',
-                      'compareRevisions', 'impactOf', 'addMethod', 'deleteMethod', 'addAttribute',
+                      'compareRevisions', 'impactOf', 'abapPath', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
                       'runSnippet', 'callFunction', 'callMethod',
                       'tableFields', 'tableIndexes', 'tableKeys']) {
@@ -503,6 +503,37 @@ const check = (label, condition, detail) => {
   check('impactOf asks what to check',
     impactNothing.isError === true && /Pass objectName/.test(JSON.stringify(impactNothing.payload)),
     impactNothing.payload);
+
+  // Snippets: only a live backend can prove usageReferenceSnippets round-trips
+  // real content for a real objectIdentifier.
+  const impactSnippets = await call('impactOf', {
+    objectName: CLASS_NAME, maxObjects: 1, maxPlacesPerObject: 1, snippets: true
+  });
+  check(`impactOf(snippets=true) fetches a real source snippet for a use of ${CLASS_NAME}`,
+    impactSnippets.payload.status === 'success' && impactSnippets.payload.snippetsFetched > 0,
+    impactSnippets.payload);
+  const snippetPlace = ((impactSnippets.payload.usedBy || [])[0] || {}).places || [];
+  check('impactOf(snippets=true) attaches the snippet to the place it belongs to, and hides the correlation id',
+    Array.isArray(snippetPlace[0] && snippetPlace[0].snippets) && snippetPlace[0].snippets.length > 0 &&
+    !('objectIdentifier' in (snippetPlace[0] || {})),
+    impactSnippets.payload);
+
+  // abapPath: reuse a caller impactOf just reported, so the check needs no
+  // object name guessed in advance and stays correct on any system.
+  const realCaller = (impact.payload.usedBy || []).find(o => o.objectUrl);
+  if (realCaller) {
+    const path = await call('abapPath', { toName: CLASS_NAME, fromUrl: realCaller.objectUrl });
+    check(`abapPath finds the one-hop path from ${realCaller.name}, a caller impactOf just reported, to ${CLASS_NAME}`,
+      path.payload.found === true && path.payload.hops === 1,
+      path.payload);
+  } else {
+    check('abapPath live check skipped: impactOf reported no caller with a URL to use', true);
+  }
+
+  const pathMissingTarget = await call('abapPath', { fromName: CLASS_NAME });
+  check('abapPath asks for the target when toName/toUrl are both missing',
+    pathMissingTarget.isError === true && /What is the target object/.test(JSON.stringify(pathMissingTarget.payload)),
+    pathMissingTarget.payload);
 
   // Function modules by name alone, and the group they live in.
   const fm = await call('getFunctionModule', { name: FUNCTION_MODULE });

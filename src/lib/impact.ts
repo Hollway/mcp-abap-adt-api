@@ -30,6 +30,8 @@ export interface ImpactPlace {
   kind: string;
   /** From a test include rather than productive code. */
   test?: boolean;
+  /** The row this place came from, kept only to look up its source snippet. */
+  objectIdentifier?: string;
 }
 
 export interface ImpactObject {
@@ -249,7 +251,8 @@ export function rollUpUsages(rows: UsageRow[], options: ImpactOptions = {}): Imp
     entry.places.push({
       name: placeName.toUpperCase(),
       kind,
-      ...(isTestUsage(row) ? { test: true } : {})
+      ...(isTestUsage(row) ? { test: true } : {}),
+      ...(row.objectIdentifier ? { objectIdentifier: row.objectIdentifier } : {})
     });
   }
 

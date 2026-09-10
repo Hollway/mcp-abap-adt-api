@@ -8,6 +8,37 @@ actually does — not what its documentation implies.
 The versions here were never published to npm: `package.json` stays on the
 upstream `0.1.1`, and the numbers below are the history of this fork.
 
+## [0.8.0] — a call graph over usageReferences
+
+Tools 176 → **177**, tests 635 → **643** in 39 suites. Read-only smoke run: 146
+checks.
+
+### A path between two objects
+
+- **`abapPath`** answers whether one object's code reaches another, and
+  through what: breadth-first over `usageReferences`, walking backwards from
+  the target through its callers until it reaches the start or runs out of
+  budget (`maxDepth`, default 8; `maxNodes`, default 300). The first path
+  found is the shortest one, because BFS visits every object at distance N
+  before any at distance N+1. Each step in the answer carries the places
+  inside it that call the next one — the same `places` `impactOf` already
+  reports, just followed as a chain instead of rolled up one level. Pure ADT
+  data, no ABAP parsing: a call made only dynamically (`CALL METHOD (name)`)
+  is invisible to it, exactly as it is to `usageReferences` itself.
+- Two objects that turn out to be the same one answer instantly, with no
+  backend call at all.
+
+### `impactOf` fetches its own snippets
+
+- **`snippets`** on `impactOf` fetches the source of the places actually
+  listed, in the same call — one more request to `usageReferenceSnippets`,
+  scoped to what depth 1 shows rather than to the raw backend answer, which
+  for a widely used class is the difference between a handful of snippets and
+  hundreds. Indirect (`depth=2`) places never get one.
+- The correlation between a place and its snippet never leaves this call:
+  `objectIdentifier` matches a place to its snippet internally and is
+  stripped from every answer, with or without `snippets` set.
+
 ## [0.7.0] — calling existing code, and the dictionary in full
 
 Tools 171 → **176**, tests 457 → **635** in 39 suites. Read-only smoke run: 141

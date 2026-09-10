@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 176 tools, read-only guardrails and 635 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 177 tools, read-only guardrails and 643 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -21,7 +21,7 @@ The server is not published to a package registry: clone the repository, build i
 - **Calling what is there**: `callFunction` takes a function module name and values, reads its signature, generates the call and runs it - the answer carries the exporting, changing and tables parameters by name, `sy-subrc` turned back into the name of the classic exception it stood for, and a class-based exception with its text. `callMethod` does the same for a static method, whose parameters `classComponents` does not report at all. Both execute code, and both end in `ROLLBACK WORK` unless `commit` is set.
 - **The dictionary, read whole**: `tableFields` answers a table with its includes spliced in where they sit - for `EKPO` that is 702 fields rather than the 307 its own definition lists - each with its data element, domain, type, length, check table, unit or currency field, conversion exit and text. `tableIndexes` and `tableKeys` answer the secondary indexes and the foreign keys with the fields they are built on. All three read dictionary tables and execute nothing.
 - **History**: `revisions` reads the version history by name (the "version" a revision carries is the transport request; the number is the `revision` field), and `compareRevisions` diffs two of them - or the active version against the inactive one, which shows an edit that is written but not activated.
-- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a flat list that is really a tree - on a widely used class it runs to hundreds of rows and past the response cap.
+- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a flat list that is really a tree - on a widely used class it runs to hundreds of rows and past the response cap. `snippets` fetches the source of the places actually listed, in the same call. `abapPath` walks that same data as a chain instead of a roll-up, breadth-first from the target back through its callers, to answer whether and how one object's code reaches another.
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.

@@ -384,3 +384,141 @@ describe('impactOf', () => {
     expect(result.indirect).toEqual([]);
   });
 });
+
+describe('impactOf snippets', () => {
+  const ROWS_ONE_OBJECT = [
+    {
+      uri: '/sap/bc/adt/oo/classes/zcl_app_order',
+      'adtcore:name': 'ZCL_APP_ORDER',
+      'adtcore:type': 'CLAS/OC',
+      packageRef: { 'adtcore:name': 'ZAPP' }
+    },
+    {
+      uri: '/sap/bc/adt/oo/classes/zcl_app_order/source/main#type=CLAS%2FOM;name=CHECK',
+      parentUri: '/sap/bc/adt/oo/classes/zcl_app_order',
+      usageInformation: 'gradeDirect,includeProductive',
+      objectIdentifier: 'id-check',
+      'adtcore:name': 'CHECK',
+      'adtcore:type': 'CLAS/OM',
+      packageRef: { 'adtcore:name': 'ZAPP' }
+    },
+    {
+      uri: '/sap/bc/adt/oo/classes/zcl_app_order/source/main#type=CLAS%2FOM;name=SAVE',
+      parentUri: '/sap/bc/adt/oo/classes/zcl_app_order',
+      usageInformation: 'gradeDirect,includeProductive',
+      objectIdentifier: 'id-save',
+      'adtcore:name': 'SAVE',
+      'adtcore:type': 'CLAS/OM',
+      packageRef: { 'adtcore:name': 'ZAPP' }
+    }
+  ];
+
+  it('fetches a snippet only for the places actually listed, and drops the correlation id', async () => {
+    const snippetCalls: any[] = [];
+    const { handler } = handlers({
+      usageReferences: async () => ROWS_ONE_OBJECT,
+      usageReferenceSnippets: async (refs: any[]) => {
+        snippetCalls.push(refs);
+        return refs.map(r => ({
+          objectIdentifier: r.objectIdentifier,
+          snippets: [{ uri: { uri: r.uri }, matches: '1', content: `snippet for ${r.objectIdentifier}`, description: '' }]
+        }));
+      }
+    });
+    const result = answer(await handler.handleImpactOf({ objectName: 'ZCL_APP_RETURN', snippets: true }));
+    expect(snippetCalls[0].map((r: any) => r.objectIdentifier).sort()).toEqual(['id-check', 'id-save']);
+    const order = result.usedBy[0];
+    expect(order.places.every((p: any) => Array.isArray(p.snippets) && p.snippets[0].content.startsWith('snippet for'))).toBe(true);
+    expect(order.places.some((p: any) => 'objectIdentifier' in p)).toBe(false);
+    expect(result.snippetsFetched).toBe(2);
+  });
+
+  it('does not fetch snippets unless asked, and never leaks the correlation id', async () => {
+    const { handler } = handlers({
+      usageReferences: async () => ROWS_ONE_OBJECT,
+      usageReferenceSnippets: async () => { throw new Error('should not be called'); }
+    });
+    const result = answer(await handler.handleImpactOf({ objectName: 'ZCL_APP_RETURN' }));
+    expect(result.snippetsFetched).toBeUndefined();
+    expect(result.usedBy[0].places.some((p: any) => 'objectIdentifier' in p)).toBe(false);
+  });
+});
+
+describe('abapPath', () => {
+  it('finds a direct caller in one hop', async () => {
+    const { handler } = handlers({
+      usageReferences: async (url: string) => (url === '/sap/bc/adt/oo/classes/zcl_app_return' ? ROWS : [])
+    });
+    const result = answer(await handler.handleAbapPath({ toName: 'ZCL_APP_RETURN', fromName: 'ZCL_APP_ORDER' }));
+    expect(result.found).toBe(true);
+    expect(result.hops).toBe(1);
+    expect(result.path.map((n: any) => n.name)).toEqual(['ZCL_APP_ORDER', 'ZCL_APP_RETURN']);
+    expect(result.path[0].callsNextVia).toEqual([{ name: 'CHECK', kind: 'method' }, { name: 'SAVE', kind: 'method' }]);
+    expect(result.path[1].callsNextVia).toBeUndefined();
+  });
+
+  it('finds a two-hop path (BFS, so the shortest one)', async () => {
+    const CALLS_ORDER = [
+      {
+        uri: '/sap/bc/adt/oo/classes/zcl_far_away',
+        parentUri: '/sap/bc/adt/vit/wb/object_type/devck/object_name/ZFAR',
+        'adtcore:name': 'ZCL_FAR_AWAY',
+        'adtcore:type': 'CLAS/OC',
+        packageRef: { 'adtcore:name': 'ZFAR' }
+      },
+      {
+        uri: '/sap/bc/adt/oo/classes/zcl_far_away/source/main#type=CLAS%2FOM;name=CALLER',
+        parentUri: '/sap/bc/adt/oo/classes/zcl_far_away',
+        usageInformation: 'gradeDirect,includeProductive',
+        'adtcore:name': 'CALLER',
+        'adtcore:type': 'CLAS/OM',
+        packageRef: { 'adtcore:name': 'ZFAR' }
+      }
+    ];
+    const { handler } = handlers({
+      usageReferences: async (url: string) => {
+        if (url === '/sap/bc/adt/oo/classes/zcl_app_return') return ROWS;
+        if (url === '/sap/bc/adt/oo/classes/zcl_app_order') return CALLS_ORDER;
+        return [];
+      }
+    });
+    const result = answer(await handler.handleAbapPath({ toName: 'ZCL_APP_RETURN', fromName: 'ZCL_FAR_AWAY' }));
+    expect(result.found).toBe(true);
+    expect(result.hops).toBe(2);
+    expect(result.path.map((n: any) => n.name)).toEqual(['ZCL_FAR_AWAY', 'ZCL_APP_ORDER', 'ZCL_APP_RETURN']);
+    expect(result.path[0].callsNextVia).toEqual([{ name: 'CALLER', kind: 'method' }]);
+  });
+
+  it('reports no path within budget instead of failing', async () => {
+    const { handler } = handlers({
+      usageReferences: async (url: string) => (url === '/sap/bc/adt/oo/classes/zcl_app_return' ? ROWS : [])
+    });
+    const result = answer(await handler.handleAbapPath({
+      toName: 'ZCL_APP_RETURN', fromName: 'ZCL_NEVER_CALLS_IT', maxDepth: 2
+    }));
+    expect(result.found).toBe(false);
+    expect(result.note).toMatch(/No path found/);
+    expect(result.nodesVisited).toBeGreaterThan(0);
+  });
+
+  it('answers immediately, with no backend calls, when from and to are the same object', async () => {
+    const { handler, asked } = handlers();
+    const result = answer(await handler.handleAbapPath({ toName: 'ZCL_APP_RETURN', fromName: 'ZCL_APP_RETURN' }));
+    expect(result.found).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(result.path).toHaveLength(1);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('says what to pass when the target is missing', async () => {
+    const { handler } = handlers();
+    await expect(handler.handleAbapPath({ fromName: 'ZCL_APP_ORDER' }))
+      .rejects.toThrow(/What is the target object/);
+  });
+
+  it('says what to pass when the start is missing', async () => {
+    const { handler } = handlers();
+    await expect(handler.handleAbapPath({ toName: 'ZCL_APP_RETURN' }))
+      .rejects.toThrow(/What is the starting object/);
+  });
+});
