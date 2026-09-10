@@ -1,10 +1,10 @@
 {
-  "name": "mcp-abap-abap-adt-api",
+  "name": "mcp-abap-adt-api",
   "version": "0.1.1",
-  "mcpName": "io.github.hollway/mcp-abap-abap-adt-api",
+  "mcpName": "io.github.hollway/mcp-abap-adt-api",
   "main": "dist/index.js",
   "bin": {
-    "mcp-abap-abap-adt-api": "dist/index.js"
+    "mcp-abap-adt-api": "dist/index.js"
   },
   "files": [
     "dist"
@@ -31,11 +31,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Hollway/mcp-abap-abap-adt-api.git"
+    "url": "git+https://github.com/Hollway/mcp-abap-adt-api.git"
   },
-  "homepage": "https://github.com/Hollway/mcp-abap-abap-adt-api#readme",
+  "homepage": "https://github.com/Hollway/mcp-abap-adt-api#readme",
   "bugs": {
-    "url": "https://github.com/Hollway/mcp-abap-abap-adt-api/issues"
+    "url": "https://github.com/Hollway/mcp-abap-adt-api/issues"
   },
   "engines": {
     "node": ">=18"

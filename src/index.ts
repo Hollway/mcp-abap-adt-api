@@ -131,7 +131,7 @@ export class AbapAdtServer extends Server {
     constructor() {
     super(
       {
-        name: "mcp-abap-abap-adt-api",
+        name: "mcp-abap-adt-api",
         version: "0.1.0",
       },
       {

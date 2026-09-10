@@ -6,7 +6,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 ## Description
 
-The MCP-Server `mcp-abap-abap-adt-api` is a Model Context Protocol (MCP) server designed to facilitate seamless communication between ABAP systems and MCP clients. It is a wrapper for [abap-adt-api](https://github.com/marcellourbani/abap-adt-api/) and provides a suite of tools and resources for managing ABAP objects, handling transport requests, performing code analysis, and more, enhancing the efficiency and effectiveness of ABAP development workflows.
+The MCP-Server `mcp-abap-adt-api` is a Model Context Protocol (MCP) server designed to facilitate seamless communication between ABAP systems and MCP clients. It is a wrapper for [abap-adt-api](https://github.com/marcellourbani/abap-adt-api/) and provides a suite of tools and resources for managing ABAP objects, handling transport requests, performing code analysis, and more, enhancing the efficiency and effectiveness of ABAP development workflows.
 
 The server is not published to a package registry: clone the repository, build it, and point your MCP client at `dist/index.js`. [Installation](#installation) has the details.
 
@@ -65,8 +65,8 @@ Connection settings can also come from a `.env` file next to the server, but tha
 1. **Clone the Repository**
 
    ```cmd
-   git clone https://github.com/Hollway/mcp-abap-abap-adt-api.git
-   cd mcp-abap-abap-adt-api
+   git clone https://github.com/Hollway/mcp-abap-adt-api.git
+   cd mcp-abap-adt-api
    ```
 
 2. **Install Dependencies**
@@ -121,9 +121,9 @@ Connection settings can also come from a `.env` file next to the server, but tha
    ```json
    {
      "mcpServers": {
-       "mcp-abap-abap-adt-api": {
+       "mcp-abap-adt-api": {
          "command": "node",
-         "args": ["PATH_TO_YOUR/mcp-abap-abap-adt-api/dist/index.js"],
+         "args": ["PATH_TO_YOUR/mcp-abap-adt-api/dist/index.js"],
          "disabled": false,
          "autoApprove": []
        }
@@ -136,7 +136,7 @@ Connection settings can also come from a `.env` file next to the server, but tha
 Use this instruction to explain the server to your model:
 
 ```
-## mcp-abap-abap-adt-api Server
+## mcp-abap-adt-api Server
 
 Tools for working on an SAP system through ADT: reading and changing ABAP
 objects, activating them, running tests, and handling transports.

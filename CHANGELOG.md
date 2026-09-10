@@ -8,6 +8,25 @@ actually does — not what its documentation implies.
 The versions here were never published to npm: `package.json` stays on the
 upstream `0.1.1`, and the numbers below are the history of this fork.
 
+## [0.9.1] — the project goes by one name
+
+No behaviour change: no tool was added, removed or altered, and the 679 tests in
+43 suites are untouched and green.
+
+### Renamed to `mcp-abap-adt-api`
+
+The repository dropped the doubled word, so the package now matches it. Changed
+in `package.json` (`name`, `mcpName`, `bin`), `package-lock.json`, the server
+name reported in the MCP handshake (`src/index.ts`) and the README — clone, the
+directory it makes, and the client configuration example.
+
+Two consequences worth knowing before upgrading: the executable installed by
+`bin` is now `mcp-abap-adt-api`, and a client that keys its server entry by name
+will see a new one. An existing entry keeps working — it points at
+`dist/index.js` by path — but the key in the configuration example changed with
+it. Repository links redirect from the old name, so an old clone URL still
+resolves.
+
 ## [0.9.0] — what a live run found on the surfaces nobody had run
 
 Tools stay at **177**, tests 643 → **679** in 43 suites. Read-only smoke run:
