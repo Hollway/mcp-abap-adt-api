@@ -88,17 +88,17 @@ describe('snippetOutput', () => {
   });
 });
 
-/** The header of a real dump page, as the feed serves it (EUD00, trimmed). */
+/** The header of a real dump page, as the feed serves it (ECC, trimmed). */
 const DUMP_HTML = [
-  '<p style="text-align:right;font-size:10px"><a href="adt://EUD/sap/bc/adt/vit/runtime/dumps/2026">Show in SAP GUI</a>',
-  '<a title="Show Abortion in Code" href="adt://EUD/sap/bc/adt/oo/classes/zmcp_snip_x/source/main#start=16">Show Abortion in Code</a></p>',
+  '<p style="text-align:right;font-size:10px"><a href="adt://DEV/sap/bc/adt/vit/runtime/dumps/2026">Show in SAP GUI</a>',
+  '<a title="Show Abortion in Code" href="adt://DEV/sap/bc/adt/oo/classes/zmcp_snip_x/source/main#start=16">Show Abortion in Code</a></p>',
   '<h4 id="HEADER">Header Information</h4><table cellspacing="3">',
   '<tr><td><b>Short Text</b></td><td> Division by 0 (type I or INT8) </td></tr>',
   '<tr><td><b>Runtime Error</b></td><td> COMPUTE_INT_ZERODIVIDE </td></tr>',
   '<tr><td><b>Exception</b></td><td> CX_SY_ZERODIVIDE </td></tr>',
   '<tr><td><b>Program</b></td><td> ZMCP_SNIP_X============CP </td></tr>',
   '<tr><td><b>Date/Time</b></td><td> 09.09.2026 12:42:07 (System) </td></tr>',
-  '<tr><td><b>User</b></td><td> VKRIVOROT </td></tr></table>'
+  '<tr><td><b>User</b></td><td> TESTER </td></tr></table>'
 ].join('');
 
 const CREATED = {
@@ -130,7 +130,7 @@ const handlers = (over: Record<string, unknown> = {}, created: Record<string, un
     // as the HTML page ST22 shows.
     dumps: async () => ({
       updated: '2026-09-09T12:00:00Z',
-      dumps: [{ id: 'dump/one', text: DUMP_HTML, type: 'ABAP runtime error', author: 'VKRIVOROT' }]
+      dumps: [{ id: 'dump/one', text: DUMP_HTML, type: 'ABAP runtime error', author: 'TESTER' }]
     }),
     login: async () => { calls.push({ login: true }); },
     ...over
@@ -301,7 +301,7 @@ describe('summariseDump', () => {
       exception: 'CX_SY_ZERODIVIDE',
       program: 'ZMCP_SNIP_X============CP',
       when: '09.09.2026 12:42:07 (System)',
-      user: 'VKRIVOROT',
+      user: 'TESTER',
       line: 16,
       id: 'dump/one two'
     });

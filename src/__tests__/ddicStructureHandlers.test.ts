@@ -5,7 +5,7 @@ import { lockRegistry } from '../lib/lockRegistry';
 const STUB = [
   "@EndUserText.label : 'MCP probe structure'",
   '@AbapCatalog.enhancementCategory : #NOT_EXTENSIBLE',
-  'define type zkri_mcp_struc {',
+  'define type zdev_mcp_struc {',
   '  component_to_be_changed : abap.string(0);',
   '',
   '}'
@@ -32,9 +32,9 @@ const harness = (over: Record<string, unknown> = {}) => {
       return activations === 0
         ? [{
           object: {
-            'adtcore:uri': '/sap/bc/adt/ddic/structures/zkri_mcp_struc',
+            'adtcore:uri': '/sap/bc/adt/ddic/structures/zdev_mcp_struc',
             'adtcore:type': 'TABL/DS',
-            'adtcore:name': 'ZKRI_MCP_STRUC',
+            'adtcore:name': 'ZDEV_MCP_STRUC',
             'adtcore:parentUri': '/sap/bc/adt/packages/%24tmp',
             user: 'TESTER',
             deleted: false
@@ -55,7 +55,7 @@ const harness = (over: Record<string, unknown> = {}) => {
 const answer = (result: any) => JSON.parse(result.content[0].text);
 
 const ARGS = {
-  name: 'ZKRI_MCP_STRUC',
+  name: 'ZDEV_MCP_STRUC',
   packageName: '$TMP',
   description: 'MCP probe structure',
   fields: [
@@ -74,7 +74,7 @@ describe('createStructure', () => {
     expect(calls).toEqual([
       'validate',
       'create',
-      'GET /sap/bc/adt/ddic/structures/zkri_mcp_struc/source/main',
+      'GET /sap/bc/adt/ddic/structures/zdev_mcp_struc/source/main',
       'lock',
       'write',
       'syntaxCheck',
@@ -86,7 +86,7 @@ describe('createStructure', () => {
     expect(result.status).toBe('success');
     expect(result.activated).toBe(true);
     // The stub's keyword, not a guessed one.
-    expect(writes[0].source).toContain('define type zkri_mcp_struc {');
+    expect(writes[0].source).toContain('define type zdev_mcp_struc {');
     expect(writes[0].source).toContain('key werks : werks_d not null;');
   });
 
@@ -105,7 +105,7 @@ describe('createStructure', () => {
   it('does not activate when the definition does not check out', async () => {
     const { handlers, calls } = harness({
       syntaxCheck: async () => [{
-        uri: '/sap/bc/adt/ddic/structures/zkri_mcp_struc/source/main',
+        uri: '/sap/bc/adt/ddic/structures/zdev_mcp_struc/source/main',
         line: 6, offset: 2, severity: 'E',
         text: 'Annotation with reference to unit code for field MENGE is missing'
       }]
@@ -155,7 +155,7 @@ describe('createStructure', () => {
     const { handlers } = harness();
     await expect(handlers.handleCreateStructure({ ...ARGS, fields: [] }))
       .rejects.toThrow(/at least one/);
-    await expect(handlers.handleCreateStructure({ ...ARGS, packageName: 'ZMM_BASE' }))
+    await expect(handlers.handleCreateStructure({ ...ARGS, packageName: 'ZAPP_BASE' }))
       .rejects.toThrow(/transport request/);
   });
 });
@@ -164,7 +164,7 @@ describe('getStructureSource', () => {
   it('answers with the text and the parsed fields', async () => {
     const table = [
       "@EndUserText.label : 'Route requests'",
-      'define type zmmstep {',
+      'define type zappstep {',
       '  key mandt : mandt not null;',
       '  aedat     : aedat;',
       '}'
@@ -172,13 +172,13 @@ describe('getStructureSource', () => {
     const { handlers } = harness({
       statelessClone: { httpClient: { request: async () => ({ body: table, headers: {} }) } }
     });
-    const result = answer(await handlers.handleGetStructureSource({ name: 'ZMMSTEP' }));
+    const result = answer(await handlers.handleGetStructureSource({ name: 'ZAPPSTEP' }));
 
     expect(result.status).toBe('success');
     expect(result.label).toBe('Route requests');
     expect(result.fieldCount).toBe(2);
     expect(result.fields[0]).toEqual({ name: 'MANDT', type: 'mandt', keyField: true, notNull: true });
-    expect(result.sourceUrl).toBe('/sap/bc/adt/ddic/structures/zmmstep/source/main');
+    expect(result.sourceUrl).toBe('/sap/bc/adt/ddic/structures/zappstep/source/main');
   });
 
   it('passes the version through when asked', async () => {
@@ -188,7 +188,7 @@ describe('getStructureSource', () => {
         httpClient: { request: async (url: string, cfg: any) => { seen.push(cfg); return { body: STUB, headers: {} }; } }
       }
     });
-    await handlers.handleGetStructureSource({ name: 'ZMMSTEP', version: 'active' });
+    await handlers.handleGetStructureSource({ name: 'ZAPPSTEP', version: 'active' });
     expect(seen[0].qs).toEqual({ version: 'active' });
   });
 
@@ -218,8 +218,8 @@ describe('createAndWrite and the DDIC types', () => {
   // classic ERP system does not have, so this refusal saves a confusing 404.
   it('refuses a transparent table with the reason', async () => {
     await expect(registration().handleCreateAndWrite({
-      objtype: 'TABL/DT', name: 'ZKRI_MCP_TAB', description: 'x',
-      packageName: '$TMP', source: 'define type zkri_mcp_tab { a : abap.char(1); }'
+      objtype: 'TABL/DT', name: 'ZDEV_MCP_TAB', description: 'x',
+      packageName: '$TMP', source: 'define type zdev_mcp_tab { a : abap.char(1); }'
     })).rejects.toThrow(/no ddic\/tables collection/);
   });
 
@@ -227,27 +227,27 @@ describe('createAndWrite and the DDIC types', () => {
   // /sap/bc/adt/packages/settings is served.
   it('refuses a package with the reason, from either creation tool', async () => {
     await expect(registration().handleCreateAndWrite({
-      objtype: 'DEVC/K', name: 'ZKRI_MCP_PKG', description: 'x', packageName: '$TMP', source: 'x'
+      objtype: 'DEVC/K', name: 'ZDEV_MCP_PKG', description: 'x', packageName: '$TMP', source: 'x'
     })).rejects.toThrow(/packages is not served at all/);
     await expect(registration().handleCreateObject({
-      objtype: 'DEVC/K', name: 'ZKRI_MCP_PKG', description: 'x', parentName: '$TMP'
+      objtype: 'DEVC/K', name: 'ZDEV_MCP_PKG', description: 'x', parentName: '$TMP'
     })).rejects.toThrow(/packages is not served at all/);
     await expect(registration().handleCreateObject({
-      objtype: 'TABL/DT', name: 'ZKRI_MCP_TAB', description: 'x', parentName: '$TMP'
+      objtype: 'TABL/DT', name: 'ZDEV_MCP_TAB', description: 'x', parentName: '$TMP'
     })).rejects.toThrow(/no ddic\/tables collection/);
   });
 
   it('knows where a CDS view and a structure keep their source', async () => {
     const cds = JSON.parse((await registration().handleCreateAndWrite({
-      objtype: 'DDLS/DF', name: 'ZKRI_MCP_CDS', description: 'x', packageName: '$TMP',
-      source: "@AbapCatalog.sqlViewName: 'ZKRIV'\ndefine view zkri_mcp_cds as select from t000 { key mandt as Client }"
+      objtype: 'DDLS/DF', name: 'ZDEV_MCP_CDS', description: 'x', packageName: '$TMP',
+      source: "@AbapCatalog.sqlViewName: 'ZDEVV'\ndefine view zdev_mcp_cds as select from t000 { key mandt as Client }"
     })).content[0].text);
-    expect(cds.sourceUrl).toBe('/sap/bc/adt/ddic/ddl/sources/zkri_mcp_cds/source/main');
+    expect(cds.sourceUrl).toBe('/sap/bc/adt/ddic/ddl/sources/zdev_mcp_cds/source/main');
 
     const structure = JSON.parse((await registration().handleCreateAndWrite({
-      objtype: 'TABL/DS', name: 'ZKRI_MCP_STRUC', description: 'x', packageName: '$TMP',
-      source: 'define type zkri_mcp_struc { a : abap.char(1); }'
+      objtype: 'TABL/DS', name: 'ZDEV_MCP_STRUC', description: 'x', packageName: '$TMP',
+      source: 'define type zdev_mcp_struc { a : abap.char(1); }'
     })).content[0].text);
-    expect(structure.sourceUrl).toBe('/sap/bc/adt/ddic/structures/zkri_mcp_struc/source/main');
+    expect(structure.sourceUrl).toBe('/sap/bc/adt/ddic/structures/zdev_mcp_struc/source/main');
   });
 });

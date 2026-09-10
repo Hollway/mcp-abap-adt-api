@@ -76,12 +76,12 @@ describe('activateByName', () => {
  * of the object names its package.
  */
 describe('activateAndVerify: the package the inactive list omits', () => {
-  const PROGRAM = '/sap/bc/adt/programs/programs/zkri_test';
+  const PROGRAM = '/sap/bc/adt/programs/programs/zdev_test';
   const rowWithoutPackage = () => ({
     object: {
       'adtcore:uri': PROGRAM,
       'adtcore:type': 'PROG/P',
-      'adtcore:name': 'ZKRI_TEST',
+      'adtcore:name': 'ZDEV_TEST',
       'adtcore:parentUri': '',
       user: 'TESTER',
       deleted: false
@@ -95,7 +95,7 @@ describe('activateAndVerify: the package the inactive list omits', () => {
       inactiveObjects: async () => (rounds === 0 ? [rowWithoutPackage()] : []),
       findObjectPath: async () => [
         { 'adtcore:type': 'DEVC/K', 'adtcore:name': '$TMP' },
-        { 'adtcore:type': 'PROG/P', 'adtcore:name': 'ZKRI_TEST' }
+        { 'adtcore:type': 'PROG/P', 'adtcore:name': 'ZDEV_TEST' }
       ],
       activate: async (objects: any[]) => {
         activated = objects;
@@ -118,9 +118,9 @@ describe('activateAndVerify: the package the inactive list omits', () => {
     const { stub, sent } = client();
     await activateAndVerify(stub as any, {
       objectUrl: PROGRAM,
-      parentUri: '/sap/bc/adt/packages/zmm_base'
+      parentUri: '/sap/bc/adt/packages/zapp_base'
     });
-    expect(sent()[0]['adtcore:parentUri']).toBe('/sap/bc/adt/packages/zmm_base');
+    expect(sent()[0]['adtcore:parentUri']).toBe('/sap/bc/adt/packages/zapp_base');
   });
 
   it('still says what to pass when the lookup finds no package', async () => {

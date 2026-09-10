@@ -178,7 +178,7 @@ describe('buildDiff', () => {
    * terminates the line already there. It was counted as an added blank line.
    */
   it('does not count the newline that closes the last line of a file', () => {
-    const src = ['*&----*', '*&  Include  zkri_test', '*&----*'].join('\r\n');
+    const src = ['*&----*', '*&  Include  zdev_test', '*&----*'].join('\r\n');
     const edits = [{ insertAfterLine: 3, insertion: 'FORM x.\r\nENDFORM.' }];
     const diff = buildDiff(src, resolveEdits(src, edits));
     expect(marks(diff, '+')).toEqual(['+FORM x.', '+ENDFORM.']);

@@ -306,7 +306,7 @@ const check = (label, condition, detail) => {
     atcNothing.payload);
 
   // A package walk. SMOKE_PACKAGE should be a package that holds objects;
-  // ZMM_BASE on the system this was written against holds 906.
+  // ZAPP_BASE on the system this was written against holds 906.
   const tree = await call('packageTree', { packageName: PACKAGE_NAME, maxDepth: 1, maxObjects: 50 });
   check('packageTree lists a package and resolves source locations',
     tree.payload.status === 'success' && tree.payload.objectCount > 0 &&

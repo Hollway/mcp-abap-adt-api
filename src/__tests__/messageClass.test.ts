@@ -14,18 +14,18 @@ import {
 /** Shortened, but attribute for attribute what the ERP backend answers. */
 const CLASS_XML =
   '<?xml version="1.0" encoding="utf-8"?>' +
-  '<mc:messageClass adtcore:responsible="TKARPENKO" adtcore:masterLanguage="RU"' +
-  ' adtcore:masterSystem="EUD" adtcore:name="ZARM_NEKOND" adtcore:type="MSAG/N"' +
+  '<mc:messageClass adtcore:responsible="TESTER" adtcore:masterLanguage="RU"' +
+  ' adtcore:masterSystem="DEV" adtcore:name="ZAPP_NOCOND" adtcore:type="MSAG/N"' +
   ' adtcore:version="active" adtcore:description="Status of goods"' +
   ' adtcore:language="RU" xmlns:mc="http://www.sap.com/adt/MessageClass"' +
   ' xmlns:adtcore="http://www.sap.com/adt/core">' +
   '<atom:link href="/sap/bc/adt/classifications?uri=x" rel="classifications"' +
   ' xmlns:atom="http://www.w3.org/2005/Atom"/>' +
   '<adtcore:packageRef adtcore:uri="/sap/bc/adt/vit/wb/x" adtcore:type="DEVC/K"' +
-  ' adtcore:name="ZARM_NEKOND"/>' +
+  ' adtcore:name="ZAPP_NOCOND"/>' +
   '<mc:messages mc:msgno="002" mc:msgtext="Value &amp;1 is not allowed for &amp;2"' +
   ' mc:selfexplainatory="false" mc:documented="true" adtcore:name="">' +
-  '<atom:link href="/sap/bc/adt/messageclass/zarm_nekond/messages/002"' +
+  '<atom:link href="/sap/bc/adt/messageclass/zapp_nocond/messages/002"' +
   ' rel="messages" xmlns:atom="http://www.w3.org/2005/Atom"/>' +
   '</mc:messages>' +
   '<mc:messages mc:msgno="001" mc:msgtext="Data not found" mc:selfexplainatory="true"' +
@@ -35,11 +35,11 @@ const CLASS_XML =
 describe('parseMessageClass', () => {
   it('reads the header, the package and every message', () => {
     const parsed = parseMessageClass(CLASS_XML);
-    expect(parsed.name).toBe('ZARM_NEKOND');
+    expect(parsed.name).toBe('ZAPP_NOCOND');
     expect(parsed.description).toBe('Status of goods');
     expect(parsed.masterLanguage).toBe('RU');
-    expect(parsed.responsible).toBe('TKARPENKO');
-    expect(parsed.packageName).toBe('ZARM_NEKOND');
+    expect(parsed.responsible).toBe('TESTER');
+    expect(parsed.packageName).toBe('ZAPP_NOCOND');
     expect(parsed.version).toBe('active');
     expect(parsed.messages).toHaveLength(2);
   });
@@ -76,7 +76,7 @@ describe('parseMessageClass', () => {
 describe('buildMessageClassDocument', () => {
   it('escapes the ampersands of a placeholder text', () => {
     const document = buildMessageClassDocument({
-      name: 'zkri_mcp_msg',
+      name: 'zdev_mcp_msg',
       description: 'Probe',
       masterLanguage: 'RU',
       messages: [{ number: '42', text: 'Value &1 is not allowed for &2', selfExplanatory: false }]
@@ -88,12 +88,12 @@ describe('buildMessageClassDocument', () => {
 
   it('pads the number and upper-cases the name', () => {
     const document = buildMessageClassDocument({
-      name: 'zkri_mcp_msg',
+      name: 'zdev_mcp_msg',
       description: 'Probe',
       masterLanguage: 'RU',
       messages: [{ number: 7 as unknown as string, text: 'Seven', selfExplanatory: true }]
     });
-    expect(document).toContain('adtcore:name="ZKRI_MCP_MSG"');
+    expect(document).toContain('adtcore:name="ZDEV_MCP_MSG"');
     expect(document).toContain('mc:msgno="007"');
   });
 
@@ -213,9 +213,9 @@ describe('numbers, escaping and urls', () => {
   });
 
   it('builds the urls the backend serves', () => {
-    expect(messageClassUrl(' ZARM_NEKOND ')).toBe('/sap/bc/adt/messageclass/zarm_nekond');
-    expect(messageUrl('ZARM_NEKOND', 1)).toBe('/sap/bc/adt/messageclass/zarm_nekond/messages/001');
-    expect(messageLongtextUrl('ZARM_NEKOND', '42'))
-      .toBe('/sap/bc/adt/messageclass/zarm_nekond/messages/042/longtext');
+    expect(messageClassUrl(' ZAPP_NOCOND ')).toBe('/sap/bc/adt/messageclass/zapp_nocond');
+    expect(messageUrl('ZAPP_NOCOND', 1)).toBe('/sap/bc/adt/messageclass/zapp_nocond/messages/001');
+    expect(messageLongtextUrl('ZAPP_NOCOND', '42'))
+      .toBe('/sap/bc/adt/messageclass/zapp_nocond/messages/042/longtext');
   });
 });

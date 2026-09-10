@@ -7,7 +7,7 @@ import { sourceCache } from '../lib/sourceCache';
  * deleteObject the lock was still there and the registry still listed it,
  * pointing at an object that no longer existed. The handler releases it now.
  */
-const URL = '/sap/bc/adt/programs/includes/zkri_test_t01';
+const URL = '/sap/bc/adt/programs/includes/zdev_test_t01';
 
 const handler = (over: Record<string, unknown> = {}) => {
   const calls: string[] = [];
@@ -56,7 +56,7 @@ describe('deleteObject', () => {
   // Without this, a syntax check reusing the cached text would report an
   // object that is no longer in the system as fine.
   it('forgets the source it had cached for the object', async () => {
-    sourceCache.set(`${URL}/source/main`, 'REPORT zkri_test.');
+    sourceCache.set(`${URL}/source/main`, 'REPORT zdev_test.');
     const { handlers } = handler();
     const result = answer(await handlers.handleDeleteObject({ objectUrl: URL, lockHandle: 'HANDLE' }));
     expect(result.sourceCacheDropped).toBe(1);
@@ -64,7 +64,7 @@ describe('deleteObject', () => {
   });
 
   it('keeps the cached source when the deletion fails', async () => {
-    sourceCache.set(`${URL}/source/main`, 'REPORT zkri_test.');
+    sourceCache.set(`${URL}/source/main`, 'REPORT zdev_test.');
     const { handlers } = handler({
       deleteObject: async () => { throw new Error('object is used elsewhere'); }
     });

@@ -439,7 +439,7 @@ const rowLines = (binding: string, variable: string, maxRows: number): string[] 
  *
  * The payload cannot be trusted to show it: a table is serialised as repeated
  * children named after its row type, so a one-row table of a named type -
- * <ET_X><ZMM_ROW>..</ZMM_ROW></ET_X> - is indistinguishable from a structure
+ * <ET_X><ZAPP_ROW>..</ZAPP_ROW></ET_X> - is indistinguishable from a structure
  * with one component. RTTI knows, and describe_by_data takes any data object,
  * so this compiles where lines( ) and ASSIGN to a table field symbol do not.
  */

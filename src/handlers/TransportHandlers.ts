@@ -141,7 +141,7 @@ export class TransportHandlers extends BaseHandler {
                         },
                         numberLike: {
                             type: 'string',
-                            description: 'Keep only requests whose number contains this text, e.g. "EUDK9A3".'
+                            description: 'Keep only requests whose number contains this text, e.g. "DEVK9A3".'
                         },
                         descriptionLike: {
                             type: 'string',
@@ -167,7 +167,7 @@ export class TransportHandlers extends BaseHandler {
                     properties: {
                         transportNumber: {
                             type: 'string',
-                            description: 'Request number, e.g. EUDK9A3OK4. A task number works too - it is looked up the same way.'
+                            description: 'Request number, e.g. DEVK9A3OK4. A task number works too - it is looked up the same way.'
                         },
                         owner: {
                             type: 'string',

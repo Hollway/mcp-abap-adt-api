@@ -38,7 +38,7 @@ export class PackageHandlers extends BaseHandler {
           properties: {
             packageName: {
               type: 'string',
-              description: 'Package to walk, e.g. ZMM_BASE.'
+              description: 'Package to walk, e.g. ZAPP_BASE.'
             },
             maxDepth: {
               type: 'number',
@@ -69,7 +69,7 @@ export class PackageHandlers extends BaseHandler {
           properties: {
             objects: {
               type: 'array',
-              description: 'Objects to read: [{name, objectType}], e.g. [{"name":"ZCL_MM","objectType":"CLAS/OC"}].',
+              description: 'Objects to read: [{name, objectType}], e.g. [{"name":"ZCL_APP","objectType":"CLAS/OC"}].',
               items: {
                 type: 'object',
                 properties: {
@@ -81,7 +81,7 @@ export class PackageHandlers extends BaseHandler {
             },
             sourceUrls: {
               type: 'array',
-              description: 'Source URLs to read instead, e.g. ["/sap/bc/adt/programs/programs/zr_mm_foo/source/main"].',
+              description: 'Source URLs to read instead, e.g. ["/sap/bc/adt/programs/programs/zr_app_foo/source/main"].',
               items: { type: 'string' }
             },
             version: {
@@ -107,7 +107,7 @@ export class PackageHandlers extends BaseHandler {
           properties: {
             packageName: {
               type: 'string',
-              description: 'Package to search, e.g. ZMM_BASE.'
+              description: 'Package to search, e.g. ZAPP_BASE.'
             },
             pattern: {
               type: 'string',

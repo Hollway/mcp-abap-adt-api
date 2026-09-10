@@ -50,7 +50,7 @@ export class MessageClassHandlers extends BaseHandler {
           properties: {
             className: {
               type: 'string',
-              description: 'Message class, e.g. ZARM_NEKOND.'
+              description: 'Message class, e.g. ZAPP_NOCOND.'
             },
             numbers: {
               type: 'array',
@@ -85,7 +85,7 @@ export class MessageClassHandlers extends BaseHandler {
           properties: {
             className: {
               type: 'string',
-              description: 'Message class, e.g. ZARM_NEKOND.'
+              description: 'Message class, e.g. ZAPP_NOCOND.'
             },
             number: {
               type: 'string',
@@ -107,7 +107,7 @@ export class MessageClassHandlers extends BaseHandler {
           properties: {
             className: {
               type: 'string',
-              description: 'Message class, e.g. ZARM_NEKOND.'
+              description: 'Message class, e.g. ZAPP_NOCOND.'
             },
             messages: {
               type: 'array',
@@ -145,7 +145,7 @@ export class MessageClassHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Name of the new message class, e.g. ZKRI_MCP_MSG.'
+              description: 'Name of the new message class, e.g. ZDEV_MCP_MSG.'
             },
             packageName: {
               type: 'string',

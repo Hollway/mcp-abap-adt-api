@@ -51,7 +51,7 @@ export class UnitTestHandlers extends BaseHandler {
                     properties: {
                         className: {
                             type: 'string',
-                            description: 'Class to test, e.g. ZCL_MM_PCK_PLAN. Its own test include is what runs.'
+                            description: 'Class to test, e.g. ZCL_APP_PCK_PLAN. Its own test include is what runs.'
                         },
                         url: {
                             type: 'string',

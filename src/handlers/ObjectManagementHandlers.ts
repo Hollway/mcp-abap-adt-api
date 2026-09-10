@@ -83,11 +83,11 @@ export class ObjectManagementHandlers extends BaseHandler {
           properties: {
             objectName: {
               type: 'string',
-              description: 'Name of the object to activate, e.g. ZCL_MM. Used to pick its rows out of the inactive list; omit to activate everything inactive.'
+              description: 'Name of the object to activate, e.g. ZCL_APP. Used to pick its rows out of the inactive list; omit to activate everything inactive.'
             },
             objectUrl: {
               type: 'string',
-              description: 'Object URL, e.g. /sap/bc/adt/oo/classes/zcl_mm. An alternative way to select the rows.'
+              description: 'Object URL, e.g. /sap/bc/adt/oo/classes/zcl_app. An alternative way to select the rows.'
             },
             parentUri: {
               type: 'string',

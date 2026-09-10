@@ -8,7 +8,7 @@ import { sourceCache, sourceCacheKey } from '../lib/sourceCache';
  * it - the plain source URL, the versions kept under their own keys, and the
  * includes of a class, which hang below the class URL.
  */
-const CLASS = '/sap/bc/adt/oo/classes/zkri_mcp_cls';
+const CLASS = '/sap/bc/adt/oo/classes/zdev_mcp_cls';
 
 beforeEach(() => sourceCache.clear());
 
@@ -26,7 +26,7 @@ describe('sourceCacheKey', () => {
 
 describe('sourceCache.forgetUnder', () => {
   it('drops the source, the versions and the class includes of one object', () => {
-    sourceCache.set(`${CLASS}/source/main`, 'CLASS zkri_mcp_cls DEFINITION.');
+    sourceCache.set(`${CLASS}/source/main`, 'CLASS zdev_mcp_cls DEFINITION.');
     sourceCache.set(sourceCacheKey(`${CLASS}/source/main`, 'active'), 'active text');
     sourceCache.set(`${CLASS}/includes/testclasses/source/main`, 'CLASS ltcl_test.');
     sourceCache.set(CLASS, 'the object url itself');
@@ -38,9 +38,9 @@ describe('sourceCache.forgetUnder', () => {
 
   // A name that merely starts with the same characters is a different object.
   it('leaves an object whose name only shares a prefix', () => {
-    sourceCache.set('/sap/bc/adt/oo/classes/zkri_mcp_cls_helper/source/main', 'other class');
+    sourceCache.set('/sap/bc/adt/oo/classes/zdev_mcp_cls_helper/source/main', 'other class');
     expect(sourceCache.forgetUnder(CLASS)).toBe(0);
-    expect(sourceCache.has('/sap/bc/adt/oo/classes/zkri_mcp_cls_helper/source/main')).toBe(true);
+    expect(sourceCache.has('/sap/bc/adt/oo/classes/zdev_mcp_cls_helper/source/main')).toBe(true);
   });
 
   it('tolerates a trailing slash and an empty url', () => {

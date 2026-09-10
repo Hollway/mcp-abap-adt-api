@@ -7,7 +7,7 @@ import {
 } from '../lib/methodSignature';
 
 const classSource = (...definition: string[]) => [
-  'CLASS zcl_mm DEFINITION',
+  'CLASS zcl_app DEFINITION',
   '  PUBLIC',
   '  FINAL',
   '  CREATE PUBLIC .',
@@ -16,7 +16,7 @@ const classSource = (...definition: string[]) => [
   ...definition.map(line => `    ${line}`),
   'ENDCLASS.',
   '',
-  'CLASS zcl_mm IMPLEMENTATION.',
+  'CLASS zcl_app IMPLEMENTATION.',
   'ENDCLASS.'
 ].join('\n');
 
@@ -212,11 +212,11 @@ describe('listMethods', () => {
 
 describe('listTypes', () => {
   const source = (...definition: string[]) => [
-    'CLASS zcl_mm DEFINITION PUBLIC FINAL CREATE PUBLIC .',
+    'CLASS zcl_app DEFINITION PUBLIC FINAL CREATE PUBLIC .',
     '  PUBLIC SECTION.',
     ...definition.map(line => `    ${line}`),
     'ENDCLASS.',
-    'CLASS zcl_mm IMPLEMENTATION.',
+    'CLASS zcl_app IMPLEMENTATION.',
     'ENDCLASS.'
   ].join('\n');
 
@@ -229,7 +229,7 @@ describe('listTypes', () => {
 
   it('lists a structure by its name and not by its components', () => {
     // A component called MATNR taken for a type would turn every parameter
-    // typed MATNR into ZCL_MM=>MATNR, which does not exist.
+    // typed MATNR into ZCL_APP=>MATNR, which does not exist.
     expect(listTypes(source(
       'TYPES: BEGIN OF ts_row,',
       '         matnr TYPE matnr,',
@@ -260,7 +260,7 @@ describe('listTypes', () => {
 
 describe('qualifying a type the class declares itself', () => {
   const withLocalType = [
-    'CLASS zcl_mm DEFINITION PUBLIC FINAL CREATE PUBLIC .',
+    'CLASS zcl_app DEFINITION PUBLIC FINAL CREATE PUBLIC .',
     '  PUBLIC SECTION.',
     '    TYPES tt_stawn TYPE STANDARD TABLE OF stawn WITH DEFAULT KEY.',
     '    TYPES: BEGIN OF ts_row,',
@@ -271,20 +271,20 @@ describe('qualifying a type the class declares itself', () => {
     '                                   iv_matnr TYPE matnr.',
     '    CLASS-METHODS elsewhere IMPORTING is_row TYPE zcl_other=>ts_row.',
     'ENDCLASS.',
-    'CLASS zcl_mm IMPLEMENTATION.',
+    'CLASS zcl_app IMPLEMENTATION.',
     'ENDCLASS.'
   ].join('\n');
 
   it('qualifies a bare local type with the class that declares it', () => {
     // DATA ... TYPE tt_stawn is refused with "type TT_STAWN is unknown".
     expect(parseMethodSignature(withLocalType, 'GET_STAWN').changing).toEqual([
-      { name: 'CT_STAWN', type: 'zcl_mm=>tt_stawn' }
+      { name: 'CT_STAWN', type: 'zcl_app=>tt_stawn' }
     ]);
   });
 
   it('qualifies a local type inside a composite type expression', () => {
     const importing = parseMethodSignature(withLocalType, 'BY_ROW').importing;
-    expect(importing[0].type).toBe('STANDARD TABLE OF zcl_mm=>ts_row');
+    expect(importing[0].type).toBe('STANDARD TABLE OF zcl_app=>ts_row');
     // A dictionary type is left alone, even when a component shares its name.
     expect(importing[1].type).toBe('matnr');
   });
@@ -295,7 +295,7 @@ describe('qualifying a type the class declares itself', () => {
   });
 
   it('reads the class name from the definition', () => {
-    expect(classNameOf(withLocalType)).toBe('ZCL_MM');
+    expect(classNameOf(withLocalType)).toBe('ZCL_APP');
     expect(classNameOf('nothing here')).toBeUndefined();
   });
 });

@@ -62,7 +62,7 @@ export class AtcHandlers extends BaseHandler {
                     properties: {
                         objectName: {
                             type: 'string',
-                            description: 'Object to check, e.g. ZCL_MM or ZR_MMO_NEW.'
+                            description: 'Object to check, e.g. ZCL_APP or ZR_APPO_NEW.'
                         },
                         objectType: {
                             type: 'string',

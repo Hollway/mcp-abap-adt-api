@@ -12,10 +12,10 @@ import { unifiedDiff } from '../lib/textDiff';
  * What the backend calls a revision's "version" is the transport request that
  * carried it - not a number - and the number is only in the content URI:
  * .../includes/main/versions/<timestamp>/00087/content. Both are worth having:
- * the transport is how a change is talked about ("what did EUDK9A3MT7 do to
+ * the transport is how a change is talked about ("what did DEVK9A3MT7 do to
  * this class"), the number is how the versions are ordered.
  *
- * A long-lived class answers with every version it ever had - ZCL_MM answers
+ * A long-lived class answers with every version it ever had - ZCL_APP answers
  * with 90, most of them "Копия <request>" rows left by transport copies - so
  * the list is filterable and capped. Handing all of it over costs about 28,000
  * characters to answer a question about the last two changes.
@@ -49,13 +49,13 @@ export class RevisionHandlers extends BaseHandler {
         return [
             {
                 name: 'revisions',
-                description: 'The version history of an object: who changed it when, and under which transport request. Takes a name (with objectType), or objectUrl for a type it cannot address. Mind what the backend means by "version": that field is the transport request that carried the change, while the version NUMBER is the "revision" field - and that is what compareRevisions takes. A long-lived object has a long history (ZCL_MM answers with 90 versions, most of them copies left by transport releases), so the newest 20 come back unless limit says otherwise, and author/transport/titleContains narrow it down.',
+                description: 'The version history of an object: who changed it when, and under which transport request. Takes a name (with objectType), or objectUrl for a type it cannot address. Mind what the backend means by "version": that field is the transport request that carried the change, while the version NUMBER is the "revision" field - and that is what compareRevisions takes. A long-lived object has a long history (ZCL_APP answers with 90 versions, most of them copies left by transport releases), so the newest 20 come back unless limit says otherwise, and author/transport/titleContains narrow it down.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         objectName: {
                             type: 'string',
-                            description: 'Object name, e.g. ZCL_MM. Use with objectType.'
+                            description: 'Object name, e.g. ZCL_APP. Use with objectType.'
                         },
                         objectType: {
                             type: 'string',
@@ -63,7 +63,7 @@ export class RevisionHandlers extends BaseHandler {
                         },
                         objectUrl: {
                             type: 'string',
-                            description: 'ADT object URL, e.g. /sap/bc/adt/oo/classes/zcl_mm. Only needed for a type objectName cannot address.'
+                            description: 'ADT object URL, e.g. /sap/bc/adt/oo/classes/zcl_app. Only needed for a type objectName cannot address.'
                         },
                         clsInclude: {
                             type: 'string',
@@ -97,7 +97,7 @@ export class RevisionHandlers extends BaseHandler {
                     properties: {
                         objectName: {
                             type: 'string',
-                            description: 'Object name, e.g. ZCL_MM. Use with objectType.'
+                            description: 'Object name, e.g. ZCL_APP. Use with objectType.'
                         },
                         objectType: {
                             type: 'string',
@@ -105,7 +105,7 @@ export class RevisionHandlers extends BaseHandler {
                         },
                         objectUrl: {
                             type: 'string',
-                            description: 'ADT object URL, e.g. /sap/bc/adt/oo/classes/zcl_mm. Only needed for a type objectName cannot address.'
+                            description: 'ADT object URL, e.g. /sap/bc/adt/oo/classes/zcl_app. Only needed for a type objectName cannot address.'
                         },
                         clsInclude: {
                             type: 'string',
@@ -199,7 +199,7 @@ export class RevisionHandlers extends BaseHandler {
      * Which includes of a class actually carry a version history, for when the
      * one that was asked for does not. The library's answer to that is
      * "Revision URL not found for object X", which sounds like the object has
-     * no history at all - and ZCL_MM, which has 91 versions of its main
+     * no history at all - and ZCL_APP, which has 91 versions of its main
      * include, answers exactly that for testclasses.
      */
     private async includesWithHistory(objectUrl: string): Promise<string[]> {

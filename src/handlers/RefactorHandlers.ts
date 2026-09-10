@@ -16,11 +16,11 @@ export class RefactorHandlers extends BaseHandler {
                     properties: {
                         objectUrl: {
                             type: 'string',
-                            description: 'Object to move, e.g. /sap/bc/adt/oo/classes/zcl_mm_foo.'
+                            description: 'Object to move, e.g. /sap/bc/adt/oo/classes/zcl_app_foo.'
                         },
                         newPackage: {
                             type: 'string',
-                            description: 'Target package, e.g. ZMM_BASE.'
+                            description: 'Target package, e.g. ZAPP_BASE.'
                         },
                         transport: {
                             type: 'string',

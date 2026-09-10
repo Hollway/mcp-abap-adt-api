@@ -13,7 +13,7 @@ import { lockRegistry } from '../lib/lockRegistry';
  *  - a text write leaves TWO rows inactive - the object (PROG/P) and its text
  *    pool (PROG/PX) - and one activation by name covers both.
  */
-const PROGRAM = 'ZKRI_MCP_TXT';
+const PROGRAM = 'ZDEV_MCP_TXT';
 const TEXT_URL = `/sap/bc/adt/textelements/programs/${PROGRAM.toLowerCase()}`;
 const PROGRAM_URL = `/sap/bc/adt/programs/programs/${PROGRAM.toLowerCase()}`;
 
@@ -128,7 +128,7 @@ describe('setTextElements', () => {
 
   it('gives the lock back when the write is refused', async () => {
     const { handlers, unlocked } = harness({
-      setTextElements: async () => { throw new Error('Resource REPT ZKRI_MCP_TXT is not locked'); }
+      setTextElements: async () => { throw new Error('Resource REPT ZDEV_MCP_TXT is not locked'); }
     });
     await expect(handlers.handleSetTextElements(ARGS)).rejects.toThrow(/is not locked/);
     expect(unlocked).toEqual([TEXT_URL]);

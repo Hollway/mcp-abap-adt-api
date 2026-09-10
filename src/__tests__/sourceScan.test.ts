@@ -1,10 +1,10 @@
 import { findInSource, outlineSource, includedPrograms, codeOf, isCommentLine } from '../lib/sourceScan';
 
 const REPORT = [
-  'REPORT zr_mm_foo.',
+  'REPORT zr_app_foo.',
   '',
-  'INCLUDE zr_mm_foo_top.',
-  'INCLUDE zr_mm_foo_f01 IF FOUND.',
+  'INCLUDE zr_app_foo_top.',
+  'INCLUDE zr_app_foo_f01 IF FOUND.',
   '',
   'START-OF-SELECTION.',
   '  PERFORM read_data.',
@@ -75,9 +75,9 @@ describe('findInSource', () => {
 describe('outlineSource', () => {
   it('lists the blocks with their line numbers', () => {
     expect(outlineSource(REPORT)).toEqual([
-      { kind: 'REPORT', name: 'ZR_MM_FOO', line: 1 },
-      { kind: 'INCLUDE', name: 'ZR_MM_FOO_TOP', line: 3 },
-      { kind: 'INCLUDE', name: 'ZR_MM_FOO_F01', line: 4 },
+      { kind: 'REPORT', name: 'ZR_APP_FOO', line: 1 },
+      { kind: 'INCLUDE', name: 'ZR_APP_FOO_TOP', line: 3 },
+      { kind: 'INCLUDE', name: 'ZR_APP_FOO_F01', line: 4 },
       { kind: 'EVENT', name: 'START-OF-SELECTION', line: 6 },
       { kind: 'FORM', name: 'READ_DATA', line: 10 },
       { kind: 'FORM', name: 'WRITE_DATA', line: 14 }
@@ -105,6 +105,6 @@ describe('outlineSource', () => {
   });
 
   it('lists the includes of a program once each', () => {
-    expect(includedPrograms(REPORT)).toEqual(['ZR_MM_FOO_TOP', 'ZR_MM_FOO_F01']);
+    expect(includedPrograms(REPORT)).toEqual(['ZR_APP_FOO_TOP', 'ZR_APP_FOO_F01']);
   });
 });

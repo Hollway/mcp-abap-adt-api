@@ -47,7 +47,7 @@ export class TextElementHandlers extends BaseHandler {
           properties: {
             objectName: {
               type: 'string',
-              description: 'Object name, e.g. ZR_MM_FOO.'
+              description: 'Object name, e.g. ZR_APP_FOO.'
             },
             objectType: {
               type: 'string',
@@ -60,7 +60,7 @@ export class TextElementHandlers extends BaseHandler {
             },
             url: {
               type: 'string',
-              description: 'Escape hatch: the text elements base URL, e.g. /sap/bc/adt/textelements/programs/zr_mm_foo.'
+              description: 'Escape hatch: the text elements base URL, e.g. /sap/bc/adt/textelements/programs/zr_app_foo.'
             }
           }
         }
@@ -73,7 +73,7 @@ export class TextElementHandlers extends BaseHandler {
           properties: {
             objectName: {
               type: 'string',
-              description: 'Object name, e.g. ZR_MM_FOO.'
+              description: 'Object name, e.g. ZR_APP_FOO.'
             },
             objectType: {
               type: 'string',

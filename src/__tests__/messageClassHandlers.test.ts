@@ -11,7 +11,7 @@ import { lockRegistry } from '../lib/lockRegistry';
 const classDocument = (messages: Array<{ no: string; text?: string; self?: boolean; documented?: boolean }>, description = 'Probe class') =>
   '<?xml version="1.0" encoding="utf-8"?>' +
   '<mc:messageClass adtcore:responsible="TESTER" adtcore:masterLanguage="RU"' +
-  ' adtcore:name="ZKRI_MCP_MSG" adtcore:type="MSAG/N" adtcore:version="active"' +
+  ' adtcore:name="ZDEV_MCP_MSG" adtcore:type="MSAG/N" adtcore:version="active"' +
   ` adtcore:description="${description}" adtcore:language="RU"` +
   ' xmlns:mc="http://www.sap.com/adt/MessageClass" xmlns:adtcore="http://www.sap.com/adt/core">' +
   '<adtcore:packageRef adtcore:type="DEVC/K" adtcore:name="$TMP"/>' +
@@ -76,10 +76,10 @@ describe('getMessages', () => {
       { no: '001', text: 'Data not found' },
       { no: '042', text: 'Value &amp;1 rejected', self: false, documented: true }
     ])]);
-    const result = answer(await handlers.handleGetMessages({ className: 'ZKRI_MCP_MSG' }));
+    const result = answer(await handlers.handleGetMessages({ className: 'ZDEV_MCP_MSG' }));
 
     expect(result.status).toBe('success');
-    expect(result.className).toBe('ZKRI_MCP_MSG');
+    expect(result.className).toBe('ZDEV_MCP_MSG');
     expect(result.description).toBe('Probe class');
     expect(result.packageName).toBe('$TMP');
     expect(result.totalMessages).toBe(2);
@@ -90,7 +90,7 @@ describe('getMessages', () => {
   it('filters by an explicit list and says which numbers are not there', async () => {
     const { handlers } = harness([classDocument([{ no: '001', text: 'One' }])]);
     const result = answer(await handlers.handleGetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       numbers: ['1', '999']
     }));
 
@@ -105,11 +105,11 @@ describe('getMessages', () => {
       { no: '100', text: 'gamma' }
     ]);
     const range = answer(await harness([document]).handlers
-      .handleGetMessages({ className: 'ZKRI_MCP_MSG', fromNumber: '2', toNumber: '99' }));
+      .handleGetMessages({ className: 'ZDEV_MCP_MSG', fromNumber: '2', toNumber: '99' }));
     expect(range.messages.map((m: any) => m.number)).toEqual(['050']);
 
     const search = answer(await harness([document]).handlers
-      .handleGetMessages({ className: 'ZKRI_MCP_MSG', search: 'GAM' }));
+      .handleGetMessages({ className: 'ZDEV_MCP_MSG', search: 'GAM' }));
     expect(search.messages.map((m: any) => m.number)).toEqual(['100']);
   });
 
@@ -118,7 +118,7 @@ describe('getMessages', () => {
   it('caps the answer and says it was cut', async () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ no: String(i + 1).padStart(3, '0'), text: `m${i}` }));
     const { handlers } = harness([classDocument(many)]);
-    const result = answer(await handlers.handleGetMessages({ className: 'ZKRI_MCP_MSG', maxMessages: 5 }));
+    const result = answer(await handlers.handleGetMessages({ className: 'ZDEV_MCP_MSG', maxMessages: 5 }));
 
     expect(result.messages).toHaveLength(5);
     expect(result.matched).toBe(30);
@@ -133,8 +133,8 @@ describe('getMessages', () => {
       }
     };
     const { handlers } = harness([classDocument([])], { statelessClone: stateless });
-    await handlers.handleGetMessages({ className: 'ZKRI_MCP_MSG' });
-    expect(calls).toEqual(['clone /sap/bc/adt/messageclass/zkri_mcp_msg']);
+    await handlers.handleGetMessages({ className: 'ZDEV_MCP_MSG' });
+    expect(calls).toEqual(['clone /sap/bc/adt/messageclass/zdev_mcp_msg']);
   });
 });
 
@@ -142,17 +142,17 @@ describe('getMessageLongtext', () => {
   it('asks for the language explicitly and hands back the html', async () => {
     const { handlers, requests } = harness([classDocument([])]);
     const result = answer(await handlers.handleGetMessageLongtext({
-      className: 'ZKRI_MCP_MSG', number: '1', language: 'e'
+      className: 'ZDEV_MCP_MSG', number: '1', language: 'e'
     }));
 
-    expect(requests[0].url).toBe('/sap/bc/adt/messageclass/zkri_mcp_msg/messages/001/longtext');
+    expect(requests[0].url).toBe('/sap/bc/adt/messageclass/zdev_mcp_msg/messages/001/longtext');
     expect(requests[0].qs).toEqual({ language: 'E' });
     expect(result.longtext).toContain('Because.');
   });
 
   it('defaults to the logon language', async () => {
     const { handlers, requests } = harness([classDocument([])]);
-    await handlers.handleGetMessageLongtext({ className: 'ZKRI_MCP_MSG', number: '1' });
+    await handlers.handleGetMessageLongtext({ className: 'ZDEV_MCP_MSG', number: '1' });
     expect(requests[0].qs).toEqual({ language: 'RU' });
   });
 });
@@ -167,15 +167,15 @@ describe('setMessages', () => {
     const { handlers, calls, requests } = harness([before, after]);
 
     const result = answer(await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '42', text: 'Brand new' }]
     }));
 
     expect(calls).toEqual([
-      'GET /sap/bc/adt/messageclass/zkri_mcp_msg',
+      'GET /sap/bc/adt/messageclass/zdev_mcp_msg',
       'lock',
-      'PUT /sap/bc/adt/messageclass/zkri_mcp_msg',
-      'GET /sap/bc/adt/messageclass/zkri_mcp_msg',
+      'PUT /sap/bc/adt/messageclass/zdev_mcp_msg',
+      'GET /sap/bc/adt/messageclass/zdev_mcp_msg',
       'unlock'
     ]);
     expect(result.status).toBe('success');
@@ -196,7 +196,7 @@ describe('setMessages', () => {
   it('carries the current description into the write', async () => {
     const { handlers, requests } = harness([classDocument([{ no: '001', text: 'One' }], 'Important class')]);
     await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'Two' }]
     });
     const put = requests.find(r => r.method === 'PUT');
@@ -207,7 +207,7 @@ describe('setMessages', () => {
   it('writes a new description when one is given', async () => {
     const { handlers, requests } = harness([classDocument([{ no: '001', text: 'One' }], 'Old')]);
     await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'One' }],
       description: 'New'
     });
@@ -218,7 +218,7 @@ describe('setMessages', () => {
     const unchanged = classDocument([{ no: '001', text: 'One' }]);
     const { handlers } = harness([unchanged, unchanged]);
     const result = answer(await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '042', text: 'Never lands' }]
     }));
 
@@ -228,13 +228,13 @@ describe('setMessages', () => {
   });
 
   it('leaves a lock this process already held in place', async () => {
-    lockRegistry.remember('/sap/bc/adt/messageclass/zkri_mcp_msg', 'OUTER', undefined);
+    lockRegistry.remember('/sap/bc/adt/messageclass/zdev_mcp_msg', 'OUTER', undefined);
     const before = classDocument([]);
     const after = classDocument([{ no: '001', text: 'One' }]);
     const { handlers, calls } = harness([before, after]);
 
     const result = answer(await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'One' }]
     }));
 
@@ -255,7 +255,7 @@ describe('setMessages', () => {
       }
     });
     const result = answer(await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'One' }]
     }));
 
@@ -266,28 +266,28 @@ describe('setMessages', () => {
   });
 
   it('refuses to change a transported class without a request', async () => {
-    const inPackage = classDocument([{ no: '001', text: 'One' }]).replace('adtcore:name="$TMP"', 'adtcore:name="ZMM_BASE"');
+    const inPackage = classDocument([{ no: '001', text: 'One' }]).replace('adtcore:name="$TMP"', 'adtcore:name="ZAPP_BASE"');
     const { handlers } = harness([inPackage]);
     await expect(handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'Two' }]
     })).rejects.toThrow(/transport request/);
   });
 
   it('passes the transport as corrNr', async () => {
-    const inPackage = classDocument([{ no: '001', text: 'One' }]).replace('adtcore:name="$TMP"', 'adtcore:name="ZMM_BASE"');
+    const inPackage = classDocument([{ no: '001', text: 'One' }]).replace('adtcore:name="$TMP"', 'adtcore:name="ZAPP_BASE"');
     const { handlers, requests } = harness([inPackage, inPackage]);
     await handlers.handleSetMessages({
-      className: 'ZKRI_MCP_MSG',
+      className: 'ZDEV_MCP_MSG',
       messages: [{ number: '001', text: 'One' }],
-      transport: 'EUDK9A3OOT'
+      transport: 'DEVK9A3OOT'
     });
-    expect(requests.find(r => r.method === 'PUT').qs).toEqual({ lockHandle: 'HANDLE', corrNr: 'EUDK9A3OOT' });
+    expect(requests.find(r => r.method === 'PUT').qs).toEqual({ lockHandle: 'HANDLE', corrNr: 'DEVK9A3OOT' });
   });
 
   it('refuses an empty message list', async () => {
     const { handlers } = harness([classDocument([])]);
-    await expect(handlers.handleSetMessages({ className: 'ZKRI_MCP_MSG', messages: [] }))
+    await expect(handlers.handleSetMessages({ className: 'ZDEV_MCP_MSG', messages: [] }))
       .rejects.toThrow(/Pass messages/);
   });
 });
@@ -299,7 +299,7 @@ describe('createMessageClass', () => {
   it('treats a validation answer with no verdict as no objection', async () => {
     const { handlers, calls } = harness([classDocument([]), classDocument([{ no: '001', text: 'One' }])]);
     const result = answer(await handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG',
+      name: 'ZDEV_MCP_MSG',
       packageName: '$TMP',
       description: 'Probe class',
       messages: [{ number: '001', text: 'One' }]
@@ -317,7 +317,7 @@ describe('createMessageClass', () => {
       validateNewObject: async () => ({ success: false, SEVERITY: 'WARNING', SHORT_TEXT: 'Name is already taken.' })
     });
     const result = answer(await handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG', packageName: '$TMP', description: 'Probe'
+      name: 'ZDEV_MCP_MSG', packageName: '$TMP', description: 'Probe'
     }));
 
     expect(result.status).toBe('error');
@@ -329,7 +329,7 @@ describe('createMessageClass', () => {
   it('creates an empty class when no messages are given', async () => {
     const { handlers, calls } = harness([classDocument([])]);
     const result = answer(await handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG', packageName: '$TMP', description: 'Probe'
+      name: 'ZDEV_MCP_MSG', packageName: '$TMP', description: 'Probe'
     }));
 
     expect(result.status).toBe('success');
@@ -343,7 +343,7 @@ describe('createMessageClass', () => {
       createObject: async (options: any) => { created.push(options); }
     });
     await handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG', packageName: '$TMP', description: 'Probe'
+      name: 'ZDEV_MCP_MSG', packageName: '$TMP', description: 'Probe'
     });
     expect(created[0].language).toBe('RU');
     expect(created[0].masterLanguage).toBe('RU');
@@ -352,14 +352,14 @@ describe('createMessageClass', () => {
   it('refuses a package other than $TMP without a transport', async () => {
     const { handlers } = harness([classDocument([])]);
     await expect(handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG', packageName: 'ZMM_BASE', description: 'Probe'
+      name: 'ZDEV_MCP_MSG', packageName: 'ZAPP_BASE', description: 'Probe'
     })).rejects.toThrow(/transport request/);
   });
 
   it('validates and stops on a dry run', async () => {
     const { handlers, calls } = harness([classDocument([])]);
     const result = answer(await handlers.handleCreateMessageClass({
-      name: 'ZKRI_MCP_MSG', packageName: '$TMP', description: 'Probe', dryRun: true
+      name: 'ZDEV_MCP_MSG', packageName: '$TMP', description: 'Probe', dryRun: true
     }));
 
     expect(result.dryRun).toBe(true);

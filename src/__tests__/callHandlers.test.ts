@@ -11,7 +11,7 @@ import { RESULT_MARKER, RESULT_END } from '../lib/asXml';
  */
 
 const FM_SOURCE = [
-  'FUNCTION z_mm_get_invoice',
+  'FUNCTION z_app_get_invoice',
   '  IMPORTING',
   '    VALUE(IV_LGNUM) TYPE LGNUM',
   '    VALUE(IV_DATE) TYPE DATS OPTIONAL',
@@ -28,7 +28,7 @@ const FM_SOURCE = [
 ].join('\n');
 
 const CLASS_SOURCE = [
-  'CLASS zcl_mm DEFINITION PUBLIC FINAL CREATE PUBLIC .',
+  'CLASS zcl_app DEFINITION PUBLIC FINAL CREATE PUBLIC .',
   '  PUBLIC SECTION.',
   '    CLASS-METHODS get_stawn',
   '      IMPORTING !iv_matnr TYPE matnr',
@@ -36,15 +36,15 @@ const CLASS_SOURCE = [
   '    METHODS do_it IMPORTING iv_a TYPE c.',
   '    METHODS if_x~run REDEFINITION.',
   'ENDCLASS.',
-  'CLASS zcl_mm IMPLEMENTATION.',
+  'CLASS zcl_app IMPLEMENTATION.',
   'ENDCLASS.'
 ].join('\n');
 
 const searchRow = {
-  'adtcore:name': 'Z_MM_GET_INVOICE',
+  'adtcore:name': 'Z_APP_GET_INVOICE',
   'adtcore:type': 'FUGR/FF',
-  'adtcore:uri': '/sap/bc/adt/functions/groups/zmm_invoice/fmodules/z_mm_get_invoice',
-  'adtcore:packageName': 'ZMM_BASE'
+  'adtcore:uri': '/sap/bc/adt/functions/groups/zapp_invoice/fmodules/z_app_get_invoice',
+  'adtcore:packageName': 'ZAPP_BASE'
 };
 
 /** A console output carrying an asXML payload the way the generated code does. */
@@ -100,14 +100,14 @@ describe('callFunction', () => {
   it('reads the signature, calls the module and returns its values by name', async () => {
     const { handlers, ran } = handler();
     const result = answer(await handlers.handleCallFunction({
-      name: 'z_mm_get_invoice',
+      name: 'z_app_get_invoice',
       values: { IV_LGNUM: '101' }
     }));
 
     expect(result).toMatchObject({
       status: 'success',
-      called: 'Z_MM_GET_INVOICE',
-      functionGroup: 'ZMM_INVOICE',
+      called: 'Z_APP_GET_INVOICE',
+      functionGroup: 'ZAPP_INVOICE',
       ran: true,
       rolledBack: true,
       subrc: 0,
@@ -121,35 +121,35 @@ describe('callFunction', () => {
     expect(result.truncated).toBeUndefined();
 
     const generated = sourceOf(ran);
-    expect(generated).toContain("CALL FUNCTION 'Z_MM_GET_INVOICE'");
+    expect(generated).toContain("CALL FUNCTION 'Z_APP_GET_INVOICE'");
     expect(generated).toContain('p_iv_lgnum = `101`.');
     expect(generated).toContain('ROLLBACK WORK.');
   });
 
   it('refuses an unknown parameter without sending anything to the system', async () => {
     const { handlers, ran } = handler();
-    await expect(handlers.handleCallFunction({ name: 'Z_MM_GET_INVOICE', values: { IV_LGNUMM: '1' } }))
+    await expect(handlers.handleCallFunction({ name: 'Z_APP_GET_INVOICE', values: { IV_LGNUMM: '1' } }))
       .rejects.toThrow(/no parameter IV_LGNUMM/);
     expect(ran).toHaveLength(0);
   });
 
   it('refuses a call with a mandatory parameter missing', async () => {
     const { handlers, ran } = handler();
-    await expect(handlers.handleCallFunction({ name: 'Z_MM_GET_INVOICE', values: {} }))
+    await expect(handlers.handleCallFunction({ name: 'Z_APP_GET_INVOICE', values: {} }))
       .rejects.toThrow(/needs a value for IV_LGNUM/);
     expect(ran).toHaveLength(0);
   });
 
   it('refuses values that are not an object', async () => {
     const { handlers } = handler();
-    await expect(handlers.handleCallFunction({ name: 'Z_MM_GET_INVOICE', values: '[1,2]' }))
+    await expect(handlers.handleCallFunction({ name: 'Z_APP_GET_INVOICE', values: '[1,2]' }))
       .rejects.toThrow(/must be an object/);
   });
 
   it('accepts values passed as a JSON string, the way some clients send them', async () => {
     const { handlers } = handler();
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: '{"IV_LGNUM":"101"}'
     }));
     expect(result.supplied).toEqual(['IV_LGNUM']);
@@ -158,13 +158,13 @@ describe('callFunction', () => {
   it('shows what would run on a dry run and touches nothing', async () => {
     const { handlers, ran } = handler();
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' },
       dryRun: true
     }));
     expect(result).toMatchObject({ status: 'success', dryRun: true });
     expect(result.source).toContain('INTERFACES if_oo_adt_classrun');
-    expect(result.source).toContain("CALL FUNCTION 'Z_MM_GET_INVOICE'");
+    expect(result.source).toContain("CALL FUNCTION 'Z_APP_GET_INVOICE'");
     expect(ran).toHaveLength(0);
   });
 
@@ -173,7 +173,7 @@ describe('callFunction', () => {
       output: consoleWith(['<MCP_SUBRC>2</MCP_SUBRC>', '<EV_COUNT>0</EV_COUNT>'])
     });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' }
     }));
     expect(result).toMatchObject({ status: 'error', subrc: 2, exceptionRaised: 'NO_AUTHORITY' });
@@ -188,7 +188,7 @@ describe('callFunction', () => {
       ])
     });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' }
     }));
     expect(result).toMatchObject({
@@ -207,7 +207,7 @@ describe('callFunction', () => {
       ])
     });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' },
       maxRows: 1
     }));
@@ -219,7 +219,7 @@ describe('callFunction', () => {
   it('commits only when asked, and says so', async () => {
     const { handlers, ran } = handler();
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' },
       commit: true
     }));
@@ -242,7 +242,7 @@ describe('callFunction', () => {
       }
     });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' }
     }));
     expect(result).toMatchObject({ status: 'error', ran: false });
@@ -254,7 +254,7 @@ describe('callFunction', () => {
   it('keeps whatever the callee printed when there is no payload', async () => {
     const { handlers } = handler({ output: 'the module wrote this and nothing else' });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' }
     }));
     expect(result).toMatchObject({ status: 'error', ran: true, output: 'the module wrote this and nothing else' });
@@ -266,7 +266,7 @@ describe('callFunction', () => {
       output: `${RESULT_MARKER}${Buffer.from('<html>no</html>', 'utf8').toString('base64')}${RESULT_END}`
     });
     const result = answer(await handlers.handleCallFunction({
-      name: 'Z_MM_GET_INVOICE',
+      name: 'Z_APP_GET_INVOICE',
       values: { IV_LGNUM: '101' }
     }));
     expect(result.status).toBe('error');
@@ -285,43 +285,43 @@ describe('callMethod', () => {
       output: consoleWith(['<MCP_SUBRC>0</MCP_SUBRC>', '<RV_STAWN>8471300000</RV_STAWN>'])
     });
     const result = answer(await handlers.handleCallMethod({
-      className: 'zcl_mm',
+      className: 'zcl_app',
       methodName: 'get_stawn',
       values: { IV_MATNR: '4711' }
     }));
 
     expect(result).toMatchObject({
       status: 'success',
-      called: 'ZCL_MM=>GET_STAWN',
+      called: 'ZCL_APP=>GET_STAWN',
       visibility: 'public',
       values: { RV_STAWN: '8471300000' }
     });
     const generated = sourceOf(ran);
-    expect(generated).toContain('CALL METHOD zcl_mm=>get_stawn');
+    expect(generated).toContain('CALL METHOD zcl_app=>get_stawn');
     expect(generated).toContain('RECEIVING');
   });
 
   it('refuses an instance method and says what to use instead', async () => {
     const { handlers, ran } = handler();
-    await expect(handlers.handleCallMethod({ className: 'ZCL_MM', methodName: 'DO_IT', values: { IV_A: 'X' } }))
+    await expect(handlers.handleCallMethod({ className: 'ZCL_APP', methodName: 'DO_IT', values: { IV_A: 'X' } }))
       .rejects.toThrow(/instance method[\s\S]*runSnippet/);
     expect(ran).toHaveLength(0);
   });
 
   it('refuses a redefinition too, which is always an instance method', async () => {
     const { handlers } = handler();
-    await expect(handlers.handleCallMethod({ className: 'ZCL_MM', methodName: 'IF_X~RUN' }))
+    await expect(handlers.handleCallMethod({ className: 'ZCL_APP', methodName: 'IF_X~RUN' }))
       .rejects.toThrow(/instance method/);
   });
 
   it('answers an unknown method with the ones the class declares', async () => {
     const { handlers } = handler();
-    await expect(handlers.handleCallMethod({ className: 'ZCL_MM', methodName: 'GET_STAWNN' }))
+    await expect(handlers.handleCallMethod({ className: 'ZCL_APP', methodName: 'GET_STAWNN' }))
       .rejects.toThrow(/does not declare GET_STAWNN[\s\S]*GET_STAWN/);
   });
 
   it('refuses a call missing the class or the method', async () => {
     const { handlers } = handler();
-    await expect(handlers.handleCallMethod({ className: 'ZCL_MM' })).rejects.toThrow(/Pass className and methodName/);
+    await expect(handlers.handleCallMethod({ className: 'ZCL_APP' })).rejects.toThrow(/Pass className and methodName/);
   });
 });

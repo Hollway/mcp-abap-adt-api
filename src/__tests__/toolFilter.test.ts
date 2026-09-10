@@ -9,7 +9,7 @@ const profile = (over: Partial<ToolProfile> = {}): ToolProfile => ({
   ...over
 });
 
-const SYSTEM = 'https://sap.example/EUQ00';
+const SYSTEM = 'https://sap.example/QAS';
 
 describe('open profile', () => {
   it('refuses nothing', () => {

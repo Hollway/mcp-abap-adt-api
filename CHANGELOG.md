@@ -1,727 +1,605 @@
-# История изменений
+# Changelog
 
-Соглашение этой ветки: **один чат — одна версия.** Каждый раз, когда работа над
-сервером продолжается в новом чате, сверху добавляется раздел новой версии:
-дата, диапазон коммитов, как изменилось число инструментов и тестов, и что
-именно сделано. Так видно, что принесла каждая итерация, а не только то, в каком
-состоянии всё оказалось сейчас.
+This fork adds tools, guardrails and tests on top of the upstream server. Every
+version below was developed against live SAP systems (a classic ERP system, an
+S/4 system and a read-only QA system), and the entries record what the backend
+actually does — not what its documentation implies.
 
-Версии этой ветки в npm не выпускались: `package.json` остаётся на `0.1.1`
-апстрима, номера ниже — история доработки.
+The versions here were never published to npm: `package.json` stays on the
+upstream `0.1.1`, and the numbers below are the history of this fork.
 
-Диапазон коммитов версии заканчивается её последним содержательным коммитом —
-коммиты самого этого файла в него не входят, иначе он не сойдётся никогда.
+## [0.7.0] — calling existing code, and the dictionary in full
 
-**С версии `[0.6.0]` файл ведётся один.** До неё у него был английский близнец
-на ветке `pr/hardening`, и оба правились вместе: это нужно было, чтобы
-предложить доработку апстриму. Отправка наверх не планируется, так что ветка
-удалена, а история изменений остаётся только здесь.
+Tools 171 → **176**, tests 457 → **635** in 39 suites. Read-only smoke run: 141
+checks.
 
-## [0.7.0] — 2026-09-09, чат 6: вызов существующего кода и словарь целиком
+### Calling code that already exists, with parameters
 
-Коммиты `6c845ce..00fff5b` (8).
-Инструментов 171 → **176**, тестов 457 → **635** в 39 наборах,
-`npm run smoke` — 141 проверка, только чтение.
+- **`callFunction`** takes a function module name and parameter values, reads
+  the signature, generates the call and runs it through a throwaway class in
+  `$TMP`. The answer carries exporting/changing/tables by name, `sy-subrc`
+  turned back into the **name** of the classic exception, a class-based
+  exception with its T100 text, the real row count of every table, and whatever
+  was substituted for a generic type.
+- **`callMethod`** does the same for a **static** method. The signature has to
+  come from the class source: `classComponents` lists methods but not their
+  parameters. An instance method is refused with a pointer to `runSnippet`.
+- Values are checked against the signature **before** anything is sent: an
+  unknown parameter name or a missing mandatory one is refused with the list of
+  what the call accepts. Otherwise a typo would come back as a compile error in
+  code nobody wrote.
+- Both **execute code** on the system as the connected user, so they count as
+  writing tools and are hidden in read-only mode. Results are **not** kept by
+  default: the generated code ends in `ROLLBACK WORK` unless `commit` is passed.
+  A function module that commits on its own cannot be rolled back — the tool
+  description says so.
+- Results travel through `CALL TRANSFORMATION id` and are printed base64 between
+  markers: the console is a formatted channel, free to break a long line, and a
+  break inside a field value would corrupt it silently.
 
-Из плана этого чата взяты два направления: вызвать то, что уже есть на системе,
-с параметрами — и прочитать словарь так, как его знает сам словарь.
-Кросс-системное сравнение из плана **убрано**: те же вопросы закрывают STMS и
-штатное удалённое сравнение версий в SE38/SE80, а читать соседние системы и так
-можно отдельными серверами.
+### The dictionary in full
 
-### Вызов существующего кода с параметрами
+- **`tableFields`** returns the fields of a table or structure with includes
+  **expanded**: for a large purchasing-item table that is 702 fields against the
+  307 its own definition lists. Each field carries position, key and `NOT NULL`
+  flags, data element, domain, type, length, decimals, check table, unit or
+  currency field, conversion exit and the text in the logon language.
+  `keysOnly`, `fields` and `maxFields` keep hundreds-of-fields tables usable.
+- **`tableIndexes`** and **`tableKeys`** return secondary indexes with their
+  fields in order, and foreign keys with check table, what fills its key,
+  cardinality and whether the value is checked on input.
+- All of it is **read-only** — nothing is executed. The dictionary is most often
+  needed on exactly the systems where nothing may be run.
+- A domain's value table is **not** passed off as a field's check table: it is
+  not one, and saying so would be worse than saying nothing.
 
-- **`callFunction`** принимает имя ФМ и значения параметров, читает сигнатуру,
-  генерирует вызов и выполняет его через одноразовый класс в `$TMP`. В ответе —
-  exporting/changing/tables по именам, `sy-subrc`, превращённый обратно в **имя**
-  классического исключения, классовое исключение с текстом T100, настоящее число
-  строк каждой таблицы и то, что было подставлено вместо родового типа.
-- **`callMethod`** — то же для **статического** метода. Сигнатуру приходится
-  читать из исходника класса: `classComponents` перечисляет методы, но не их
-  параметры. Экземплярный метод отбивается с указанием на `runSnippet`.
-- Значения сверяются с сигнатурой **до** отправки: незнакомое имя параметра и
-  незаполненный обязательный отбиваются со списком того, что вызов принимает.
-  Иначе опечатка приезжала бы ошибкой компиляции в коде, которого никто не писал.
-- Оба **исполняют код** на системе от имени подключённого пользователя, поэтому
-  отнесены к пишущим и в read-only режиме прячутся. Результат по умолчанию **не
-  сохраняется**: сгенерированный код заканчивается `ROLLBACK WORK`, если не
-  передан `commit`. ФМ, который сам делает `COMMIT WORK`, откатить нечем — это
-  сказано в описании инструмента.
-- Результаты передаются через `CALL TRANSFORMATION id` и печатаются base64 между
-  маркерами: консоль — форматированный канал, она вправе разорвать длинную
-  строку, и разрыв внутри значения поля испортил бы его молча.
+### What the data preview endpoint turned out to require
 
-### Словарь целиком
+Two limits, both found by running against a live system, shaped every query:
 
-- **`tableFields`** отдаёт поля таблицы или структуры с **раскрытыми**
-  включениями: у `EKPO` это 702 поля против 307, которые перечисляет её
-  собственное определение. На каждом поле — позиция, признаки ключа и
-  `NOT NULL`, элемент данных, домен, тип, длина, знаки после запятой,
-  проверочная таблица, поле единицы или валюты, конверсионный выход и текст на
-  языке подключения. Есть `keysOnly`, `fields` и `maxFields` — для таблиц на
-  сотни полей.
-- **`tableIndexes`** и **`tableKeys`** — вторичные индексы с их полями по
-  порядку и внешние ключи с проверочной таблицей, тем, что заполняет её ключ,
-  мощностью связи и признаком, проверяется ли значение на вводе.
-- Всё это **только чтение**, ничего не исполняется: словарь чаще всего нужен как
-  раз на системах, где ничего запускать нельзя.
-- Таблица значений домена **не** выдаётся за проверочную таблицу поля: это не
-  она, и сказать так было бы хуже, чем не сказать ничего.
+- **255 characters per query**, counting the whole query. Splitting across lines
+  does not help: a newline there is not even whitespace, and the parser reads a
+  table name with a newline and `WHERE` as one identifier. So columns are
+  requested densely, `ORDER BY` is dropped where sorting can happen afterwards,
+  and name lists are cut by what fits rather than by count.
+- **Spaces are required around `=`.** `tabname='EKPO'` is rejected with "a
+  logical expression is required at positions starting from TABNAME=". Commas in
+  the select list do not need spaces.
 
-### Что выяснилось про эндпоинт предпросмотра данных
+Three columns are also not named the way they sound: `DD12L` has no
+`UNIQUE_SQL`, `DD05S` calls the position `PRIMPOS` and has no `CHECKFIELD`, and
+`DD08L` keeps cardinality in `CARDLEFT` and `CARD`, not `CARDLEFT`/`CARDRIGHT`.
 
-Два ограничения, определившие вид всех запросов, — оба нашлись прогоном:
+### Seven defects the live runs found
 
-- **255 символов на запрос**, причём считается весь запрос. Разбивать на строки
-  бесполезно: перевод строки там даже не пробельный символ, и парсер читает
-  `dd03l` с переводом строки и `WHERE` как одно имя таблицы. Поэтому столбцы
-  запрашиваются плотно, `ORDER BY` опущен там, где сортировку можно сделать
-  после, а список имён режется по тому, что влезает, а не по количеству.
-- **Вокруг `=` нужны пробелы.** `tabname='EKPO'` отбивается сообщением
-  «требуется логическое выражение в позициях, начиная с TABNAME=». Запятые в
-  списке выборки — можно без пробелов.
+Each one passed the unit tests and was wrong against a real system.
 
-Плюс три столбца называются не так, как звучат: в DD12L нет `UNIQUE_SQL`, в
-DD05S позиция — `PRIMPOS` и нет `CHECKFIELD` (там имя поля, заполняющего ключ
-проверочной таблицы, или константа), а в DD08L мощность связи лежит в `CARDLEFT`
-и `CARD`, а не `CARDLEFT`/`CARDRIGHT`.
+1. **A generic type cannot be declared.** Half the standard function modules
+   type a parameter that way — `CONVERSION_EXIT_ALPHA_INPUT` takes `CLIKE` — and
+   `DATA` refuses it. A concrete type is now substituted, and the substitution
+   is reported in the answer. Unqualified character types are widened too:
+   `DATA x TYPE c` compiles and means `C(1)`, so a value would have been
+   silently truncated to one character.
+2. **`LIKE` becomes `TYPE`, and a `TABLES` parameter becomes a table.**
+   `DDIF_FIELDINFO_GET` declares `TABLES DFIES_TAB LIKE DFIES`, and both halves
+   were being taken literally: a dictionary type cannot be referenced through
+   `LIKE`, and a `TABLES` parameter needs a table, not one of its rows.
+3. **You cannot ask at runtime whether a result is a table.** `lines( )` of a
+   non-table is a syntax error, and so is `ASSIGN` into a field symbol of
+   `TYPE ANY TABLE`. Every call with an elementary exporting parameter died
+   there. Row counting stays with `TABLES`, where the table is known.
+4. **A table is not serialised as `<item>` rows.** When it has a named row type,
+   asXML names the rows after it, and a 19-field structure arrived as a
+   structure with one component. A repeated name is now read as a table, and
+   because a one-row table of a named type is indistinguishable from a
+   structure, the generated code asks RTTI which results are tables and reports
+   it.
+5. **A type declared inside a class must be qualified.** A method taking
+   `CHANGING ct_x TYPE tt_x` cannot be called from outside without
+   `zcl_something=>tt_x` — the snippet was refused with "type TT_X is unknown".
+   Class types are collected and qualified, including inside composite
+   expressions. `BEGIN OF … END OF` components are deliberately not collected: a
+   component named `MATNR`, mistaken for a type, would turn every `MATNR`
+   parameter into a class-qualified type that does not exist.
+6. **`TYPE p` is left alone.** Widening it means guessing the decimals, and the
+   guess is wrong in both directions: `DECIMALS 4` made a timestamp method
+   reject its argument, `DECIMALS 0` would silently cut the fraction off a
+   quantity. The ABAP default is at least documented.
+7. **An exception class name arrives as an absolute type.** RTTI answers
+   `\CLASS=CX_...`, and only the class name is wanted.
 
-### Семь дефектов, найденных живыми прогонами
+**Not verified live:** `commit: true` — no run committed on purpose.
 
-Каждый прошёл юнит-тесты и каждый был неверен против живой системы.
+## [0.6.0] — function modules, an ABAP console, revisions, impact, class members
 
-1. **Родовой тип нельзя объявить.** Половина штатных ФМ типизирует параметр
-   именно так — `CONVERSION_EXIT_ALPHA_INPUT` принимает `CLIKE`, — и `DATA`
-   отказывается: «CLIKE имеет родовой тип». Теперь подставляется конкретный тип,
-   а подстановка сообщается в ответе. Неуточнённые символьные типы тоже
-   расширяются: `DATA x TYPE c` компилируется и означает `C(1)`, то есть
-   значение молча обрезалось бы до одного символа.
-2. **`LIKE` становится `TYPE`, а параметр `TABLES` — таблицей.**
-   `DDIF_FIELDINFO_GET` объявляет `TABLES DFIES_TAB LIKE DFIES`, и обе половины
-   этого понимались буквально: на тип словаря нельзя ссылаться через `LIKE`, а
-   параметру `TABLES` нужна таблица, а не одна её строка.
-3. **Спросить в рантайме, таблица ли результат, нельзя.** `lines( )` от
-   не-таблицы — синтаксическая ошибка, и `ASSIGN` в поле-символ
-   `TYPE ANY TABLE` тоже: «P_OUTPUT несовместимо по типу с <MCP_TAB>». На этом
-   падал каждый вызов с элементарным exporting-параметром. Подсчёт строк остался
-   у `TABLES`, где таблица известна; для остального считается то, что приехало, —
-   а приезжает всё.
-4. **Таблица пишется не строками `<item>`.** Когда у неё именованный тип строки,
-   asXML называет строки по нему — `<DFIES_TAB><DFIES>…</DFIES></DFIES_TAB>` — и
-   19 полей `ZMMSTEP_POS` приехали как структура с одним компонентом. Теперь
-   повторяющееся имя читается как таблица, а поскольку однострочная таблица
-   именованного типа всё равно неотличима от структуры, генерируемый код
-   спрашивает RTTI, что из результатов таблица, и сообщает это в ответе.
-5. **Тип, объявленный внутри класса, надо квалифицировать.**
-   `ZCL_MM=>GET_STAWN` принимает `CHANGING ct_stawn TYPE tt_stawn`, и вне класса
-   `tt_stawn` не значит ничего: сниппет отбивался с «тип TT_STAWN является
-   неизвестным». Типы класса собираются и пишутся как `zcl_mm=>tt_stawn` — в том
-   числе внутри составного выражения. Компоненты `BEGIN OF … END OF` при этом
-   сознательно не собираются: компонент с именем `MATNR`, принятый за тип,
-   превратил бы каждый параметр типа `MATNR` в `ZCL_MM=>MATNR`, которого нет.
-6. **`TYPE p` оставлен как есть.** Расширять его — значит угадывать знаки после
-   запятой, и угадывание неверно в любую сторону: `DECIMALS 4` заставил
-   `CL_ABAP_TSTMP=>ADD` отбить метку времени как «недопустимый тип»,
-   `DECIMALS 0` молча отрезал бы дробную часть количества. Штатное умолчание
-   ABAP хотя бы документировано.
-7. **Имя класса исключения приезжает абсолютным типом.** RTTI отвечает
-   `\CLASS=CX_PARAMETER_INVALID_RANGE`, а нужно только имя класса.
+Tools 162 → **171**, tests 284 → **457** in 33 suites. Read-only smoke run: 121
+checks.
 
-### Проверено живьём на EUD00
+This is where wrapping the library ran out: of the 158 public `ADTClient`
+methods, 12 remain uncovered, and all 12 deliberately (`activate` is replaced by
+`activateObjects`/`activateByName`/`activateSafe`, `syntaxCheck` by
+`syntaxCheckCode`, `changePackageExecute` is preview-only, eight `rapGen*` by
+`rapGenIsAvailable`, `objectStructureElements` is a helper). Everything added
+after this the library cannot do at all.
 
-Все одноразовые классы созданы в `$TMP` и удалены за собой, локов не осталось,
-все вызовы откачены: `CONVERSION_EXIT_ALPHA_INPUT` (полный цикл и подстановка
-типа), `DATE_CHECK_PLAUSIBILITY` (классическое исключение по имени и текст T100
-по-русски), `DDIF_FIELDINFO_GET` (таблица на 19 строк, обрезанная до двух, с
-настоящим числом строк), `Z_MM_GET_INVOICE`, `CL_ABAP_TSTMP=>ADD` (возвращаемый
-параметр и классовое исключение), `ZCL_MM=>GET_STAWN` (тип, объявленный в
-классе), отказ на экземплярном методе и на несуществующем — со списком тех, что
-есть. По словарю: `ZMMSTEP_POS` (19 полей с русскими текстами), `EKPO`
-(702 поля, 24 включения), ракурс `MARAV` (140 полей), 14 индексов `EKPO`,
-67 внешних ключей `EKPO`.
+### Function modules
 
-**Не проверено живьём:** `commit: true` — ни один вызов в прогонах не
-фиксировался намеренно.
+- **`getFunctionModule`, `listFunctionGroup`, `createFunctionModule`.** You
+  could not ask about a function module with what you actually have in hand:
+  `CALL FUNCTION 'Z_SOMETHING'` gives a name, and every endpoint wants the
+  **group**. The signature is worse: ADT serves it as the first statement of the
+  source rather than the `*"` block SE37 shows, so answering "what does this
+  module take" meant reading 1100 lines and parsing ABAP by eye.
+- `getFunctionModule` takes one name, finds the group and returns the signature
+  as data: importing / exporting / changing / tables / exceptions with types,
+  defaults and a pass-by-value flag (`VALUE(NAME)` versus a bare name is easy to
+  read backwards). The body is not returned by default.
+- `listFunctionGroup` lists a group's modules, includes and global data. So does
+  `nodeContents`, but every row there carries a SAP GUI bridge link padded to 30
+  characters: 14,000 characters for a thirty-module group against about 3,000
+  here.
+- `createFunctionModule` creates a module in an existing group together with its
+  interface — otherwise the signature cannot be set, since it lives in the
+  source text. A missing group is refused with a pointer to what creates one.
 
-## [0.6.0] — 2026-09-09, чат 5: ФМ, ABAP-консоль, ревизии, влияние, члены класса, описания
+### ABAP console
 
-Коммиты `4e79e4d..85a08de` (13).
-Инструментов 162 → **171**, тестов 284 → **457** в 33 наборах,
-`npm run smoke` — 121 проверка, только чтение.
+- **`runSnippet`** executes a piece of ABAP and returns what it printed. There
+  was nothing to execute code with: `runQuery` reads only SELECT, `runClass`
+  needs an existing class implementing `IF_OO_ADT_CLASSRUN`. So the fragment is
+  wrapped in such a class, created in `$TMP`, activated, run and deleted.
+- This **executes code** as the connected user: the tool counts as writing and
+  is refused in read-only mode. A fragment that does not compile comes back with
+  the activation messages, the line, and the source that was written.
 
-Обёртки библиотеки на этом закончились: из 158 публичных методов `ADTClient`
-непокрытыми остались 12, и все 12 — сознательно (`activate` заменён тройкой
-`activateObjects`/`activateByName`/`activateSafe`, `syntaxCheck` →
-`syntaxCheckCode`, `changePackageExecute` — только preview, восемь `rapGen*` —
-только `rapGenIsAvailable`, `objectStructureElements` — вспомогательный).
-Всё, что добавлено дальше, библиотека не умеет вовсе.
+### Revisions and version comparison
 
-### Функциональные модули
+- **`revisions`** rewritten: takes a name and type (the URL still works),
+  returns the newest 20 instead of the whole history, and filters by author,
+  transport and description. On a class with 91 versions that is ~28,000
+  characters for the question "what changed last". It also names what the
+  backend does not: what it calls the "version" is the **transport request**,
+  and the version number lives only in the content URI.
+- **`compareRevisions`** shows what changed between two versions as a unified
+  diff. A side can be a revision number, a request number, or the words
+  `active` / `inactive` / `latest`, so an edit that is written but not activated
+  is visible too — version history does not show that at all.
+- The diff uses the **patience algorithm** rather than plain LCS: ABAP source is
+  full of repeats (`ENDIF.`, `ENDMETHOD.`, blank lines), and a minimal LCS pairs
+  one method's `ENDMETHOD` with another's, so inserting a method reads as
+  rewriting two unrelated ones. Only lines occurring once on each side anchor.
 
-- **`getFunctionModule`, `listFunctionGroup`, `createFunctionModule`.** О ФМ
-  нельзя было спросить ровно то, что есть на руках: `CALL FUNCTION
-  'Z_MM_GET_INVOICE'` даёт имя, а любому эндпоинту нужна **группа** —
-  `/sap/bc/adt/functions/groups/<группа>/fmodules/<модуль>/source/main`. С
-  сигнатурой хуже: ADT отдаёт её первым оператором исходника (а не блоком
-  `*"`, который показывает SE37), так что ответ на «что этот модуль
-  принимает» означал чтение 1100 строк и разбор ABAP глазами.
-- `getFunctionModule` берёт одно имя, находит группу и отдаёт сигнатуру
-  данными: importing / exporting / changing / tables / exceptions с типами,
-  значениями по умолчанию и признаком передачи по значению (`VALUE(ИМЯ)` против
-  простого имени — это легко прочитать наоборот). Тело по умолчанию не
-  возвращается.
-- `listFunctionGroup` — модули, инклюды и глобальные данные группы. То же
-  отдаёт `nodeContents`, но каждая строка несёт ссылку SAPGUI-моста, добитую
-  пробелами до 30 символов: 14 000 символов на группу из тридцати модулей
-  против примерно 3000 здесь.
-- `createFunctionModule` создаёт модуль в существующей группе вместе с
-  интерфейсом — иначе сигнатуру не задать, она живёт в тексте исходника.
-  Отсутствующая группа отбивается с указанием, чем её создать.
+### Impact analysis
 
-### ABAP-консоль
+- **`impactOf`** answers what depends on an object or on one of its methods:
+  objects, the places inside them, each one's package, worst first.
+  `usageReferences` answers the same question with a flat list that is really a
+  tree — for one 352-line class that is about 178,000 characters, past the
+  response cap. Uses from test includes are marked, standard SAP is counted but
+  hidden by default, and `depth=2` goes one step further and names the caller it
+  arrived through.
 
-- **`runSnippet`** — выполнить кусок ABAP и получить то, что он напечатал.
-  Выполнить код было нечем: `runQuery` читает только SELECT, `runClass` требует
-  уже существующий класс с `IF_OO_ADT_CLASSRUN`. Поэтому фрагмент оборачивается
-  в такой класс, создаётся в `$TMP`, активируется, запускается и удаляется.
-  Вывод — через `out->write( )` и `out->write_text( )`.
-- Это **исполнение кода** на системе от имени подключённого пользователя:
-  инструмент отнесён к пишущим, в read-only режиме отбивается. Фрагмент,
-  который не компилируется, возвращает сообщения активации со строкой и тот
-  исходник, который был записан.
+### Class members
 
-### Ревизии и сравнение версий
+- **`addMethod`, `addAttribute`, `deleteMethod`.** A method lives in two places
+  in one source, so adding one by hand is two `patchObjectSource` edits whose
+  line numbers must both still line up after the first. The signature is passed
+  as data, the ABAP is assembled here, and the indentation is taken from the
+  class. The edits are planned and handed to `editObject`, so the lock cycle,
+  diff and activation check are the ones already proven.
+- Where it refuses instead of guessing: the method already exists (with line
+  numbers), the class has no such visibility section, no IMPLEMENTATION part, no
+  `ENDMETHOD`, or a `METHODS:` chain line declares two methods at once —
+  deleting part of it would rewrite someone else's declaration. A single entry
+  in a chain is removed, closing the chain if it was the last.
 
-- **`revisions`** переписан: принимает имя и тип (URL остался), отдаёт
-  новейшие 20 вместо всей истории и фильтруется по автору, запросу и описанию.
-  На `ZCL_MM` это 91 строка и ~28 000 символов на вопрос о последнем
-  изменении. Заодно названы вещи, о которых бэкенд молчит: то, что он называет
-  «версией», — это **транспортный запрос**, а номер версии лежит только в URI
-  содержимого и отдаётся полем `revision`.
-- **`compareRevisions`** — что изменилось между двумя версиями, унифицированным
-  диффом. Сторона задаётся номером ревизии, номером запроса или словами
-  `active` / `inactive` / `latest`, так что видно и правку, которая записана,
-  но не активирована, — этого история версий не показывает вообще.
-- Дифф считается **patience-алгоритмом**, а не обычным LCS: исходник на ABAP
-  полон повторов (`ENDIF.`, `ENDMETHOD.`, пустые строки), и минимальный LCS
-  спаривает `ENDMETHOD` одного метода с `ENDMETHOD` другого — вставка метода
-  тогда читается как переписывание двух посторонних. Якорями служат только
-  строки, встречающиеся по одному разу с каждой стороны.
+### Tool descriptions
 
-### Анализ влияния
+- **112 of 171** tools carried upstream one-line stubs ("Runs a class.", "Lock
+  an object", "Deletes a trace."). The description is the only thing a model
+  picks a tool by, and not one measured limit had made it in. They are now
+  detailed where behaviour is non-obvious (locks, deletion, activation,
+  transports, debugger, refactorings, reading data) and one exact line where the
+  name speaks for itself — descriptions are paid for on every request.
+- Now stated outright: a lock handle dies with the session and must be released
+  **before** activation; `activateObjects` can answer success and leave the
+  object inactive; deletion does not release the lock; `validateNewObject`
+  answers 200 with an empty body on some collections; `runQuery` is SELECT only;
+  `tableContents` returns data, not fields; `searchObject`'s `objType` filter
+  silently loses subtypes such as `FUGR/FF`; `gitPullRepo` overwrites the
+  package's objects; releasing a request is irreversible and changes another
+  system. Plus the debugger order of work: breakpoints → listener → start the
+  program **from outside**, because this server cannot start it.
 
-- **`impactOf`** — что зависит от объекта или от одного его метода: объекты,
-  места внутри них, пакет каждого, по убыванию задетости. `usageReferences`
-  отвечает на это же плоским списком, который на самом деле дерево: у
-  `ZCL_MM_RETURN` — 352 строки и около 178 000 символов (вызов отбивается
-  ограничителем ответа), у `ZIF_MM_C` — 1074 строки. Использования из
-  тест-инклюдов помечаются, стандартный SAP по умолчанию не показывается и
-  считается, `depth=2` проходит на шаг дальше и называет вызывающего, через
-  которого дошёл.
+### Small things and dead code
 
-### Члены класса
+- The trailing loop in the package walk was unreachable: a subpackage found at
+  the depth limit lands in `notWalked` where it is seen, so the level the walk
+  ends on is always empty. Removed.
+- **The source cache was never invalidated**: after `deleteObject` it still held
+  the deleted object's text, and `syntaxCheckCode` reuses that text — so
+  checking an object that no longer exists answered "all fine". `forgetUnder`
+  now drops everything belonging to the object.
+- Three source-map addresses that had no test got one, including the only one
+  never verified by reading — `DCLS/DL`, for which no object exists on any of
+  the systems available; the address comes from discovery, and the code says so.
 
-- **`addMethod`, `addAttribute`, `deleteMethod`** — метод живёт в двух местах
-  одного исходника, поэтому добавление вручную — две правки
-  `patchObjectSource`, у которых обеих должны сойтись номера строк после
-  первой. Сигнатура передаётся данными, ABAP собирается здесь, отступы берутся
-  те, что уже в классе. Правки планируются и отдаются `editObject`, так что
-  цикл блокировки, дифф и проверка активации — те же, что уже проверены.
-- Где отбивается вместо угадывания: метод уже есть (с номерами строк), секции
-  видимости в классе нет, у класса нет части IMPLEMENTATION, у реализации нет
-  `ENDMETHOD`, и строка цепочки `METHODS:` объявляет два метода сразу — удалять
-  её часть значит переписать чужое объявление. Одну запись из цепочки
-  `deleteMethod` убирает, закрывая цепочку, если запись была последней.
+### Six defects these runs found
 
-### Описания инструментов
+1. A class include with no history answered "Revision URL not found for object
+   X" — as if a class with 91 versions had no history at all. The refusal now
+   names the includes that do have one.
+2. Comparing the two newest versions often comes out empty by default: releasing
+   a request leaves a copy with identical text. That is now said, rather than
+   read as "the last change did nothing".
+3. `FUGR/FF` matched the `FUGR/F` family prefix in impact parsing and hid the
+   group it belongs to.
+4. A standalone include was reported as a place inside itself.
+5. Search with `objType=FUGR/FF` answers an empty list: quick search does not
+   accept that subtype. The search now runs unfiltered and the type is selected
+   on this side.
+6. Body assembly ate the caller's indentation — an `IF` block turned into a
+   flat list. Fixed in class method assembly too.
 
-- **112 из 171** инструмента несли апстримовые заглушки в одну строку («Runs a
-  class.», «Lock an object», «Deletes a trace.»). Описание — единственное, по
-  чему модель выбирает инструмент, и ни одно из измеренных живьём ограничений
-  в них не попало. Теперь подробно там, где поведение неочевидно (локи,
-  удаление, активация, транспорты, отладчик, рефакторинги, чтение данных), и
-  одной точной строкой там, где имя говорит само (трассы, git, discovery,
-  вспомогательные ATC) — потому что описания оплачиваются на каждом запросе.
-- Что теперь сказано прямо: дескриптор блокировки умирает вместе с сессией и
-  снимать его надо **до** активации; `activateObjects` может ответить успехом,
-  оставив объект неактивным; удаление не снимает лок; `validateNewObject` на
-  части коллекций отвечает 200 с пустым телом; `runQuery` — только SELECT;
-  `tableContents` отдаёт данные, а не поля; фильтр `objType` у `searchObject`
-  молча теряет подтипы вроде `FUGR/FF`; `gitPullRepo` перезаписывает объекты
-  пакета; релиз запроса необратим и меняет другую систему. И порядок работы с
-  отладчиком: точки останова → слушатель → запуск программы **извне**, потому
-  что запустить её этот сервер не может.
+Plus two found by a fragment that dumps: **a dump takes the session with it**
+(the run answers 500, the next call an empty 400), so the cleanup right after it
+failed — and every failed fragment left its class behind in `$TMP`. Deletion now
+logs in again and retries. The 500 itself says nothing: the cause is in the dump
+feed, a 10,088-character ST22 HTML page, from which six fields and the failing
+source line are now extracted.
 
-### Мелочи и мёртвый код
+## [0.5.0] — SE91 messages, tables and structures, package-wide work, ATC
 
-- Хвостовой цикл в обходе пакета оказался недостижимым: подпакет, найденный на
-  пределе глубины, попадает в `notWalked` там же, где его видят, поэтому
-  уровень, на котором обход заканчивается, всегда пуст. Убран.
-- **Кэш исходников не сбрасывался никогда**: после `deleteObject` в нём
-  оставался текст удалённого объекта, а `syntaxCheckCode` этот текст
-  переиспользует — проверка объекта, которого больше нет, отвечала «всё в
-  порядке». `forgetUnder` теперь убирает всё, что относится к объекту: сам
-  исходник, версии под своими ключами и инклюды класса.
-- Закрыты тестами три адреса из карты исходников, которые их не имели, включая
-  единственный не проверенный чтением — `DCLS/DL` (объектов этого типа нет ни
-  на одной из пяти систем, адрес взят из discovery; так и оставлен, с
-  оговоркой в коде).
+Tools 152 → **162**, tests 174 → **284** in 25 suites. Read-only smoke run: 90
+checks.
 
-### Проверено живьём
+### Messages (SE91)
 
-Всё — на EUD00, тестовые объекты созданы в `$TMP` и удалены за собой, локов не
-осталось, `inactiveObjects` пуст:
+- **`getMessages`, `getMessageLongtext`, `setMessages`, `createMessageClass`.**
+  What `MESSAGE e001(zfoo)` raises was unreachable: `objectStructure` calls
+  exactly the endpoint that carries the messages and throws them away, keeping
+  the general metadata. So a report written through this server could raise
+  messages that do not exist, and a message class could not be filled.
+- Four backend facts, measured live, shaped the tools. Messages live **inside
+  the class document** and nowhere else: the individual message resource answers
+  an empty stub to any GET. The only write that works is a **PUT of the whole
+  document** under the class lock; PUT and DELETE on a message resource are
+  refused with "Message X is not locked" for any handle. Messages are **merged
+  by number**, so writing one leaves the rest alone — and therefore **a message
+  cannot be deleted through ADT**. The class header, by contrast, is
+  **replaced**, so a write without the current description wipes it:
+  `setMessages` reads first.
+- A message text is an XML attribute, and almost every real message contains
+  `&1`, `&2`. Without escaping, the backend fails the whole parse and writes
+  nothing.
+- The long text can be read (`?language=E`, with no fallback to another
+  language) but **not written** — that resource has no PUT. No activation is
+  needed: the text is in T100 as soon as the answer comes back.
 
-- `revisions` и `compareRevisions` на `ZCL_MM` (91 версия), `ZR_MMO_NEW`,
-  инклюдах класса; дифф реальных изменений `ZCL_MM` между запросом и активной
-  версией.
-- `impactOf` на `ZCL_MM_RETURN` (352 строки → 99 объектов в 38 пакетах),
-  `ZCL_MM=>GET_STAWN` (32 строки → 11 объектов), `ZIF_MM_C` (1074 строки).
-- Члены класса — полный цикл на `ZKRI_MCP_MEMBERS`: создание, dry run,
-  статический метод с сигнатурой, отказ на дубль, приватный атрибут, публичная
-  константа, метод без сигнатуры, удаление метода, чтение активной версии.
-- ФМ: `Z_MM_GET_INVOICE` и `V51P_FILL_GT` по имени (второй — с параметрами
-  `LIKE` и тремя десятками аргументов), `GUI_UPLOAD` для `TABLES` и классических
-  исключений, `ZMM_ARM_FM` списком, и создание целиком — `ZKRI_MCP_FG` с
-  `Z_KRI_MCP_ADD`.
-- `runSnippet`: арифметика и текст, `SELECT` по `T001` таблицей, объявления в
-  приватной секции, ошибка компиляции с названным неизвестным полем, деление
-  на ноль.
+### Tables, structures and CDS
 
-### Шесть дефектов, найденных этими прогонами
+- **`getStructureSource`** returns a table or structure definition: the DDL text
+  plus a parsed field list with types and key flags. There was no other way to
+  read a table's fields: `searchObject` returns a SAP GUI bridge link for a
+  table, `objectStructure` only metadata. `TABL/DT` and `TABL/DS` both come from
+  the `ddic/structures` collection.
+- **`createStructure`** creates a structure and sets its fields in one call,
+  with a syntax check between write and activation: the dictionary error names
+  the field and the reason, whereas the same trouble from activation arrives as
+  a localised phrase about reference tables. Two release-dependent things are
+  therefore not guessed: the **opening keyword** is taken from the stub the
+  backend just created (`define type` on classic ERP, `define table` on S/4),
+  and the **reference in a unit or currency annotation** is qualified with the
+  structure name (`'mseg.meins'`, not `'meins'`) — hence `unitField` and
+  `currencyField`.
+- **`createAndWrite`** learned where CDS view (`DDLS/DF`) and structure
+  (`TABL/DS`) sources live, so both are one call now.
+- **What cannot be created, and why** — refused with a reason instead of a 404.
+  A transparent table: the library's type map POSTs to `/sap/bc/adt/ddic/tables`,
+  a collection classic ERP does not have at all, and the technical settings are
+  not in the source form either. A package: `/sap/bc/adt/packages` is not served
+  at all — only `packages/settings` — so creating, name-checking and even reading
+  an existing package answer 404.
 
-1. `clsInclude`, у которого нет истории, отвечал «Revision URL not found for
-   object ZCL_MM» — как будто у класса с 91 версией истории нет вообще. Теперь
-   отказ называет инклюды, у которых она есть.
-2. Сравнение двух новейших версий по умолчанию часто выходит пустым: релиз
-   запроса оставляет копию с тем же текстом. Теперь это сказано, а не читается
-   как «последнее изменение ничего не сделало».
-3. `FUGR/FF` совпадал с префиксом семейства `FUGR/F` в разборе влияния и
-   скрывал группу, которой принадлежит.
-4. Одиночный инклюд попадал в отчёт влияния как место внутри самого себя.
-5. Поиск с фильтром `objType=FUGR/FF` отвечает пустым списком: быстрый поиск
-   этого подтипа не принимает. Поиск идёт без фильтра, тип отбирается на нашей
-   стороне.
-6. Сборка тела съедала отступы вызывающего — блок `IF` превращался в список.
-   Исправлено и в сборке методов класса.
+### Package-wide work
 
-Плюс два, найденных фрагментом, который дампится: **дамп забирает с собой
-сессию** (запуск отвечает 500, следующий вызов — пустым 400), поэтому уборка,
-которая идёт сразу за ним, падала — и каждый упавший фрагмент оставлял свой
-класс в `$TMP`; теперь удаление логинится заново и повторяет попытку. И сам
-500 не говорит ничего: причина — в ленте дампов, HTML-страницей ST22 на 10 088
-символов, из которой теперь берутся шесть полей и строка фрагмента, на которой
-он умер.
-
-## [0.5.0] — 2026-09-09, чат 4: сообщения SE91, таблицы и структуры, работа пакетом, ATC
-
-Коммиты `89b2fd1..cd1f151` (17), плюс правки этого файла и README после них.
-Инструментов 152 → **162**, тестов 174 → **284** в 25 наборах,
-`npm run smoke` — 90 проверок, только чтение.
-
-### Сообщения (SE91)
-
-- **`getMessages`, `getMessageLongtext`, `setMessages`, `createMessageClass`** —
-  то, что поднимает `MESSAGE e001(zfoo)`, до сих пор было недостижимо:
-  `objectStructure` дёргает ровно тот эндпоинт, который несёт сообщения, и
-  выбрасывает их, оставляя общую метаданную. Значит, отчёт, написанный через
-  этот сервер, мог поднимать несуществующие сообщения, а класс сообщений нельзя
-  было наполнить.
-- Четыре особенности бэкенда, измеренные живьём и определившие устройство
-  инструментов. Сообщения лежат **внутри документа класса** и больше нигде:
-  ресурс отдельного сообщения отвечает пустой заглушкой на любой GET.
-  Единственная работающая запись — **PUT всего документа** под блокировкой
-  класса; PUT и DELETE на ресурс сообщения отбиваются с «Сообщение X is not
-  locked» при любом дескрипторе. Сообщения **накладываются по номеру**, поэтому
-  запись одного не трогает остальные — и поэтому **удалить сообщение через ADT
-  нельзя**. А заголовок класса, наоборот, **заменяется**, так что запись без
-  текущего описания его затирает: `setMessages` сначала читает.
-- Текст сообщения — атрибут XML, и почти в каждом реальном сообщении есть `&1`,
-  `&2`. Без экранирования бэкенд роняет разбор целиком («Завершение элемента
-  messageClass ожидается») и не пишет ничего.
-- Длинный текст читается (`?language=E`, без фолбэка на другой язык), но
-  **не пишется** — на этом ресурсе нет PUT. Активация не нужна: текст в T100
-  сразу после ответа.
-
-### Таблицы, структуры и CDS
-
-- **`getStructureSource`** — определение таблицы или структуры: DDL-текст плюс
-  разобранный список полей с типами и признаками ключа. Прочитать поля таблицы
-  иначе было нельзя: `searchObject` отдаёт для таблицы ссылку SAPGUI-моста,
-  `objectStructure` — только метаданную. TABL/DT и TABL/DS приходят из одной
-  коллекции `ddic/structures`.
-- **`createStructure`** создаёт структуру и задаёт ей поля одним вызовом, с
-  проверкой синтаксиса между записью и активацией: ошибка словаря оттуда
-  называет поле и причину, тогда как та же беда из активации приходит
-  локализованной фразой про ссылочные таблицы. Два места, которые зависят от
-  релиза и поэтому не угадываются: **открывающее ключевое слово** берётся из
-  заготовки, которую бэкенд только что создал (`define type` на классическом
-  ERP, `define table` на S/4 — проверено на EMD00), а **ссылка в аннотации
-  единицы или валюты** квалифицируется именем структуры (`'mseg.meins'`, не
-  `'meins'`) — для этого есть параметры `unitField` и `currencyField`.
-- **`createAndWrite`** узнал, где лежат исходники CDS-вью (`DDLS/DF`) и
-  структуры (`TABL/DS`), — теперь и то и другое одним вызовом.
-- **Чего создать нельзя, и почему** — отбивается с причиной вместо 404.
-  Прозрачную таблицу: карта типов внутри `abap-adt-api` шлёт POST в
-  `/sap/bc/adt/ddic/tables`, коллекции которой на классическом ERP нет вовсе, а
-  технических настроек (класс поставки, буферизация, категория размера) в
-  исходниковой форме тоже нет. Пакет: `/sap/bc/adt/packages` не обслуживается
-  совсем — только `packages/settings`, поэтому создание, проверка имени и даже
-  чтение существующего пакета отвечают 404.
-
-### Работа пакетом
-
-- **`packageTree`, `readSources`, `searchInPackage`** — первый вопрос о
-  незнакомой доработке («что в этом пакете и где используется вот эта строка»)
-  был самым дорогим: уровень из `nodeContents`, догадка о том, какие объекты
-  важны, чтение на каждый объект, поиск на каждый объект.
-- `packageTree` обходит дерево в ширину и разрешает, где лежит исходник каждого
-  объекта: без этого список бесполезен, потому что большинству типов
-  `nodeContents` выдаёт ссылку SAPGUI-моста, которая отдаёт свойства и никакого
-  содержимого. Достигнутый предел оставляет верхние уровни полными и называет
-  неоткрытые пакеты. Неизвестный пакет отличается от пустого — оба отвечают
-  пустым списком узлов, и не по свойствам объекта:
-  `/sap/bc/adt/vit/wb/object_type/devck/object_name/ЧТО_УГОДНО` отвечает 200 и
-  повторяет любое выдуманное имя. Знает только поиск по репозиторию.
-- Две коллекции лежат не там, где кажется: преобразования обслуживаются из
-  `xslt/transformations`, а не `xslt/sources`; для расширений метаданных
-  (`DDLX/EX`) коллекции нет вовсе, поэтому тип не заведён — вместо адреса,
-  который может только отдать 404.
+- **`packageTree`, `readSources`, `searchInPackage`.** The first question about
+  an unfamiliar development ("what is in this package, and where is this string
+  used") was the most expensive one: a level from `nodeContents`, a guess at
+  which objects matter, then a read and a search per object.
+- `packageTree` walks the tree breadth-first and resolves where each object's
+  source lives — without that the list is useless, because for most types
+  `nodeContents` hands back a SAP GUI bridge link that serves properties and no
+  content. Hitting the limit leaves the upper levels complete and names the
+  packages left unopened. An unknown package is distinguished from an empty one,
+  which object properties cannot do: the bridge URL answers 200 and echoes any
+  invented name back. Only a repository search knows.
+- Two collections are not where they look: transformations are served from
+  `xslt/transformations`, not `xslt/sources`; metadata extensions (`DDLX/EX`)
+  have no collection at all, so the type is not registered — better than an
+  address that can only 404.
 
 ### ATC
 
-- **`atcCheck`** — прогон проверок по объекту или пакету с читаемым отчётом:
-  приоритет, правило, сообщение и строка исходника, худшее сверху. Запуск был
-  невозможен вообще: `createAtcRun` шлёт POST в
-  `/sap/bc/adt/atc/runs?worklistId=`, а библиотека подставляет туда аргумент,
-  который называет «variant», — имя варианта, и бэкенд отвечает 500 без
-  объяснений. ID нужно брать из `atcCheckVariant`, который, вопреки названию,
-  открывает worklist и возвращает его ID. Пакет адресуется ссылкой
-  SAPGUI-моста: `/sap/bc/adt/packages/ZFOO` отбивается с «No URI-Mapping
-  defined for URI».
-- Описания `atcCheckVariant` и `createAtcRun` исправлены на то, что эти
-  инструменты делают в действительности.
+- **`atcCheck`** runs the checks over an object or package with a readable
+  report: priority, rule, message and source line, worst first. Running one was
+  impossible: `createAtcRun` POSTs to `/sap/bc/adt/atc/runs?worklistId=` and the
+  library puts the argument it calls "variant" — a variant name — there, so the
+  backend answers 500 with no explanation. The ID has to come from
+  `atcCheckVariant`, which, despite its name, opens a worklist and returns its
+  ID. A package is addressed by its SAP GUI bridge link:
+  `/sap/bc/adt/packages/ZFOO` is refused with "No URI-Mapping defined for URI".
+- The `atcCheckVariant` and `createAtcRun` descriptions now say what those tools
+  actually do.
 
-### Исправления
+### Fixes
 
-- **Ответ валидации без вердикта больше не читается как отказ.**
-  `validateNewObject` в библиотеке считает успех как `!!CHECK_RESULT ||
-  !!SEVERITY`, а эндпоинт класса сообщений отвечает на валидацию 200 с пустым
-  телом — оба пути создания отбивали свободное имя словами «The system refused
-  the name: see the validate step», ничего не создав.
-- **`objectEnhancements`: положительный ответ наконец увиден.** Прошлый вывод
-  «эндпоинт отвечает, но пусто» был неверен — дело было в объектах, у которых
-  расширений нет. `CL_FEBAN_ALV_GRID`, `CL_FIKZ_DI_HELPER`,
-  `ZCL_DDK_CONTRACTOR`, `SAPMV56A` и функция `IDOC_INPUT_DEBITOR` отвечают
-  своими реализациями, элементами внутри них и строкой внедрения каждого.
-  Пустой ответ теперь подсказывает, где искать такие объекты: `ENHINCINX`.
+- **A validation answer with no verdict is no longer read as a refusal.** The
+  library scores success as `!!CHECK_RESULT || !!SEVERITY`, and the message-class
+  endpoint answers validation with 200 and an empty body — so both creation
+  paths refused a free name with "The system refused the name: see the validate
+  step", having created nothing.
+- **`objectEnhancements`: a positive answer finally seen.** The earlier
+  conclusion "the endpoint answers, but empty" was wrong — it was the objects,
+  which had no enhancements. Real ones answer with their implementations, the
+  elements inside them and each insertion line. An empty answer now says where
+  to look for such objects: `ENHINCINX`.
 
-### Проверено живьём
+### Domains and text elements: writing verified on S/4, two wrong assumptions exposed
 
-- **EUD00**: полный цикл класса сообщений (создание с двумя сообщениями →
-  чтение → правка одного → смена флага → обрезка длинного текста → удаление, в
-  `$TMP` на `ZKRI_MCP_MSG`), `createStructure` с полем количества и с
-  предохранителем на пропущенную аннотацию единицы, CDS-вью через
-  `createAndWrite`, отказы на `TABL/DT` и `DEVC/K`, `packageTree` на
-  `ZYTR_ZB`/`ZMM`/`ZMM_BASE`, `readSources`, `searchInPackage`, `atcCheck` на
-  классе, программе и пакете, `atcDocumentation` по ссылке из настоящего
-  worklist. Тестовые объекты удалены за собой, локов не осталось.
-- **Все пять систем, только чтение**: сообщения, исходник структуры, обход
-  пакета и вариант ATC работают везде. Домены и текстовые элементы работают
-  **только на EMD00** — там же исходник структуры приходит как `define table`,
-  что и подтверждает, зачем ключевое слово берётся из заготовки. На EUQ00
-  профиль read-only отдаёт 112 инструментов вместо 162.
+- **`setDomainProperties` and `setDataElementProperties` now take and release
+  the lock themselves** and activate on request. They used to demand a handle
+  and refuse without one, pointing at `createDomain` — no help for an existing
+  object: changing one field turned into a three-call chain. A handle passed in,
+  or a lock this process already holds, is still used as is and not released.
+- The text-element tool had been written blind: on classic ERP
+  `/sap/bc/adt/textelements` does not exist at all, so the code had never run
+  against a working backend. Two things it got wrong: **the text resource must
+  be locked, not the object** (with a program lock the write is refused 423,
+  naming the text pool, not the program — the old hint sent you the opposite
+  way), and **a write leaves two rows inactive**, the object (`PROG/P`) and its
+  text pool (`PROG/PX`); one activation by name closes both, while activation by
+  the object URL would never see the `PROG/PX` row.
 
-### Домены: запись проверена на EMD00, и по ходу нашёлся дефект
+### A fix found along the way: the inactive list was read in the wrong session
 
-- **`setDomainProperties` и `setDataElementProperties` теперь сами берут и
-  снимают блокировку** и по запросу активируют (`activate`). Раньше они
-  требовали дескриптор и отказывали без него, отправляя к `createDomain`, —
-  что для существующего объекта не помощь: правка одного поля превращалась в
-  цепочку из трёх вызовов. Чужой дескриптор и блокировка, которую уже держит
-  этот процесс, по-прежнему используются как есть и не снимаются.
-- Полный цикл на EMD00 в `$TMP` (`ZKRI_MCP_DOMA`, `ZKRI_MCP_DTEL`): создание
-  домена с фиксированными значениями → чтение `version=active` → патч только
-  описания (тип и значения на месте) → патч значений (описание и тип на месте)
-  → элемент данных на этом домене с четырьмя метками → удаление. Локов не
-  осталось, неактивного ничего.
+`inactiveObjects` went through the stateless clone like every other read — and
+sessions **disagree** about that list. After a text write and its activation,
+the session that did the work saw nothing inactive while the clone kept showing
+the program, three reads running, with the object provably active. That list is
+asked precisely to learn whether an edit reached the system, so an answer from
+another session turns finished work into "not activated yet". It is now read on
+the stateful client, where `activateSafe`'s own check reads it.
 
-### Текстовые элементы: запись проверена на EMD00, и это вскрыло два неверных допущения
+## [0.4.0] — dictionary, texts, enhancements, composite tools
 
-Инструмент писался вслепую: на EUD00 эндпоинта `/sap/bc/adt/textelements` нет
-вовсе, так что этот код ни разу не выполнялся против работающего бэкенда.
+Tools 135 → **152**, tests 117 → **174** in 18 suites. Read-only smoke run: 57
+checks.
 
-- **Блокировать надо сам ресурс текстов, а не объект.** С локом программы
-  запись отбивается 423 «Resource **REPT** ZKRI_MCP_TXT is not locked (invalid
-  lock handle)» — в сообщении назван текстовый пул, не программа. Прежняя
-  подсказка инструмента отправляла лочить объект, то есть ровно в обратную
-  сторону. Теперь лок берётся на URL текстов и снимается там же; свой
-  дескриптор и лок из реестра используются как есть.
-- **Запись оставляет в неактивных две строки** — объект (`PROG/P`) и его
-  текстовый пул (`PROG/PX`). Одна активация по имени закрывает обе; активация
-  по URL объекта строку `PROG/PX` не увидела бы. Параметр `activate` доводит
-  дело до конца.
-- Полный цикл на EMD00 в `$TMP` (`ZKRI_MCP_TXT`): текстовые символы и тексты
-  селекции записаны и прочитаны обратно, замена всего набора (а не слияние)
-  подтверждена, объект остался активным, локов не осталось.
+### New tools — dictionary
 
-### Исправление, которое нашлось по ходу: список неактивных читался в чужой сессии
-
-`inactiveObjects` шёл через stateless-клон, как все прочие чтения, — и сессии
-об этом списке **расходятся**. После записи текстов и её активации сессия,
-которая делала работу, не видела ничего неактивного, а клон продолжал
-показывать программу — три чтения подряд, при том что объект заведомо активен
-(его активация сама себя проверила, и удалился он без возражений). Этот список
-спрашивают, чтобы узнать, дошла ли правка до системы, поэтому ответ из чужой
-сессии превращает законченную работу в «ещё не активировано». Теперь читается
-на stateful-клиенте — там же, где его читала проверка внутри `activateSafe`.
-
-### Не проверено живьём
-
-- `DCLS/DL` — адрес исходника взят из discovery, объекта такого типа на EUD00
-  не нашлось.
-
-## [0.4.0] — 2026-09-08, чат 3: словарь, тексты, энхансменты, composite-инструменты
-
-Коммиты `27c8983..94920dc` (14). Инструментов 135 → **152**, тестов 117 → **174**
-в 18 наборах, `npm run smoke` — 57 проверок, только чтение.
-
-### Новые инструменты — словарь
-
-- **`createDataElement` и `createDomain`** создают объект словаря и сразу
-  задают его определение: проверка имени, создание, блокировка, чтение
-  метаданных, которые присвоила система, запись определения, снятие блокировки,
-  активация с проверкой. `createObject` умеет `DTEL/DE` и `DOMA/DD`, и именно в
-  этом была беда: получался объект без типа, который не активируется и всплывает
-  ошибкой при следующем обращении к пакету. Откатов нет — в ответе видно, на
-  каком шаге остановились и в каком состоянии объект. Тип элемента данных — либо
-  домен, либо встроенный тип, не оба; метки режутся до длин, которые допускает
-  SAP (10/20/40/55), и ответ говорит, какие обрезал. Пакет кроме `$TMP` без
-  транспортного запроса отбивается до создания.
+- **`createDataElement` and `createDomain`** create the object and set its
+  definition in one go: name check, create, lock, read the metadata the system
+  assigned, write the definition, unlock, activate with verification.
+  `createObject` handles `DTEL/DE` and `DOMA/DD`, and that was the trouble: you
+  got a typeless object that will not activate and surfaces as an error the next
+  time the package is touched. There is no rollback — the answer shows which
+  step it stopped at and what state the object is in. A data element's type is
+  either a domain or a built-in type, not both; labels are cut to the lengths
+  SAP allows (10/20/40/55) and the answer says which were cut. A package other
+  than `$TMP` without a transport request is refused before creation.
 - **`getDataElementProperties` / `setDataElementProperties`,
-  `getDomainProperties` / `setDomainProperties`** — чтение и изменение
-  определения. PUT в бэкенд заменяет определение целиком, поэтому изменение
-  передаётся как патч и накладывается на то, что сейчас в системе.
+  `getDomainProperties` / `setDomainProperties`** read and change the
+  definition. A PUT replaces the definition wholesale, so a change is passed as
+  a patch and applied over what is in the system now.
 
-### Новые инструменты — то, чего не видно в исходнике
+### New tools — what the source does not show
 
-- **`getTextElements` / `setTextElements`** — текстовые символы, тексты селекции
-  и заголовки списка. Они лежат вне исходника, поэтому `getObjectSource` их
-  никогда не показывал, и программа, написанная через этот сервер, получалась с
-  безымянными полями экрана выбора.
-- **`objectEnhancements`** — реализации расширений, активные на объекте, с
-  позицией внедрения и, по запросу, исходником. Рассуждать о стандартном
-  инклюде по одному его исходнику неверно: выполняется исходник плюс то, что
-  впрыснули расширения, и в тексте их не видно.
+- **`getTextElements` / `setTextElements`** — text symbols, selection texts and
+  list headings. They live outside the source, so `getObjectSource` never showed
+  them, and a program written through this server came out with unnamed
+  selection-screen fields.
+- **`objectEnhancements`** — the enhancement implementations active on an
+  object, with the insertion point and, on request, the source. Reasoning about
+  a standard include from its own source alone is wrong: what runs is the source
+  plus what enhancements inject, and the text does not show them.
 
-### Новые инструменты — навигация и транспорт
+### New tools — navigation and transport
 
-- **`transportDetails`** — что внутри запроса: его задачи и все объекты. Раньше
-  список объектов известного запроса добывался `SELECT` из `E071` через
-  `runQuery`.
-- **`typeHierarchy`** — предки и потомки класса или интерфейса,
-  **`whereUsedMethod`** — вызывающие метод. Оба принимают имя: бэкенд отвечает
-  по позиции курсора, а считать строку и колонку в непрочитанном исходнике —
-  именно то, из-за чего `usageReferences` оставался неиспользуемым. Позиция
-  ищется по исходнику (`lib/symbolPosition`), объявление предпочитается
-  реализации, и в ответе процитирована строка, на которую попали.
-- **`atcDocumentation`** — текст правила ATC по ссылке из worklist,
-  **`changePackagePreview`** — что означал бы перенос объекта в другой пакет
-  (только предпросмотр: шага `evaluate` в библиотеке нет, документ приходится
-  собирать самому, и выполнять такое на живом пакете непроверенным не стоит),
-  **`rapGenIsAvailable`** — есть ли на системе генератор RAP.
+- **`transportDetails`** — what is inside a request: its tasks and every object.
+  That list used to be fetched with a `SELECT` from `E071` through `runQuery`.
+- **`typeHierarchy`** (ancestors and descendants of a class or interface) and
+  **`whereUsedMethod`** (callers of a method). Both take a name: the backend
+  answers by cursor position, and counting line and column in a source you have
+  not read is exactly what kept `usageReferences` unused. The position is found
+  in the source, a declaration is preferred over an implementation, and the
+  answer quotes the line it landed on.
+- **`atcDocumentation`** (the rule text behind a worklist link),
+  **`changePackagePreview`** (what moving an object to another package would
+  mean — preview only: the library has no `evaluate` step, the document has to
+  be assembled here, and running that unverified against a live package is not
+  worth it) and **`rapGenIsAvailable`**.
 
-### Новые инструменты — цепочки одним вызовом
+### New tools — whole chains in one call
 
-- **`createAndWrite`** — создать объект и записать исходник одним вызовом, с
-  активацией и проверкой. Половина этой пары хуже, чем ни одной: объект без
-  исходника не активируется, и это выясняется позже и не тем, кто его создал.
-  Знает, где лежит исходник `CLAS/OC`, `INTF/OI`, `PROG/P`, `PROG/I`, `FUGR/F`,
-  `FUGR/FF` и `FUGR/I`; для включаемой программы идёт путём `createInclude`.
-- **`runTests`** — активировать, прогнать тесты и объяснить результат: сколько
-  методов выполнилось, сколько прошло, и каждое падение с классом, методом и
-  сообщением ABAP Unit. Против неактивного объекта тесты не выполняются вовсе, а
-  ответ на это — пустой список, который читается как «всё прошло».
+- **`createAndWrite`** creates an object and writes its source in one call, with
+  activation and verification. Half of that pair is worse than neither: an
+  object with no source will not activate, and that surfaces later and to
+  someone else. It knows where the source lives for `CLAS/OC`, `INTF/OI`,
+  `PROG/P`, `PROG/I`, `FUGR/F`, `FUGR/FF` and `FUGR/I`.
+- **`runTests`** activates, runs the tests and explains the result: how many
+  methods ran, how many passed, and every failure with class, method and ABAP
+  Unit message. Against an inactive object the tests do not run at all, and the
+  answer to that is an empty list, which reads as "everything passed".
 
-### Исправления, найденные живыми прогонами
+### Fixes the live runs found
 
-- **Объекты создаются на языке входа, а не на EN.** Библиотека подставляет в
-  документ создания `language="EN"` и делает его языком-оригиналом, а SAP
-  складывает туда все тексты объекта — элемент данных создавался «успешно» и
-  читался обратно с пустым описанием и четырьмя пустыми метками (в `DD04T` они
-  лежали под `DDLANGUAGE='E'`). Появился параметр `language`, по умолчанию —
-  язык логона.
-- **`transportDetails` работает на бэкенде, который отвечает списком.**
-  Библиотека спрашивает `/cts/transportrequests/<номер>` и читает из ответа
-  один запрос; эта система номер игнорирует и отдаёт весь список запросов
-  пользователя, поэтому разбор находил пустоту — деблокированный запрос с семью
-  объектами показывался как пустой. Теперь запрос ищется в списке, номер задачи
-  разрешается в её запрос, а ненайденный запрос так и называется.
-- **Дескриптор блокировки берётся из реестра.** `unLock`, `setObjectSource`,
-  `createTestInclude` и `deleteObject` требовали его, хотя сервер его держит, —
-  цепочку из трёх вызовов нельзя было провести, не перенося дескриптор руками.
-- **Реестр находит блокировку, которая покрывает URL.** Инклюд класса (тесты,
-  локальные определения) пишется по своему URL, а блокировка принадлежит
-  классу; поиск по URL записи находил пустоту. Теперь отвечает самая длинная
-  удерживаемая блокировка, чей URL — префикс запрошенного.
-- **`changePackagePreview` не портит протокол.** Библиотека печатает свой
-  аргумент через `console.log`, а stdout — это канал MCP; на время вызова
-  `console.log` перенаправляется в stderr.
-- **Каждый вызов пишущей цепочки остаётся в сессии, которая держит
-  блокировку.** Аудит маршрутизации поймал `createAndWrite` на чтении через
-  stateless-клон; проверка имени и чтение определения, на которое накладывается
-  патч, переведены на stateful-клиент.
+- **Objects are created in the logon language, not EN.** The library puts
+  `language="EN"` in the creation document and makes it the original language,
+  and SAP files every text of the object under it — a data element was created
+  "successfully" and read back with an empty description and four empty labels.
+  There is now a `language` parameter, defaulting to the logon language.
+- **`transportDetails` works on a backend that answers with a list.** The
+  library asks `/cts/transportrequests/<number>` and reads one request from the
+  answer; this system ignores the number and returns the user's whole request
+  list, so the parse found nothing — a released request with seven objects
+  showed as empty. The request is now found in the list, a task number resolves
+  to its request, and a request that is not there is named as such.
+- **The lock handle comes from the registry.** `unLock`, `setObjectSource`,
+  `createTestInclude` and `deleteObject` demanded it even though the server
+  holds it — a three-call chain could not be run without carrying the handle by
+  hand.
+- **The registry finds a lock that covers the URL.** A class include (tests,
+  local definitions) is written under its own URL while the lock belongs to the
+  class, so looking the write URL up found nothing. The longest held lock whose
+  URL is a prefix of the requested one now answers.
+- **`changePackagePreview` no longer corrupts the protocol.** The library prints
+  its argument with `console.log`, and stdout is the MCP channel; `console.log`
+  is redirected to stderr for the duration of the call.
+- **Every call in a writing chain stays in the session holding the lock.** A
+  routing audit caught `createAndWrite` reading through the stateless clone.
 
-### Ограничения системы, выясненные живьём
+### System limits established live
 
-- **Домены на этой системе через ADT не обслуживаются**:
-  `/sap/bc/adt/ddic/domains/...` отвечает 404 на любое имя, включая ресурс
-  валидации, а поиск домена отдаёт только SAPGUI-URI — при этом элементы данных
-  на той же системе работают нормально. `createDomain` останавливается на
-  проверке имени, то есть ничего не создаёт, и объясняет причину; домен остаётся
-  за SE11.
-- **Текстовые элементы через ADT тоже недоступны**: `/sap/bc/adt/textelements`
-  отсутствует целиком. Оба инструмента объясняют это вместо того, чтобы
-  выглядеть как опечатка в имени объекта.
+- **Domains are not served through ADT on classic ERP**:
+  `/sap/bc/adt/ddic/domains/...` answers 404 for any name, including the
+  validation resource, while data elements on the same system work normally.
+  `createDomain` stops at the name check, so it creates nothing, and explains
+  why.
+- **Text elements are unavailable there too**: `/sap/bc/adt/textelements` is
+  absent entirely. Both tools explain that rather than looking like a typo in
+  the object name.
 
-### Внутреннее
+### Internal
 
-- Новые модули: `lib/ddicProperties` (сборка документов словаря чистыми
-  функциями — правило «не упомянутое сохраняется» проверяется без системы),
-  `lib/symbolPosition` (позиция имени в исходнике), `lib/lockCycle` (взятие и
-  снятие блокировки — три инструмента делали это по-своему).
+- New modules: `lib/ddicProperties` (dictionary documents assembled by pure
+  functions, so "what is not mentioned is preserved" is testable without a
+  system), `lib/symbolPosition` (a name's position in the source) and
+  `lib/lockCycle` (taking and releasing a lock — three tools did it their own
+  way).
 
-## [0.3.0] — 2026-09-08, чат 2: кривые эндпоинты и чтение исходника
+## [0.3.0] — crooked endpoints and reading source
 
-Коммиты `1e7e630..a104860` (9). Инструментов 132 → **135**, тестов 61 → **117**,
-smoke — 30 проверок.
+Tools 132 → **135**, tests 61 → **117**. Smoke run: 30 checks.
 
-### Новые инструменты
+### New tools
 
-- **`editObject`** проходит всю цепочку правки одним вызовом: блокировка,
-  правка, снятие блокировки, активация и проверка. Порядок в ней существенный —
-  активировать объект, который держит твоя же сессия, нельзя, — а каждый шаг
-  умеет отказать по-своему. Откатов нет: при неудаче исходник остаётся в
-  неактивной версии, которую система не исполняет, и в ответе видно, до какого
-  шага дело дошло.
-- **`findInSource` и `sourceOutline`** читают исходник как текст. ADT умеет
-  находить только фрагмент класса, поэтому поиск подпрограммы в отчёте раньше
-  означал вычитывание всего исходника через вызывающего, а запрос
-  `fragmentMappings` с типом, которого бэкенд не знает, — один из способов
-  угробить сессию. `sourceOutline` отдаёт оглавление (`REPORT`, `CLASS`,
-  `METHOD`, `FORM`, `MODULE`, `FUNCTION`, `INCLUDE`, событийные блоки) с
-  номерами строк, `findInSource` ищет текст или регулярное выражение и при
-  `searchIncludes` проходит по включаемым программам отчёта.
+- **`editObject`** walks the whole edit chain in one call: lock, edit, unlock,
+  activate, verify. The order matters — an object your own session holds cannot
+  be activated — and every step can fail in its own way. There is no rollback:
+  on failure the source stays in an inactive version the system does not run,
+  and the answer shows how far it got.
+- **`findInSource` and `sourceOutline`** read source as text. ADT can only find
+  a fragment of a class, so finding a subroutine in a report used to mean
+  reading the whole source through the caller — and asking `fragmentMappings`
+  for a type the backend does not know is one way to kill the session.
+  `sourceOutline` returns a table of contents (`REPORT`, `CLASS`, `METHOD`,
+  `FORM`, `MODULE`, `FUNCTION`, `INCLUDE`, event blocks) with line numbers;
+  `findInSource` searches for text or a regular expression and, with
+  `searchIncludes`, walks a report's includes.
 
-### Кривые эндпоинты, которые теперь честны
+### Crooked endpoints that are honest now
 
-- **`activateByName` больше не выдаёт желаемое за действительное.** Вызов
-  библиотеки отвечает `success: true` и для объектов, которые остались
-  неактивными; теперь хендлер перечитывает список неактивных и сообщает
-  `verified` и `stillInactive`, понижая `success`, если объект на месте.
-  Предпочитать всё равно `activateSafe`.
-- **`createObject` отказывает на `PROG/I` сразу** и называет замену
-  (`createInclude`) — раньше бэкенд отвечал 400 или 500, и ошибка читалась как
-  неверный пакет.
-- **`fragmentMappings` отбивает тип, который типом не является** (например
-  `FORM`), до обращения к системе, а при отказе бэкенда говорит, куда идти:
-  `CLAS/OM` для метода класса, `findInSource` для всего остального.
+- **`activateByName` no longer reports what it wishes were true.** The library
+  call answers `success: true` for objects that stayed inactive; the handler now
+  re-reads the inactive list and reports `verified` and `stillInactive`,
+  lowering `success` if the object is still there. Prefer `activateSafe` anyway.
+- **`createObject` refuses `PROG/I` outright** and names the replacement
+  (`createInclude`) — the backend used to answer 400 or 500, and the error read
+  as a wrong package.
+- **`fragmentMappings` rejects a type that is not a type** (`FORM`, for example)
+  before touching the system, and on a backend refusal says where to go:
+  `CLAS/OM` for a class method, `findInSource` for everything else.
 
-### Исправления, найденные живыми прогонами
+### Fixes the live runs found
 
-- **Якорь `patchObjectSource` сопоставляется с переводами строк исходника.**
-  ADT отдаёт исходники этой системы с CRLF, а якорь пишется с обычным переводом
-  строки — поэтому любой многострочный якорь не находился. Замещающий текст
-  переводился и раньше, теперь переводится и якорь.
-- **Пакет для активации ищется сам.** Список неактивных объектов оставляет
-  `adtcore:parentUri` пустым для программы, а активация без него отказывает —
-  законченная правка падала на последнем шаге из-за значения, которое система
-  прекрасно знает (`findObjectPath` называет пакет).
+- **The `patchObjectSource` anchor is matched against the source's line
+  endings.** ADT serves this system's sources with CRLF while an anchor is
+  written with plain newlines, so no multi-line anchor ever matched. The
+  replacement text was already translated; the anchor is now too.
+- **The package for activation is looked up.** The inactive-object list leaves
+  `adtcore:parentUri` empty for a program, and activation without it is refused
+  — a finished edit failed on the last step over a value the system knows
+  perfectly well (`findObjectPath` names the package).
 
-## [0.2.0] — 2026-09-08, чат 1: надёжность, предохранители, первые инструменты
+## [0.2.0] — reliability, guardrails, first tools
 
-Коммиты `9f9234a..887168a` (23). Инструментов 127 → **132**; тестов не было
-вовсе — стало **73** в 7 наборах, плюс `npm run smoke` (19 проверок по stdio
-против живой системы, только чтение).
+Tools 127 → **132**. There were no tests at all — now **73** in 7 suites, plus
+`npm run smoke` (19 stdio checks against a live system, read-only).
 
-### Надёжность
+### Reliability
 
-- **Ошибки ADT сохраняют диагностику SAP.** Раньше каждый хендлер перепаковывал
-  исключение в сообщение axios («Request failed with status code 400»), а всё,
-  что не было `McpError`, превращалось в «Internal server error». Теперь ошибка
-  несёт `status`, `adtType`, `t100`, `localizedMessage` и `diagnostic`: `sap` —
-  настоящий отказ системы, `transport` — сбой HTTP, на который SAP не ответила.
-- **Сессия ADT восстанавливается сама.** `abap-adt-api` не делает повторный
-  логон, пока клиент stateful, а этот сервер держал его таким всегда — поэтому
-  умершая сессия означала, что все последующие вызовы падают до ручного вызова
-  `login`. Сервер распознаёт эту картину, переподключается и повторяет читающие
-  вызовы один раз, помечая ответ `sessionRecovered`. Пишущие вызовы не
-  повторяются никогда: сессия восстанавливается, но вызывающему сообщается, что
-  дескриптор блокировки мёртв.
-- **Чтение идёт по отдельной сессии.** Читающие вызовы выполняются через
-  stateless-клон, поэтому библиотека восстанавливает их сама, и они не трогают
-  stateful-сессию, которая держит блокировки. Запись, блокировки и отладчик
-  остаются на ней.
-- **`healthcheck` действительно проверяет.** Он обращается к системе и
-  сообщает, к какой именно подключён, состояние сессии, профиль инструментов,
-  метрики и время ответа — вместо неизменного «healthy».
-- **`login`, `logout` и `dropSession` возвращают корректный результат.** `login`
-  раньше не отдавал текста вовсе, и клиент отклонял ответ по схеме, хотя
-  переаутентификация проходила успешно. В описании `logout` теперь сказано, что
-  после него клиент не может залогиниться заново.
+- **ADT errors keep SAP's diagnostics.** Every handler used to repack the
+  exception into an axios message ("Request failed with status code 400"), and
+  anything that was not an `McpError` became "Internal server error". An error
+  now carries `status`, `adtType`, `t100`, `localizedMessage` and `diagnostic`:
+  `sap` for a real refusal, `transport` for an HTTP failure SAP never answered.
+- **The ADT session recovers itself.** `abap-adt-api` does not re-login while
+  the client is stateful, and this server kept it stateful always — so a dead
+  session meant every later call failed until `login` was called by hand. The
+  server recognises the pattern, reconnects, and retries reading calls once,
+  marking the answer `sessionRecovered`. Writing calls are never retried: the
+  session is restored, but the caller is told the lock handle is dead.
+- **Reads go through a separate session.** Reading calls run on a stateless
+  clone, so the library recovers them itself and they do not disturb the
+  stateful session holding the locks. Writes, locks and the debugger stay on it.
+- **`healthcheck` actually checks.** It reaches the system and reports which one
+  it is connected to, the session state, the tool profile, metrics and response
+  time — instead of an unchanging "healthy".
+- **`login`, `logout` and `dropSession` return a valid result.** `login`
+  returned no text at all, so the client rejected the answer against the schema
+  even though re-authentication had succeeded.
 
-### Новые инструменты
+### New tools
 
-- **`patchObjectSource`** меняет часть объекта: сервер сам читает текущий
-  исходник, применяет правки (диапазон строк, точный фрагмент текста или
-  вставка) и возвращает unified diff — небольшое изменение больше не стоит
-  полной перезаливки. `dryRun` показывает результат без записи.
-- **`activateSafe`** активирует объект и затем проверяет, что неактивным ничего
-  не осталось.
-- **`listLocks` / `unlockAll`** показывают блокировки, которые держит процесс, и
-  снимают их разом; они также снимаются при остановке сервера и обнуляются после
-  повторного логона.
-- **`createInclude`** создаёт включаемую программу (`PROG/I`), чего
-  `createObject` не умеет: библиотека не передаёт ссылку на главную программу.
+- **`patchObjectSource`** changes part of an object: the server reads the
+  current source, applies the edits (line range, exact text fragment or an
+  insertion) and returns a unified diff — a small change no longer costs a full
+  re-upload. `dryRun` shows the result without writing.
+- **`activateSafe`** activates and then verifies that nothing was left inactive.
+- **`listLocks` / `unlockAll`** show the locks the process holds and release
+  them at once; they are also released when the server stops.
+- **`createInclude`** creates an include program (`PROG/I`), which
+  `createObject` cannot: the library does not pass the main program reference.
 
-### Исправления, найденные живыми прогонами
+### Fixes the live runs found
 
-- **`deleteObject` освобождает лок удалённого объекта**: ADT его не снимает, и
-  запись в реестре продолжала указывать на несуществующий объект.
-- **Diff `patchObjectSource` описывает правку честно**: вставка показывала лишнюю
-  пустую строку и теряла строку контекста.
+- **`deleteObject` releases the deleted object's lock**: ADT does not, and the
+  registry entry went on pointing at an object that no longer existed.
+- **The `patchObjectSource` diff describes the edit honestly**: an insertion
+  showed a spurious blank line and lost a context line.
 
-### Удобство
+### Convenience
 
-- `getObjectSource` принимает `version` (`active` / `inactive` / `workingArea`) —
-  раньше активная версия через инструмент была недоступна.
-- `unitTestRun` объясняет пустой результат, а не оставляет его на прочтение как
-  «все тесты прошли».
-- `userTransports` отдаёт плоский список с фильтрами по статусу, владельцу,
-  номеру и описанию; `raw` возвращает исходную структуру.
-- `runQuery` и `tableContents` принимают `offset`.
-- Объектные и массивные параметры объявлены как таковые и разбираются: флаги
-  `unitTestRun`, класс для оценки, ссылки, предложения, конфигурации и точки
-  останова были объявлены строками и уходили в библиотеку неразобранными.
+- `getObjectSource` takes `version` (`active` / `inactive` / `workingArea`) —
+  the active version was unreachable through the tool before.
+- `unitTestRun` explains an empty result rather than leaving it to be read as
+  "everything passed".
+- `userTransports` returns a flat list with filters on status, owner, number and
+  description; `raw` returns the original structure.
+- `runQuery` and `tableContents` take `offset`.
+- Object and array parameters are declared as such and parsed: flags, the class
+  to evaluate, references, proposals, configurations and breakpoints were all
+  declared as strings and reached the library unparsed.
 
-### Эксплуатация
+### Operations
 
-- `SAP_READONLY` отбивает все изменяющие инструменты, `SAP_READONLY_ALLOW`
-  пропускает через этот забор отдельные группы или инструменты (например
-  `debugger` — систему не разрабатывают, но отлаживать на ней нужно),
-  `SAP_TOOLS_EXCLUDE` скрывает группы целиком; у инструментов появились
-  `readOnlyHint` и `destructiveHint`. Исключение группы сильнее разрешения.
-- Ответ больше `SAP_MAX_RESPONSE_CHARS` заменяется конвертом с размером и
-  усечённым фрагментом.
-- `LOG_LEVEL` (по умолчанию `warn`) вместо строки метрик на каждый запрос; сами
-  метрики переехали в `healthcheck`; неиспользуемый ограничитель частоты удалён.
-- При старте сервер печатает, к какой системе подключился, и предупреждает,
-  если настройки взяты из `.env`, а не переданы клиентом.
+- `SAP_READONLY` refuses every changing tool, `SAP_READONLY_ALLOW` lets
+  individual groups or tools through that fence (for example `debugger` — a
+  system nobody develops on may still need debugging), and
+  `SAP_TOOLS_EXCLUDE` hides whole groups; tools carry `readOnlyHint` and
+  `destructiveHint`. Excluding a group beats allowing it.
+- An answer larger than `SAP_MAX_RESPONSE_CHARS` is replaced by an envelope with
+  the size and a truncated fragment.
+- `LOG_LEVEL` (default `warn`) instead of a metrics line on every request;
+  metrics moved into `healthcheck`; an unused rate limiter was removed.
+- On start-up the server prints which system it connected to, and warns when the
+  settings came from `.env` rather than from the client.
 
-## [0.1.1] — единообразная структура ответа
+## [0.1.1] — uniform response shape
 
-- Ответы инструментов приведены к общему виду.
+- Tool answers brought to a common shape.
 
-## [0.1.0] — первый коммит
+## [0.1.0] — first commit
 
-- Начальная структура проекта.
+- Initial project structure.

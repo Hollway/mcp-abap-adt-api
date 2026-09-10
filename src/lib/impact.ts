@@ -4,7 +4,7 @@
  * usageReferences answers with a flat list that is really a tree: a row per
  * package, a row per object inside it, and a row per place inside that - a
  * method, an include of a function group, a function module, the test
- * include. ZCL_MM_RETURN answers with 352 rows and about 178,000 characters,
+ * include. ZCL_APP_RETURN answers with 352 rows and about 178,000 characters,
  * which is more than a context window should spend on the question "what
  * breaks if I change this".
  *

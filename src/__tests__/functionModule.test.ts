@@ -9,7 +9,7 @@ import { FunctionModuleHandlers } from '../handlers/FunctionModuleHandlers';
 import { MUTATING_TOOLS } from '../lib/toolClasses';
 
 /**
- * The interface exactly as ADT serves it, taken from GUI_UPLOAD on EUD00:
+ * The interface exactly as ADT serves it, taken from GUI_UPLOAD on ECC:
  * bare names for by-reference parameters, VALUE(NAME) for by-value ones, a
  * TABLES entry carrying the pragma ADT adds for an untyped parameter, classic
  * exceptions, and the full stop of the whole statement on the last line.
@@ -44,8 +44,8 @@ describe('parseParameter', () => {
   });
 
   it('reads a by-value parameter', () => {
-    expect(parseParameter('VALUE(ET_INVOICE) TYPE ZMM_INVOICE_LIST_TT'))
-      .toEqual({ name: 'ET_INVOICE', type: 'ZMM_INVOICE_LIST_TT', byValue: true });
+    expect(parseParameter('VALUE(ET_INVOICE) TYPE ZAPP_INVOICE_LIST_TT'))
+      .toEqual({ name: 'ET_INVOICE', type: 'ZAPP_INVOICE_LIST_TT', byValue: true });
   });
 
   it('reads REFERENCE(...) as by reference', () => {
@@ -173,14 +173,14 @@ const NODE_CONTENTS = {
   nodes: [
     {
       OBJECT_TYPE: 'FUGR/FF',
-      OBJECT_NAME: 'Z_MM_GET_INVOICE',
-      OBJECT_URI: '/sap/bc/adt/functions/groups/zmm_arm_fm/fmodules/z_mm_get_invoice',
-      OBJECT_VIT_URI: '/sap/bc/adt/vit/wb/object_type/fugrff/object_name/SAPLZMM_ARM_FM%20%20%20%20Z_MM_GET_INVOICE'
+      OBJECT_NAME: 'Z_APP_GET_INVOICE',
+      OBJECT_URI: '/sap/bc/adt/functions/groups/zapp_core_fm/fmodules/z_app_get_invoice',
+      OBJECT_VIT_URI: '/sap/bc/adt/vit/wb/object_type/fugrff/object_name/SAPLZAPP_CORE_FM%20%20%20%20Z_APP_GET_INVOICE'
     },
     {
       OBJECT_TYPE: 'FUGR/I',
-      OBJECT_NAME: 'LZMM_ARM_FMTOP',
-      OBJECT_URI: '/sap/bc/adt/functions/groups/zmm_arm_fm/includes/lzmm_arm_fmtop/source/main'
+      OBJECT_NAME: 'LZAPP_CORE_FMTOP',
+      OBJECT_URI: '/sap/bc/adt/functions/groups/zapp_core_fm/includes/lzapp_core_fmtop/source/main'
     },
     { OBJECT_TYPE: 'FUGR/PD', OBJECT_NAME: 'GT_T604' },
     { OBJECT_TYPE: 'FUGR/PY', OBJECT_NAME: 'GTY_S_DELIVERY_POS' }
@@ -188,10 +188,10 @@ const NODE_CONTENTS = {
 };
 
 const SEARCH_HIT = [{
-  'adtcore:uri': '/sap/bc/adt/functions/groups/zmm_arm_fm/fmodules/z_mm_get_invoice',
+  'adtcore:uri': '/sap/bc/adt/functions/groups/zapp_core_fm/fmodules/z_app_get_invoice',
   'adtcore:type': 'FUGR/FF',
-  'adtcore:name': 'Z_MM_GET_INVOICE',
-  'adtcore:packageName': 'ZMM_ARM',
+  'adtcore:name': 'Z_APP_GET_INVOICE',
+  'adtcore:packageName': 'ZAPP_ARM',
   'adtcore:description': 'Функциональный модуль'
 }];
 
@@ -204,7 +204,7 @@ const handlers = (over: Record<string, unknown> = {}) => {
     searchObject: async (query: string, type: string | undefined) => {
       calls.push({ search: query, type });
       return [
-        { 'adtcore:name': 'ZMM_ARM_FM', 'adtcore:type': 'FUGR/F', 'adtcore:packageName': 'ZMM_ARM' },
+        { 'adtcore:name': 'ZAPP_CORE_FM', 'adtcore:type': 'FUGR/F', 'adtcore:packageName': 'ZAPP_ARM' },
         ...SEARCH_HIT
       ];
     },
@@ -226,12 +226,12 @@ const answer = (result: any) => JSON.parse(result.content[0].text);
 describe('getFunctionModule', () => {
   it('finds the group from the name alone and reads the signature', async () => {
     const { handler, calls } = handlers();
-    const result = answer(await handler.handleGetFunctionModule({ name: 'z_mm_get_invoice' }));
-    expect(calls[0]).toEqual({ search: 'Z_MM_GET_INVOICE', type: undefined });
+    const result = answer(await handler.handleGetFunctionModule({ name: 'z_app_get_invoice' }));
+    expect(calls[0]).toEqual({ search: 'Z_APP_GET_INVOICE', type: undefined });
     expect(calls[1]).toEqual({
-      read: '/sap/bc/adt/functions/groups/zmm_arm_fm/fmodules/z_mm_get_invoice/source/main'
+      read: '/sap/bc/adt/functions/groups/zapp_core_fm/fmodules/z_app_get_invoice/source/main'
     });
-    expect(result).toMatchObject({ functionGroup: 'ZMM_ARM_FM', package: 'ZMM_ARM' });
+    expect(result).toMatchObject({ functionGroup: 'ZAPP_CORE_FM', package: 'ZAPP_ARM' });
     expect(result.counts).toEqual({ importing: 4, exporting: 1, changing: 1, tables: 1, exceptions: 2 });
     // The body is not returned unless asked for: these are often 1000 lines.
     expect(result.body).toBeUndefined();
@@ -240,8 +240,8 @@ describe('getFunctionModule', () => {
 
   it('skips the lookup when the group is given', async () => {
     const { handler, calls } = handlers();
-    await handler.handleGetFunctionModule({ name: 'Z_X', functionGroup: 'ZMM_ARM_FM' });
-    expect(calls[0]).toEqual({ read: '/sap/bc/adt/functions/groups/zmm_arm_fm/fmodules/z_x/source/main' });
+    await handler.handleGetFunctionModule({ name: 'Z_X', functionGroup: 'ZAPP_CORE_FM' });
+    expect(calls[0]).toEqual({ read: '/sap/bc/adt/functions/groups/zapp_core_fm/fmodules/z_x/source/main' });
   });
 
   it('returns a page of the body when asked', async () => {
@@ -268,12 +268,12 @@ describe('getFunctionModule', () => {
 describe('listFunctionGroup', () => {
   it('lists the modules, includes and globals without the SAPGUI padding', async () => {
     const { handler, calls } = handlers();
-    const result = answer(await handler.handleListFunctionGroup({ functionGroup: 'zmm_arm_fm' }));
-    expect(calls[0]).toEqual({ nodes: 'FUGR/F:ZMM_ARM_FM' });
+    const result = answer(await handler.handleListFunctionGroup({ functionGroup: 'zapp_core_fm' }));
+    expect(calls[0]).toEqual({ nodes: 'FUGR/F:ZAPP_CORE_FM' });
     expect(result.counts).toEqual({ modules: 1, includes: 1, globalData: 1, globalTypes: 1 });
     expect(result.modules).toEqual([{
-      name: 'Z_MM_GET_INVOICE',
-      sourceUrl: '/sap/bc/adt/functions/groups/zmm_arm_fm/fmodules/z_mm_get_invoice/source/main'
+      name: 'Z_APP_GET_INVOICE',
+      sourceUrl: '/sap/bc/adt/functions/groups/zapp_core_fm/fmodules/z_app_get_invoice/source/main'
     }]);
     expect(JSON.stringify(result)).not.toContain('OBJECT_VIT_URI');
   });
@@ -281,7 +281,7 @@ describe('listFunctionGroup', () => {
   it('leaves the globals out when asked', async () => {
     const { handler } = handlers();
     const result = answer(await handler.handleListFunctionGroup({
-      functionGroup: 'ZMM_ARM_FM', includeGlobals: false
+      functionGroup: 'ZAPP_CORE_FM', includeGlobals: false
     }));
     expect(result.globalData).toBeUndefined();
   });
@@ -309,7 +309,7 @@ describe('createFunctionModule', () => {
     const { handler, calls } = handlers();
     const result = answer(await handler.handleCreateFunctionModule({
       name: 'z_mcp_add',
-      functionGroup: 'ZKRI_MCP_FG',
+      functionGroup: 'ZDEV_MCP_FG',
       description: 'adds two numbers',
       importing: [{ name: 'iv_a', type: 'i' }],
       exporting: [{ name: 'ev_sum', type: 'i' }],

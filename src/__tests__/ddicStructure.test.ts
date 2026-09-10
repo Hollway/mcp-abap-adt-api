@@ -10,7 +10,7 @@ import {
 const STUB = [
   "@EndUserText.label : 'MCP probe structure'",
   '@AbapCatalog.enhancementCategory : #NOT_EXTENSIBLE',
-  'define type zkri_mcp_struc {',
+  'define type zdev_mcp_struc {',
   '  component_to_be_changed : abap.string(0);',
   '',
   '}'
@@ -20,9 +20,9 @@ const STUB = [
 const TABLE = [
   "@EndUserText.label : 'Table of route requests'",
   '@AbapCatalog.enhancementCategory : #NOT_EXTENSIBLE',
-  'define type zmmstep {',
+  'define type zappstep {',
   '  key mandt   : mandt not null;',
-  '  key stepout : zmm_step_out not null;',
+  '  key stepout : zapp_step_out not null;',
   '  aedat       : aedat;',
   '',
   '}'
@@ -33,11 +33,11 @@ describe('openerFrom', () => {
   // newer ones "define structure" - and a write with the wrong one is refused
   // with "Can't save due to errors in source".
   it('takes the opening line from what the backend served', () => {
-    expect(openerFrom(STUB, 'ZKRI_MCP_STRUC')).toBe('define type zkri_mcp_struc {');
+    expect(openerFrom(STUB, 'ZDEV_MCP_STRUC')).toBe('define type zdev_mcp_struc {');
   });
 
   it('falls back to define type when there is no stub to learn from', () => {
-    expect(openerFrom(undefined, 'ZKRI_MCP_STRUC')).toBe('define type zkri_mcp_struc {');
+    expect(openerFrom(undefined, 'ZDEV_MCP_STRUC')).toBe('define type zdev_mcp_struc {');
     expect(openerFrom('', 'ZFOO')).toBe('define type zfoo {');
   });
 
@@ -50,7 +50,7 @@ describe('openerFrom', () => {
 describe('buildStructureSource', () => {
   it('writes the label, the opener and the fields in order', () => {
     const source = buildStructureSource({
-      name: 'ZKRI_MCP_STRUC',
+      name: 'ZDEV_MCP_STRUC',
       description: 'MCP probe structure',
       stub: STUB,
       fields: [
@@ -61,7 +61,7 @@ describe('buildStructureSource', () => {
     expect(source.split('\n')).toEqual([
       "@EndUserText.label : 'MCP probe structure'",
       '@AbapCatalog.enhancementCategory : #NOT_EXTENSIBLE',
-      'define type zkri_mcp_struc {',
+      'define type zdev_mcp_struc {',
       '  key werks : werks_d not null;',
       '  matnr : matnr;',
       '}'
@@ -82,7 +82,7 @@ describe('buildStructureSource', () => {
   // refused with a message that names the quantity field and not the reference.
   it('qualifies a unit or currency reference with the structure name', () => {
     const source = buildStructureSource({
-      name: 'ZKRI_MCP_STRUC', description: 'd',
+      name: 'ZDEV_MCP_STRUC', description: 'd',
       fields: [
         { name: 'MEINS', type: 'MEINS' },
         { name: 'WAERS', type: 'WAERS' },
@@ -90,8 +90,8 @@ describe('buildStructureSource', () => {
         { name: 'NETWR', type: 'NETWR', currencyField: 'waers' }
       ]
     });
-    expect(source).toContain("@Semantics.quantity.unitOfMeasure : 'zkri_mcp_struc.meins'");
-    expect(source).toContain("@Semantics.amount.currencyCode : 'zkri_mcp_struc.waers'");
+    expect(source).toContain("@Semantics.quantity.unitOfMeasure : 'zdev_mcp_struc.meins'");
+    expect(source).toContain("@Semantics.amount.currencyCode : 'zdev_mcp_struc.waers'");
   });
 
   it('refuses a unit reference to a field the structure does not have', () => {
@@ -160,11 +160,11 @@ describe('buildStructureSource', () => {
 describe('parseStructureSource', () => {
   it('reads a real table into a field list with its keys', () => {
     const parsed = parseStructureSource(TABLE);
-    expect(parsed.name).toBe('ZMMSTEP');
+    expect(parsed.name).toBe('ZAPPSTEP');
     expect(parsed.label).toBe('Table of route requests');
     expect(parsed.fields).toEqual([
       { name: 'MANDT', type: 'mandt', keyField: true, notNull: true },
-      { name: 'STEPOUT', type: 'zmm_step_out', keyField: true, notNull: true },
+      { name: 'STEPOUT', type: 'zapp_step_out', keyField: true, notNull: true },
       { name: 'AEDAT', type: 'aedat', keyField: false, notNull: false }
     ]);
   });
@@ -207,7 +207,7 @@ describe('parseStructureSource', () => {
 
 describe('urls', () => {
   it('serves tables and structures from the same collection', () => {
-    expect(structureUrl('ZMMSTEP')).toBe('/sap/bc/adt/ddic/structures/zmmstep');
-    expect(structureSourceUrl('ZMMSTEP')).toBe('/sap/bc/adt/ddic/structures/zmmstep/source/main');
+    expect(structureUrl('ZAPPSTEP')).toBe('/sap/bc/adt/ddic/structures/zappstep');
+    expect(structureSourceUrl('ZAPPSTEP')).toBe('/sap/bc/adt/ddic/structures/zappstep/source/main');
   });
 });

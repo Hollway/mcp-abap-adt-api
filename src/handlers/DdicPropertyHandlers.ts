@@ -68,11 +68,11 @@ export class DdicPropertyHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Domain name, e.g. ZMM_STATUS.'
+              description: 'Domain name, e.g. ZAPP_STATUS.'
             },
             domainUrl: {
               type: 'string',
-              description: 'Object URL instead of the name, e.g. /sap/bc/adt/ddic/domains/zmm_status.'
+              description: 'Object URL instead of the name, e.g. /sap/bc/adt/ddic/domains/zapp_status.'
             },
             version: {
               type: 'string',
@@ -145,11 +145,11 @@ export class DdicPropertyHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Data element name, e.g. ZMM_STATUS.'
+              description: 'Data element name, e.g. ZAPP_STATUS.'
             },
             dataElementUrl: {
               type: 'string',
-              description: 'Object URL instead of the name, e.g. /sap/bc/adt/ddic/dataelements/zmm_status.'
+              description: 'Object URL instead of the name, e.g. /sap/bc/adt/ddic/dataelements/zapp_status.'
             },
             version: {
               type: 'string',
@@ -170,7 +170,7 @@ export class DdicPropertyHandlers extends BaseHandler {
             description: { type: 'string', description: 'Short description.' },
             domain: {
               type: 'string',
-              description: 'Domain the element takes its type from, e.g. ZMM_STATUS. Alternative to dataType.'
+              description: 'Domain the element takes its type from, e.g. ZAPP_STATUS. Alternative to dataType.'
             },
             dataType: {
               type: 'string',
@@ -223,7 +223,7 @@ export class DdicPropertyHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Domain name, e.g. ZMM_STATUS.' },
+            name: { type: 'string', description: 'Domain name, e.g. ZAPP_STATUS.' },
             description: { type: 'string', description: 'Short description.' },
             packageName: { type: 'string', description: 'Development package. $TMP needs no transport.' },
             datatype: { type: 'string', description: 'DDIC data type, e.g. CHAR, NUMC, DEC, DATS.' },
@@ -270,7 +270,7 @@ export class DdicPropertyHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Data element name, e.g. ZMM_STATUS.' },
+            name: { type: 'string', description: 'Data element name, e.g. ZAPP_STATUS.' },
             description: { type: 'string', description: 'Short description.' },
             packageName: { type: 'string', description: 'Development package. $TMP needs no transport.' },
             domain: { type: 'string', description: 'Domain the element takes its type from. Alternative to dataType.' },

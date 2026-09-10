@@ -16,7 +16,7 @@ import {
  * document, and both end with an ENDCLASS.
  */
 const CLASS = [
-  'class ZCL_KRI_MCP definition',                    // 1
+  'class ZCL_DEV_MCP definition',                    // 1
   '  public',                                        // 2
   '  final',                                         // 3
   '  create public .',                               // 4
@@ -36,7 +36,7 @@ const CLASS = [
   'ENDCLASS.',                                       // 18
   '',                                                // 19
   '',                                                // 20
-  'CLASS ZCL_KRI_MCP IMPLEMENTATION.',               // 21
+  'CLASS ZCL_DEV_MCP IMPLEMENTATION.',               // 21
   '',                                                // 22
   '  METHOD constructor.',                           // 23
   '    mv_name = iv_name.',                          // 24

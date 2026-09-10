@@ -56,7 +56,7 @@ export class TableHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Table or structure, e.g. EKPO or ZMMSTEP_POS.'
+              description: 'Table or structure, e.g. EKPO or ZAPPSTEP_POS.'
             },
             expandIncludes: {
               type: 'boolean',
@@ -99,7 +99,7 @@ export class TableHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Table, e.g. ZMMSTEP_POS.' }
+            name: { type: 'string', description: 'Table, e.g. ZAPPSTEP_POS.' }
           },
           required: ['name']
         }

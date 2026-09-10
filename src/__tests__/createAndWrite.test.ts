@@ -152,7 +152,7 @@ describe('createAndWrite', () => {
 
   it('refuses a package other than $TMP without a transport, before creating anything', async () => {
     const { handlers, calls } = handler();
-    await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, packageName: 'ZMM_BASE' }))
+    await expect(handlers.handleCreateAndWrite({ ...CLASS_ARGS, packageName: 'ZAPP_BASE' }))
       .rejects.toThrow(/needs a transport request/);
     expect(calls).toEqual([]);
   });

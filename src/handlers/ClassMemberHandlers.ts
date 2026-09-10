@@ -58,7 +58,7 @@ export class ClassMemberHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            className: { type: 'string', description: 'Class name, e.g. ZCL_MM.' },
+            className: { type: 'string', description: 'Class name, e.g. ZCL_APP.' },
             methodName: { type: 'string', description: 'Name of the new method.' },
             visibility: {
               type: 'string',
@@ -103,7 +103,7 @@ export class ClassMemberHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            className: { type: 'string', description: 'Class name, e.g. ZCL_MM.' },
+            className: { type: 'string', description: 'Class name, e.g. ZCL_APP.' },
             methodName: { type: 'string', description: 'Method to remove.' },
             transport: { type: 'string', description: 'Transport request for the change.' },
             activate: { type: 'boolean', description: 'Activate afterwards (default true).' },
@@ -118,7 +118,7 @@ export class ClassMemberHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            className: { type: 'string', description: 'Class name, e.g. ZCL_MM.' },
+            className: { type: 'string', description: 'Class name, e.g. ZCL_APP.' },
             attributeName: { type: 'string', description: 'Name of the new attribute.' },
             type: { type: 'string', description: 'ABAP type, e.g. string, i, mara-matnr, ztt_foo.' },
             visibility: {

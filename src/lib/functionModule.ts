@@ -4,11 +4,11 @@
  * ADT serves a function module as ABAP that starts with its own interface -
  * not with the *"-comment block SE37 shows:
  *
- *   FUNCTION Z_MM_GET_INVOICE
+ *   FUNCTION Z_APP_GET_INVOICE
  *     IMPORTING
  *       VALUE(IV_LGNUM) TYPE LGNUM OPTIONAL
  *     EXPORTING
- *       VALUE(ET_INVOICE) TYPE ZMM_INVOICE_LIST_TT.
+ *       VALUE(ET_INVOICE) TYPE ZAPP_INVOICE_LIST_TT.
  *
  * So the signature is in the text, and writing the text is how it is set. Two
  * conventions matter and are easy to get backwards: VALUE(NAME) is pass by

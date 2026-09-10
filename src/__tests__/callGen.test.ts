@@ -12,7 +12,7 @@ import {
 import type { FunctionSignature } from '../lib/functionModule';
 
 const signature = (over: Partial<FunctionSignature> = {}): FunctionSignature => ({
-  name: 'Z_MM_GET_INVOICE',
+  name: 'Z_APP_GET_INVOICE',
   importing: [],
   exporting: [],
   changing: [],
@@ -75,7 +75,7 @@ describe('abapValue', () => {
 
 describe('checkObjectName', () => {
   it('accepts a plain and a namespaced name', () => {
-    expect(checkObjectName('Z_MM_GET_INVOICE', 'x')).toBe('Z_MM_GET_INVOICE');
+    expect(checkObjectName('Z_APP_GET_INVOICE', 'x')).toBe('Z_APP_GET_INVOICE');
     expect(checkObjectName('/SAPAPO/DM_ORDER', 'x')).toBe('/SAPAPO/DM_ORDER');
   });
 
@@ -100,15 +100,15 @@ describe('buildFunctionCall', () => {
     const call = buildFunctionCall(
       signature({
         importing: [{ name: 'IV_LGNUM', type: 'LGNUM' }],
-        exporting: [{ name: 'ET_INVOICE', type: 'ZMM_INVOICE_LIST_TT' }]
+        exporting: [{ name: 'ET_INVOICE', type: 'ZAPP_INVOICE_LIST_TT' }]
       }),
       { IV_LGNUM: '101' }
     );
     const text = body(call.code);
     expect(text).toContain('DATA p_iv_lgnum TYPE LGNUM.');
-    expect(text).toContain('DATA p_et_invoice TYPE ZMM_INVOICE_LIST_TT.');
+    expect(text).toContain('DATA p_et_invoice TYPE ZAPP_INVOICE_LIST_TT.');
     expect(text).toContain('p_iv_lgnum = `101`.');
-    expect(text).toContain("CALL FUNCTION 'Z_MM_GET_INVOICE'");
+    expect(text).toContain("CALL FUNCTION 'Z_APP_GET_INVOICE'");
     expect(text).toContain('      EXPORTING\n        iv_lgnum = p_iv_lgnum');
     expect(text).toContain('      IMPORTING\n        et_invoice = p_et_invoice');
     expect(call.results).toEqual([
@@ -265,9 +265,9 @@ describe('buildMethodCall', () => {
   };
 
   it('calls a static method and receives its returning parameter', () => {
-    const call = buildMethodCall({ className: 'ZCL_MM', methodName: 'GET_STAWN' }, method, { IV_MATNR: '4711' });
+    const call = buildMethodCall({ className: 'ZCL_APP', methodName: 'GET_STAWN' }, method, { IV_MATNR: '4711' });
     const text = body(call.code);
-    expect(text).toContain('CALL METHOD zcl_mm=>get_stawn');
+    expect(text).toContain('CALL METHOD zcl_app=>get_stawn');
     expect(text).toContain('      EXPORTING\n        iv_matnr = p_iv_matnr');
     expect(text).toContain('      RECEIVING\n        rv_stawn = p_rv_stawn');
     expect(call.results).toEqual([
@@ -277,14 +277,14 @@ describe('buildMethodCall', () => {
 
   it('refuses a value passed for the returning parameter', () => {
     expect(() => buildMethodCall(
-      { className: 'ZCL_MM', methodName: 'GET_STAWN' },
+      { className: 'ZCL_APP', methodName: 'GET_STAWN' },
       method,
       { RV_STAWN: 'X' }
     )).toThrow(/the returning parameter/);
   });
 
   it('refuses a class or method name that could carry code', () => {
-    expect(() => buildMethodCall({ className: 'ZCL_MM', methodName: 'x. LEAVE PROGRAM' }, method, { IV_MATNR: '1' }))
+    expect(() => buildMethodCall({ className: 'ZCL_APP', methodName: 'x. LEAVE PROGRAM' }, method, { IV_MATNR: '1' }))
       .toThrow(CallGenError);
   });
 });
@@ -508,7 +508,7 @@ describe('telling a table from a structure', () => {
 
   it('reads a one-row table of a named type as a table of one', () => {
     const outcome = interpretCall(
-      { MCP_SUBRC: '0', MCP_TABLES: ['ET_ROWS'], ET_ROWS: { ZMM_ROW: { MATNR: '1' } } },
+      { MCP_SUBRC: '0', MCP_TABLES: ['ET_ROWS'], ET_ROWS: { ZAPP_ROW: { MATNR: '1' } } },
       generated
     );
     expect(outcome.values.ET_ROWS).toEqual([{ MATNR: '1' }]);
@@ -534,7 +534,7 @@ describe('telling a table from a structure', () => {
 
   it('reads the table list whether it arrived as one name or several', () => {
     const single = interpretCall(
-      { MCP_SUBRC: '0', MCP_TABLES: 'ET_ROWS', ET_ROWS: { ZMM_ROW: { MATNR: '1' } } },
+      { MCP_SUBRC: '0', MCP_TABLES: 'ET_ROWS', ET_ROWS: { ZAPP_ROW: { MATNR: '1' } } },
       generated
     );
     expect(single.values.ET_ROWS).toEqual([{ MATNR: '1' }]);

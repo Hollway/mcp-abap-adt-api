@@ -40,7 +40,7 @@ export class DdicStructureHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Table or structure name, e.g. ZMMSTEP.'
+              description: 'Table or structure name, e.g. ZAPPSTEP.'
             },
             version: {
               type: 'string',
@@ -58,7 +58,7 @@ export class DdicStructureHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Name of the new structure, e.g. ZKRI_MCP_STRUC.'
+              description: 'Name of the new structure, e.g. ZDEV_MCP_STRUC.'
             },
             packageName: {
               type: 'string',

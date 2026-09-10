@@ -205,7 +205,7 @@ function declarations(source: string): Declaration[] {
  * A parameter typed with one of these reads as a bare name in the source -
  * CHANGING ct_stawn TYPE tt_stawn - and that name means nothing anywhere else:
  * a snippet declaring DATA ... TYPE tt_stawn is refused with "type TT_STAWN is
- * unknown". Qualified as ZCL_MM=>TT_STAWN it resolves, which is why they are
+ * unknown". Qualified as ZCL_APP=>TT_STAWN it resolves, which is why they are
  * collected here.
  */
 export function listTypes(source: string): string[] {

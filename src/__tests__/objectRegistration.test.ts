@@ -21,11 +21,11 @@ describe('createObject', () => {
     const { handlers, calls } = handler();
     await expect(handlers.handleCreateObject({
       objtype: 'PROG/I',
-      name: 'ZR_MM_FOO_F01',
-      parentName: 'ZR_MM_FOO',
+      name: 'ZR_APP_FOO_F01',
+      parentName: 'ZR_APP_FOO',
       description: 'Forms',
-      parentPath: '/sap/bc/adt/packages/zmm_base'
-    })).rejects.toThrow(/createInclude[\s\S]*ZR_MM_FOO/);
+      parentPath: '/sap/bc/adt/packages/zapp_base'
+    })).rejects.toThrow(/createInclude[\s\S]*ZR_APP_FOO/);
     expect(calls).toHaveLength(0);
   });
 

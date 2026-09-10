@@ -8,10 +8,10 @@ import {
 
 const CLASS_SOURCE = [
   '*&---------------------------------------------------------------------*',
-  '* CLASS zcl_mm_old DEFINITION - the predecessor, in a comment',
-  'CLASS zcl_mm_pck_plan DEFINITION PUBLIC FINAL CREATE PUBLIC.',
+  '* CLASS zcl_app_old DEFINITION - the predecessor, in a comment',
+  'CLASS zcl_app_pck_plan DEFINITION PUBLIC FINAL CREATE PUBLIC.',
   '  PUBLIC SECTION.',
-  '    INTERFACES zif_mm_c.',
+  '    INTERFACES zif_app_c.',
   '    METHODS constructor IMPORTING iv_werks TYPE werks_d.',
   '    CLASS-METHODS check_plan',
   '      IMPORTING iv_vbeln TYPE vbeln',
@@ -21,7 +21,7 @@ const CLASS_SOURCE = [
   '      plan_route_undo.',
   'ENDCLASS.',
   '',
-  'CLASS zcl_mm_pck_plan IMPLEMENTATION.',
+  'CLASS zcl_app_pck_plan IMPLEMENTATION.',
   '  METHOD constructor.',
   '    RETURN.',
   '  ENDMETHOD.',
@@ -36,20 +36,20 @@ const CLASS_SOURCE = [
 
 describe('locateType', () => {
   it('finds the class declaration and points at the name', () => {
-    const at = locateType(CLASS_SOURCE, 'ZCL_MM_PCK_PLAN');
+    const at = locateType(CLASS_SOURCE, 'ZCL_APP_PCK_PLAN');
     expect(at).toBeDefined();
     expect(at!.line).toBe(3);
     expect(at!.kind).toBe('definition');
     expect(CLASS_SOURCE.split('\r\n')[at!.line - 1].slice(at!.column, at!.endColumn))
-      .toBe('zcl_mm_pck_plan');
+      .toBe('zcl_app_pck_plan');
   });
 
   it('skips a commented-out declaration', () => {
-    expect(locateType(CLASS_SOURCE, 'zcl_mm_old')).toBeUndefined();
+    expect(locateType(CLASS_SOURCE, 'zcl_app_old')).toBeUndefined();
   });
 
   it('finds an interface declaration', () => {
-    expect(locateType('INTERFACE zif_mm_c PUBLIC.', 'ZIF_MM_C')).toMatchObject({
+    expect(locateType('INTERFACE zif_app_c PUBLIC.', 'ZIF_APP_C')).toMatchObject({
       line: 1,
       column: 10,
       kind: 'definition'
@@ -57,7 +57,7 @@ describe('locateType', () => {
   });
 
   it('is undefined for a name that is only used, never declared', () => {
-    expect(locateType(CLASS_SOURCE, 'zif_mm_c')).toBeUndefined();
+    expect(locateType(CLASS_SOURCE, 'zif_app_c')).toBeUndefined();
   });
 });
 
@@ -101,15 +101,15 @@ describe('locateMethod', () => {
 
 describe('urls', () => {
   it('builds class and interface source urls', () => {
-    expect(classSourceUrl('ZCL_MM')).toBe('/sap/bc/adt/oo/classes/zcl_mm/source/main');
-    expect(interfaceSourceUrl(' ZIF_MM_C ')).toBe('/sap/bc/adt/oo/interfaces/zif_mm_c/source/main');
+    expect(classSourceUrl('ZCL_APP')).toBe('/sap/bc/adt/oo/classes/zcl_app/source/main');
+    expect(interfaceSourceUrl(' ZIF_APP_C ')).toBe('/sap/bc/adt/oo/interfaces/zif_app_c/source/main');
   });
 
   it('strips the source part to get the object url', () => {
-    expect(objectUrlOf('/sap/bc/adt/oo/classes/zcl_mm/source/main'))
-      .toBe('/sap/bc/adt/oo/classes/zcl_mm');
-    expect(objectUrlOf('/sap/bc/adt/oo/classes/zcl_mm/source/main#start=1,0'))
-      .toBe('/sap/bc/adt/oo/classes/zcl_mm');
+    expect(objectUrlOf('/sap/bc/adt/oo/classes/zcl_app/source/main'))
+      .toBe('/sap/bc/adt/oo/classes/zcl_app');
+    expect(objectUrlOf('/sap/bc/adt/oo/classes/zcl_app/source/main#start=1,0'))
+      .toBe('/sap/bc/adt/oo/classes/zcl_app');
     expect(objectUrlOf('/sap/bc/adt/ddic/domains/zd')).toBe('/sap/bc/adt/ddic/domains/zd');
   });
 });

@@ -20,7 +20,7 @@ import type { Row } from '../lib/tableFields';
 
 /** A DD03L row, with the columns runQuery answers in. */
 const field = (over: Partial<Record<string, unknown>> = {}): Row => ({
-  TABNAME: 'ZMMSTEP_POS',
+  TABNAME: 'ZAPPSTEP_POS',
   FIELDNAME: 'WERKS',
   POSITION: 1,
   KEYFLAG: '',
@@ -118,7 +118,7 @@ describe('the statement length', () => {
     // It refuses anything longer with "maximum number of characters in the
     // line exceeds 255", counting the whole statement.
     expect(fieldsQuery(['EKPO']).length).toBeLessThanOrEqual(255);
-    expect(headerQuery('ZMMSTEP_POS').length).toBeLessThanOrEqual(255);
+    expect(headerQuery('ZAPPSTEP_POS').length).toBeLessThanOrEqual(255);
     expect(indexesQuery('EKPO').length).toBeLessThanOrEqual(255);
     expect(textsQuery(['WERKS_D', 'MATNR']).length).toBeLessThanOrEqual(255);
   });
@@ -157,15 +157,15 @@ describe('flattenFields', () => {
   it('reads a plain table into fields with the flags it has', () => {
     const byStructure = groupByStructure([
       field({ FIELDNAME: 'MANDT', POSITION: 1, KEYFLAG: 'X', NOTNULL: 'X', ROLLNAME: 'MANDT', DOMNAME: 'MANDT', DATATYPE: 'CLNT', LENG: 3 }),
-      field({ FIELDNAME: 'MENGE', POSITION: 2, ROLLNAME: 'MENGE_D', DATATYPE: 'QUAN', LENG: 13, DECIMALS: 3, REFTABLE: 'ZMMSTEP_POS', REFFIELD: 'MEINS' })
+      field({ FIELDNAME: 'MENGE', POSITION: 2, ROLLNAME: 'MENGE_D', DATATYPE: 'QUAN', LENG: 13, DECIMALS: 3, REFTABLE: 'ZAPPSTEP_POS', REFFIELD: 'MEINS' })
     ]);
-    const { fields } = flattenFields('ZMMSTEP_POS', { byStructure });
+    const { fields } = flattenFields('ZAPPSTEP_POS', { byStructure });
     expect(fields[0]).toEqual({
       name: 'MANDT', position: 1, key: true, notNull: true,
       dataElement: 'MANDT', domain: 'MANDT', dataType: 'CLNT', length: 3
     });
     expect(fields[1]).toMatchObject({
-      name: 'MENGE', position: 2, decimals: 3, reference: 'ZMMSTEP_POS-MEINS'
+      name: 'MENGE', position: 2, decimals: 3, reference: 'ZAPPSTEP_POS-MEINS'
     });
   });
 
@@ -316,19 +316,19 @@ describe('shapeIndexes', () => {
 describe('shapeForeignKeys', () => {
   it('reads a key with what fills the key of the check table, in its order', () => {
     const shaped = shapeForeignKeys(
-      [{ FIELDNAME: 'STEPIN', CHECKTABLE: 'ZTRANSFER_POINT', FRKART: '', CARDLEFT: 'C', CARD: 'N', CHECKFLAG: 'X', ARBGB: 'ZMM', MSGNR: '010' }],
+      [{ FIELDNAME: 'STEPIN', CHECKTABLE: 'ZCHECK_POINT', FRKART: '', CARDLEFT: 'C', CARD: 'N', CHECKFLAG: 'X', ARBGB: 'ZAPP', MSGNR: '010' }],
       [
-        { FIELDNAME: 'STEPIN', PRIMPOS: 2, FORTABLE: 'ZMMSTEP_POS', FORKEY: 'STEPIN', FORSTRING: '' },
-        { FIELDNAME: 'STEPIN', PRIMPOS: 1, FORTABLE: 'ZMMSTEP_POS', FORKEY: 'MANDT', FORSTRING: '' }
+        { FIELDNAME: 'STEPIN', PRIMPOS: 2, FORTABLE: 'ZAPPSTEP_POS', FORKEY: 'STEPIN', FORSTRING: '' },
+        { FIELDNAME: 'STEPIN', PRIMPOS: 1, FORTABLE: 'ZAPPSTEP_POS', FORKEY: 'MANDT', FORSTRING: '' }
       ]
     );
     expect(shaped[0]).toEqual({
       field: 'STEPIN',
-      checkTable: 'ZTRANSFER_POINT',
+      checkTable: 'ZCHECK_POINT',
       cardinality: 'C:N',
       checked: true,
-      message: 'ZMM 010',
-      keyFields: ['ZMMSTEP_POS-MANDT', 'ZMMSTEP_POS-STEPIN']
+      message: 'ZAPP 010',
+      keyFields: ['ZAPPSTEP_POS-MANDT', 'ZAPPSTEP_POS-STEPIN']
     });
   });
 

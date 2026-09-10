@@ -8,16 +8,16 @@ import { lockRegistry } from '../lib/lockRegistry';
  * without a transport, and the promise that a failure half-way says exactly
  * where it stopped instead of rolling anything back.
  */
-const DOMAIN_URL = '/sap/bc/adt/ddic/domains/zmm_test';
-const ELEMENT_URL = '/sap/bc/adt/ddic/dataelements/zmm_test';
+const DOMAIN_URL = '/sap/bc/adt/ddic/domains/zapp_test';
+const ELEMENT_URL = '/sap/bc/adt/ddic/dataelements/zapp_test';
 
 const META = {
-  name: 'ZMM_TEST',
+  name: 'ZAPP_TEST',
   description: 'Test',
   language: 'EN',
   masterLanguage: 'EN',
-  masterSystem: 'EUD',
-  responsible: 'VKRIVOROT',
+  masterSystem: 'DEV',
+  responsible: 'TESTER',
   packageName: '$TMP'
 };
 
@@ -82,7 +82,7 @@ const handler = (over: Record<string, unknown> = {}) => {
           object: {
             'adtcore:uri': DOMAIN_URL,
             'adtcore:type': 'DOMA/DD',
-            'adtcore:name': 'ZMM_TEST',
+            'adtcore:name': 'ZAPP_TEST',
             'adtcore:parentUri': '/sap/bc/adt/packages/%24tmp',
             user: 'TESTER',
             deleted: false
@@ -103,7 +103,7 @@ const handler = (over: Record<string, unknown> = {}) => {
 const answer = (result: any) => JSON.parse(result.content[0].text);
 
 const DOMAIN_ARGS = {
-  name: 'ZMM_TEST',
+  name: 'ZAPP_TEST',
   description: 'Test',
   packageName: '$TMP',
   datatype: 'CHAR',
@@ -127,7 +127,7 @@ describe('createDomain', () => {
       written: true,
       activated: true,
       objectUrl: DOMAIN_URL,
-      name: 'ZMM_TEST'
+      name: 'ZAPP_TEST'
     });
     expect(written[0].properties.typeInformation).toEqual({ datatype: 'CHAR', length: 4, decimals: 0 });
     // The metadata written back is the system's own, apart from the language:
@@ -149,7 +149,7 @@ describe('createDomain', () => {
 
   it('refuses a package other than $TMP without a transport, before creating anything', async () => {
     const { handlers, calls } = handler();
-    await expect(handlers.handleCreateDomain({ ...DOMAIN_ARGS, packageName: 'ZMM_BASE' }))
+    await expect(handlers.handleCreateDomain({ ...DOMAIN_ARGS, packageName: 'ZAPP_BASE' }))
       .rejects.toThrow(/needs a transport request/);
     expect(calls).toEqual([]);
   });
@@ -194,10 +194,10 @@ describe('createDataElement', () => {
   it('writes a domain-based element and activates it', async () => {
     const { handlers, calls, written } = handler();
     const result = answer(await handlers.handleCreateDataElement({
-      name: 'ZMM_TEST',
+      name: 'ZAPP_TEST',
       description: 'Test',
       packageName: '$TMP',
-      domain: 'zmm_test',
+      domain: 'zapp_test',
       label: 'Test status'
     }));
 
@@ -211,7 +211,7 @@ describe('createDataElement', () => {
       objectUrl: ELEMENT_URL,
       typeKind: 'domain'
     });
-    expect(written[0].properties.typeName).toBe('ZMM_TEST');
+    expect(written[0].properties.typeName).toBe('ZAPP_TEST');
     expect(written[0].properties.fieldLabels.shortFieldLabel).toBe('Test statu');
     expect(result.truncatedLabels).toEqual([{ label: 'short', limit: 10, written: 'Test statu' }]);
   });
@@ -219,7 +219,7 @@ describe('createDataElement', () => {
   it('writes a built-in type element', async () => {
     const { handlers, written } = handler();
     const result = answer(await handlers.handleCreateDataElement({
-      name: 'ZMM_TEST',
+      name: 'ZAPP_TEST',
       description: 'Test',
       packageName: '$TMP',
       dataType: 'dec',
@@ -239,10 +239,10 @@ describe('createDataElement', () => {
   it('refuses a type given twice and a type given not at all', async () => {
     const { handlers, calls } = handler();
     await expect(handlers.handleCreateDataElement({
-      name: 'ZMM_TEST', description: 'Test', packageName: '$TMP', domain: 'ZD', dataType: 'CHAR'
+      name: 'ZAPP_TEST', description: 'Test', packageName: '$TMP', domain: 'ZD', dataType: 'CHAR'
     })).rejects.toThrow(/either from a domain/);
     await expect(handlers.handleCreateDataElement({
-      name: 'ZMM_TEST', description: 'Test', packageName: '$TMP'
+      name: 'ZAPP_TEST', description: 'Test', packageName: '$TMP'
     })).rejects.toThrow(/needs a type/);
     expect(calls).toEqual([]);
   });
@@ -258,7 +258,7 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
   it('takes the lock, writes and gives it back', async () => {
     const { handlers, calls } = handler();
     const result = answer(await handlers.handleSetDomainProperties({
-      name: 'ZMM_TEST', description: 'Edited'
+      name: 'ZAPP_TEST', description: 'Edited'
     }));
 
     expect(calls).toEqual(['lock', 'read', 'write', 'unlock']);
@@ -271,14 +271,14 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
 
   it('reads what the system holds only once the lock is ours', async () => {
     const { handlers, calls } = handler();
-    await handlers.handleSetDataElementProperties({ name: 'ZMM_TEST', label: 'Status' });
+    await handlers.handleSetDataElementProperties({ name: 'ZAPP_TEST', label: 'Status' });
     expect(calls.indexOf('lock')).toBeLessThan(calls.indexOf('read'));
   });
 
   it('leaves a caller\'s own handle alone', async () => {
     const { handlers, calls } = handler();
     const result = answer(await handlers.handleSetDomainProperties({
-      name: 'ZMM_TEST', description: 'Edited', lockHandle: 'THEIRS'
+      name: 'ZAPP_TEST', description: 'Edited', lockHandle: 'THEIRS'
     }));
 
     expect(calls).toEqual(['read', 'write']);
@@ -290,7 +290,7 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
     lockRegistry.remember(DOMAIN_URL, 'OUTER', undefined);
     const { handlers, calls } = handler();
     const result = answer(await handlers.handleSetDomainProperties({
-      name: 'ZMM_TEST', description: 'Edited'
+      name: 'ZAPP_TEST', description: 'Edited'
     }));
 
     expect(calls).toEqual(['read', 'write']);
@@ -300,7 +300,7 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
   it('activates when asked, and only after the lock is off', async () => {
     const { handlers, calls } = handler();
     const result = answer(await handlers.handleSetDomainProperties({
-      name: 'ZMM_TEST', description: 'Edited', activate: true
+      name: 'ZAPP_TEST', description: 'Edited', activate: true
     }));
 
     expect(calls).toEqual(['lock', 'read', 'write', 'unlock', 'inactiveObjects', 'activate', 'inactiveObjects']);
@@ -313,7 +313,7 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
     const { handlers, calls } = handler({
       setDomainProperties: async () => { throw new Error('type not allowed'); }
     });
-    await expect(handlers.handleSetDomainProperties({ name: 'ZMM_TEST', datatype: 'NOPE' }))
+    await expect(handlers.handleSetDomainProperties({ name: 'ZAPP_TEST', datatype: 'NOPE' }))
       .rejects.toThrow(/type not allowed/);
     expect(calls).toContain('unlock');
   });
@@ -323,7 +323,7 @@ describe('setDomainProperties and setDataElementProperties: the lock', () => {
       unLock: async () => { throw new Error('lock is not yours'); }
     });
     const result = answer(await handlers.handleSetDataElementProperties({
-      name: 'ZMM_TEST', label: 'Status', activate: true
+      name: 'ZAPP_TEST', label: 'Status', activate: true
     }));
 
     expect(result.written).toBe(true);

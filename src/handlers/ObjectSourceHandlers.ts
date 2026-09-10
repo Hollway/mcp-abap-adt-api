@@ -51,7 +51,7 @@ export class ObjectSourceHandlers extends BaseHandler {
           properties: {
             objectSourceUrl: {
               type: 'string',
-              description: 'Source URL, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main'
+              description: 'Source URL, e.g. /sap/bc/adt/oo/classes/zcl_app/source/main'
             },
             edits: {
               type: 'array',
@@ -93,7 +93,7 @@ export class ObjectSourceHandlers extends BaseHandler {
           properties: {
             objectSourceUrl: {
               type: 'string',
-              description: 'Source URL, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main'
+              description: 'Source URL, e.g. /sap/bc/adt/oo/classes/zcl_app/source/main'
             },
             edits: {
               type: 'array',

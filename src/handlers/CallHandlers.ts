@@ -51,7 +51,7 @@ export class CallHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Function module, e.g. Z_MM_GET_INVOICE. The group is found by search.'
+              description: 'Function module, e.g. Z_APP_GET_INVOICE. The group is found by search.'
             },
             values: {
               type: 'object',
@@ -93,7 +93,7 @@ export class CallHandlers extends BaseHandler {
           properties: {
             className: {
               type: 'string',
-              description: 'Class holding the method, e.g. ZCL_MM.'
+              description: 'Class holding the method, e.g. ZCL_APP.'
             },
             methodName: {
               type: 'string',

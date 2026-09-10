@@ -18,7 +18,7 @@ import type { FunctionParameter } from '../lib/functionModule';
  * Everything about them was reachable only if you already knew where they
  * live: the source URL needs the function GROUP
  * (/sap/bc/adt/functions/groups/<group>/fmodules/<module>/source/main), and a
- * caller reading `CALL FUNCTION 'Z_MM_GET_INVOICE'` has the module name and
+ * caller reading `CALL FUNCTION 'Z_APP_GET_INVOICE'` has the module name and
  * nothing else. The signature was worse: ADT serves it as the first statement
  * of the source, so answering "what does this module take" meant reading a
  * 1,100-line source and reading the ABAP by eye.
@@ -31,7 +31,7 @@ const PARAMETER_SCHEMA = (what: string) => ({
     type: 'object',
     properties: {
       name: { type: 'string' },
-      type: { type: 'string', description: 'ABAP type, e.g. LGNUM, STRING, ZMM_INVOICE_LIST_TT.' },
+      type: { type: 'string', description: 'ABAP type, e.g. LGNUM, STRING, ZAPP_INVOICE_LIST_TT.' },
       byValue: { type: 'boolean', description: 'Pass by value: VALUE(NAME).' },
       optional: { type: 'boolean', description: 'OPTIONAL.' },
       default: { type: 'string', description: `DEFAULT <this>, written as ABAP: 'X', SPACE, ABAP_TRUE.` },
@@ -58,7 +58,7 @@ export class FunctionModuleHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Function module name, e.g. Z_MM_GET_INVOICE.' },
+            name: { type: 'string', description: 'Function module name, e.g. Z_APP_GET_INVOICE.' },
             functionGroup: {
               type: 'string',
               description: 'The group, if you know it. Saves the lookup; required only when the search cannot find the module.'
@@ -83,7 +83,7 @@ export class FunctionModuleHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            functionGroup: { type: 'string', description: 'Group name, e.g. ZMM_ARM_FM.' },
+            functionGroup: { type: 'string', description: 'Group name, e.g. ZAPP_CORE_FM.' },
             includeGlobals: {
               type: 'boolean',
               description: 'Also list the global data and types of the TOP include. Default true.'
@@ -98,7 +98,7 @@ export class FunctionModuleHandlers extends BaseHandler {
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Name of the new module, e.g. Z_MM_DO_THING.' },
+            name: { type: 'string', description: 'Name of the new module, e.g. Z_APP_DO_THING.' },
             functionGroup: { type: 'string', description: 'The group it goes into. Must exist.' },
             description: { type: 'string', description: 'Short text for the module.' },
             importing: PARAMETER_SCHEMA('Importing parameters'),

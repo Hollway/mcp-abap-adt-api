@@ -12,7 +12,7 @@ import type { ImpactObject, UsageRow } from '../lib/impact';
  *
  * usageReferences already answers it, in a form that cannot be read: a flat
  * list that is really a tree of packages, objects and the places inside them.
- * ZCL_MM_RETURN answers with 352 rows, about 178,000 characters, for what is
+ * ZCL_APP_RETURN answers with 352 rows, about 178,000 characters, for what is
  * in the end a list of some 40 objects. This rolls that up, and can follow the
  * callers one step further to show what depends on them in turn.
  */
@@ -30,7 +30,7 @@ export class ImpactHandlers extends BaseHandler {
           properties: {
             objectName: {
               type: 'string',
-              description: 'Object name, e.g. ZCL_MM_RETURN. Use with objectType.'
+              description: 'Object name, e.g. ZCL_APP_RETURN. Use with objectType.'
             },
             objectType: {
               type: 'string',

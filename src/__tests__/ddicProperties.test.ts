@@ -9,13 +9,13 @@ import {
 
 const DOMAIN = {
   metaData: {
-    name: 'ZMM_STATUS',
+    name: 'ZAPP_STATUS',
     description: 'Status',
     language: 'EN',
     masterLanguage: 'EN',
-    masterSystem: 'EUD',
-    responsible: 'VKRIVOROT',
-    packageName: 'ZMM_BASE'
+    masterSystem: 'DEV',
+    responsible: 'TESTER',
+    packageName: 'ZAPP_BASE'
   },
   properties: {
     typeInformation: { datatype: 'CHAR', length: 4, decimals: 0 },
@@ -28,7 +28,7 @@ const DOMAIN = {
       ampmFormat: false
     },
     valueInformation: {
-      valueTableRef: 'ZMM_STATUS_T',
+      valueTableRef: 'ZAPP_STATUS_T',
       appendExists: false,
       fixValues: [{ low: 'A', text: 'Active' }]
     }
@@ -37,16 +37,16 @@ const DOMAIN = {
 
 const ELEMENT = {
   metaData: {
-    name: 'ZMM_STATUS',
+    name: 'ZAPP_STATUS',
     description: 'Status',
     language: 'EN',
     masterLanguage: 'EN',
-    masterSystem: 'EUD',
-    responsible: 'VKRIVOROT',
-    packageName: 'ZMM_BASE'
+    masterSystem: 'DEV',
+    responsible: 'TESTER',
+    packageName: 'ZAPP_BASE'
   },
   properties: {
-    typeName: 'ZMM_STATUS',
+    typeName: 'ZAPP_STATUS',
     dataType: 'CHAR',
     dataTypeLength: 4,
     dataTypeDecimals: 0,
@@ -56,7 +56,7 @@ const ELEMENT = {
       longFieldLabel: 'Delivery status',
       headingFieldLabel: 'Delivery status'
     },
-    searchHelp: 'ZMM_SH',
+    searchHelp: 'ZAPP_SH',
     searchHelpParameter: 'STATUS',
     setGetParameter: '',
     defaultComponentName: '',
@@ -88,7 +88,7 @@ describe('domain merge', () => {
 
   it('keeps the value table when only the fixed values change, and the other way round', () => {
     expect(mergeDomain(DOMAIN, { fixValues: [] }).properties.valueInformation?.valueTableRef)
-      .toBe('ZMM_STATUS_T');
+      .toBe('ZAPP_STATUS_T');
     expect(mergeDomain(DOMAIN, { valueTable: 'ZOTHER' }).properties.valueInformation?.fixValues)
       .toEqual([{ low: 'A', text: 'Active' }]);
   });
@@ -143,8 +143,8 @@ describe('data element merge', () => {
       ...ELEMENT,
       properties: { ...ELEMENT.properties, typeName: '', dataType: 'CHAR', dataTypeLength: 10 }
     };
-    const { state } = mergeDataElement(predefined, { domain: 'zmm_other' });
-    expect(state.properties.typeName).toBe('ZMM_OTHER');
+    const { state } = mergeDataElement(predefined, { domain: 'zapp_other' });
+    expect(state.properties.typeName).toBe('ZAPP_OTHER');
     expect(state.properties.dataType).toBe('');
     expect(state.properties.dataTypeLength).toBe(0);
   });
@@ -175,13 +175,13 @@ describe('data element merge', () => {
 
 describe('urls', () => {
   it('builds the object url from a name in any case', () => {
-    expect(domainUrl('ZMM_Status')).toBe('/sap/bc/adt/ddic/domains/zmm_status');
-    expect(dataElementUrl(' ZMM_STATUS ')).toBe('/sap/bc/adt/ddic/dataelements/zmm_status');
+    expect(domainUrl('ZAPP_Status')).toBe('/sap/bc/adt/ddic/domains/zapp_status');
+    expect(dataElementUrl(' ZAPP_STATUS ')).toBe('/sap/bc/adt/ddic/dataelements/zapp_status');
     expect(domainUrl('/BOFU/NAME')).toBe('/sap/bc/adt/ddic/domains/%2Fbofu%2Fname');
   });
 
   it('reads the name back out of a url', () => {
-    expect(ddicNameOf('/sap/bc/adt/ddic/domains/zmm_status')).toBe('ZMM_STATUS');
+    expect(ddicNameOf('/sap/bc/adt/ddic/domains/zapp_status')).toBe('ZAPP_STATUS');
     expect(ddicNameOf('/sap/bc/adt/ddic/dataelements/%2Fbofu%2Fname')).toBe('/BOFU/NAME');
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "mcp-abap-abap-adt-api",
   "version": "0.1.1",
-  "mcpName": "io.github.mario-andreschak/mcp-abap-abap-adt-api",
+  "mcpName": "io.github.hollway/mcp-abap-abap-adt-api",
   "main": "dist/index.js",
   "bin": {
     "mcp-abap-abap-adt-api": "dist/index.js"
@@ -16,7 +16,6 @@
     "build": "tsc -p tsconfig.json",
     "start": "node ./dist/index.js",
     "dev": "npx @modelcontextprotocol/inspector ./dist/index.js",
-    "prepublishOnly": "npm run build",
     "smoke": "node scripts/smoke.js"
   },
   "keywords": [
@@ -27,19 +26,19 @@
     "mcp",
     "model-context-protocol"
   ],
-  "author": "mario-andreschak",
-  "description": "MCP server wrapping abap-adt-api for full ABAP ADT development workflows (object CRUD, transports, locking, syntax check, activation) against SAP systems",
+  "author": "Hollway",
+  "contributors": [
+    "mario-andreschak (original author)"
+  ],
+  "description": "MCP server wrapping abap-adt-api for full ABAP ADT development workflows (object CRUD, transports, locking, syntax check, activation) against SAP systems. Fork of mario-andreschak/mcp-abap-abap-adt-api with additional tools, guardrails and tests.",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mario-andreschak/mcp-abap-abap-adt-api.git"
+    "url": "git+https://github.com/Hollway/mcp-abap-abap-adt-api.git"
   },
-  "homepage": "https://github.com/mario-andreschak/mcp-abap-abap-adt-api#readme",
+  "homepage": "https://github.com/Hollway/mcp-abap-abap-adt-api#readme",
   "bugs": {
-    "url": "https://github.com/mario-andreschak/mcp-abap-abap-adt-api/issues"
+    "url": "https://github.com/Hollway/mcp-abap-abap-adt-api/issues"
   },
   "engines": {
     "node": ">=18"

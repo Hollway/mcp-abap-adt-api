@@ -100,7 +100,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
           properties: {
             name: {
               type: 'string',
-              description: 'Include name, e.g. ZR_MM_FOO_F01.'
+              description: 'Include name, e.g. ZR_APP_FOO_F01.'
             },
             description: {
               type: 'string',
@@ -108,11 +108,11 @@ export class ObjectRegistrationHandlers extends BaseHandler {
             },
             packageName: {
               type: 'string',
-              description: 'Development package, e.g. ZMM_BASE.'
+              description: 'Development package, e.g. ZAPP_BASE.'
             },
             mainProgram: {
               type: 'string',
-              description: 'Main program the include belongs to, e.g. ZR_MM_FOO. This is the reference createObject fails to send.'
+              description: 'Main program the include belongs to, e.g. ZR_APP_FOO. This is the reference createObject fails to send.'
             },
             transport: {
               type: 'string',
@@ -142,7 +142,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
             },
             name: {
               type: 'string',
-              description: 'Object name, e.g. ZCL_MM_FOO.'
+              description: 'Object name, e.g. ZCL_APP_FOO.'
             },
             description: {
               type: 'string',

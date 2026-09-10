@@ -97,7 +97,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     properties: {
                         className: {
                             type: 'string',
-                            description: 'Class holding the method, e.g. ZCL_MM_PCK_PLAN.'
+                            description: 'Class holding the method, e.g. ZCL_APP_PCK_PLAN.'
                         },
                         interfaceName: {
                             type: 'string',
@@ -105,7 +105,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         },
                         objectSourceUrl: {
                             type: 'string',
-                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main.'
+                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_app/source/main.'
                         },
                         method: {
                             type: 'string',
@@ -127,15 +127,15 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     properties: {
                         className: {
                             type: 'string',
-                            description: 'Class name, e.g. ZCL_MM_PCK_PLAN.'
+                            description: 'Class name, e.g. ZCL_APP_PCK_PLAN.'
                         },
                         interfaceName: {
                             type: 'string',
-                            description: 'Interface name, e.g. ZIF_MM_C.'
+                            description: 'Interface name, e.g. ZIF_APP_C.'
                         },
                         objectSourceUrl: {
                             type: 'string',
-                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_mm/source/main. Pass name as well.'
+                            description: 'Source URL instead of a name, e.g. /sap/bc/adt/oo/classes/zcl_app/source/main. Pass name as well.'
                         },
                         name: {
                             type: 'string',
@@ -260,7 +260,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     properties: {
                         url: {
                             type: 'string',
-                            description: 'Object URL, e.g. /sap/bc/adt/oo/classes/zcl_mm'
+                            description: 'Object URL, e.g. /sap/bc/adt/oo/classes/zcl_app'
                         },
                         type: {
                             type: 'string',

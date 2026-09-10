@@ -4,12 +4,12 @@ import { SourceSearchHandlers } from '../handlers/SourceSearchHandlers';
  * The handler side of findInSource / sourceOutline: which sources get read,
  * and what happens when one of them cannot be.
  */
-const MAIN_URL = '/sap/bc/adt/programs/programs/zr_mm_foo/source/main';
+const MAIN_URL = '/sap/bc/adt/programs/programs/zr_app_foo/source/main';
 
 const MAIN = [
-  'REPORT zr_mm_foo.',
-  'INCLUDE zr_mm_foo_f01.',
-  'INCLUDE zr_mm_foo_gone.',
+  'REPORT zr_app_foo.',
+  'INCLUDE zr_app_foo_f01.',
+  'INCLUDE zr_app_foo_gone.',
   'START-OF-SELECTION.',
   '  PERFORM read_data.'
 ].join('\n');
@@ -27,7 +27,7 @@ const handler = () => {
     getObjectSource: async (url: string, options: any) => {
       read.push({ url, options });
       if (url === MAIN_URL) return MAIN;
-      if (url.includes('zr_mm_foo_f01')) return F01;
+      if (url.includes('zr_app_foo_f01')) return F01;
       throw new Error('Object does not exist');
     }
   };
@@ -57,14 +57,14 @@ describe('findInSource', () => {
     }));
     expect(read.map(r => r.url)).toEqual([
       MAIN_URL,
-      '/sap/bc/adt/programs/includes/zr_mm_foo_f01/source/main',
-      '/sap/bc/adt/programs/includes/zr_mm_foo_gone/source/main'
+      '/sap/bc/adt/programs/includes/zr_app_foo_f01/source/main',
+      '/sap/bc/adt/programs/includes/zr_app_foo_gone/source/main'
     ]);
     // "FORM read_data" also sits inside "PERFORM read_data." in the main
     // program, so both sources answer - and each one says which it is
     expect(result.results.map((r: any) => [r.name, r.matches[0].line])).toEqual([
-      ['ZR_MM_FOO', 5],
-      ['ZR_MM_FOO_F01', 1]
+      ['ZR_APP_FOO', 5],
+      ['ZR_APP_FOO_F01', 1]
     ]);
   });
 
@@ -77,7 +77,7 @@ describe('findInSource', () => {
     }));
     expect(result.status).toBe('success');
     expect(result.unreadableIncludes).toEqual([
-      { name: 'ZR_MM_FOO_GONE', error: 'Object does not exist' }
+      { name: 'ZR_APP_FOO_GONE', error: 'Object does not exist' }
     ]);
   });
 
@@ -127,9 +127,9 @@ describe('sourceOutline', () => {
     const { handlers } = handler();
     const result = answer(await handlers.handleSourceOutline({ objectSourceUrl: MAIN_URL }));
     expect(result.results[0].entries).toEqual([
-      { kind: 'REPORT', name: 'ZR_MM_FOO', line: 1 },
-      { kind: 'INCLUDE', name: 'ZR_MM_FOO_F01', line: 2 },
-      { kind: 'INCLUDE', name: 'ZR_MM_FOO_GONE', line: 3 },
+      { kind: 'REPORT', name: 'ZR_APP_FOO', line: 1 },
+      { kind: 'INCLUDE', name: 'ZR_APP_FOO_F01', line: 2 },
+      { kind: 'INCLUDE', name: 'ZR_APP_FOO_GONE', line: 3 },
       { kind: 'EVENT', name: 'START-OF-SELECTION', line: 4 }
     ]);
   });

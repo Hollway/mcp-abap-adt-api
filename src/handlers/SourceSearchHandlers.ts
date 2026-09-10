@@ -40,7 +40,7 @@ export class SourceSearchHandlers extends BaseHandler {
           properties: {
             objectSourceUrl: {
               type: 'string',
-              description: 'Source URL, e.g. /sap/bc/adt/programs/programs/zr_mm_foo/source/main'
+              description: 'Source URL, e.g. /sap/bc/adt/programs/programs/zr_app_foo/source/main'
             },
             pattern: {
               type: 'string',
@@ -86,7 +86,7 @@ export class SourceSearchHandlers extends BaseHandler {
           properties: {
             objectSourceUrl: {
               type: 'string',
-              description: 'Source URL, e.g. /sap/bc/adt/programs/programs/zr_mm_foo/source/main'
+              description: 'Source URL, e.g. /sap/bc/adt/programs/programs/zr_app_foo/source/main'
             },
             kinds: {
               type: 'array',
