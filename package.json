@@ -27,10 +27,7 @@
     "model-context-protocol"
   ],
   "author": "Hollway",
-  "contributors": [
-    "mario-andreschak (original author)"
-  ],
-  "description": "MCP server wrapping abap-adt-api for full ABAP ADT development workflows (object CRUD, transports, locking, syntax check, activation) against SAP systems. Fork of mario-andreschak/mcp-abap-abap-adt-api with additional tools, guardrails and tests.",
+  "description": "MCP server wrapping abap-adt-api for full ABAP ADT development workflows (object CRUD, transports, locking, syntax check, activation, dictionary and code execution) against SAP systems",
   "license": "MIT",
   "repository": {
     "type": "git",

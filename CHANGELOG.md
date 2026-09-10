@@ -89,8 +89,8 @@ Each one passed the unit tests and was wrong against a real system.
    `TYPE ANY TABLE`. Every call with an elementary exporting parameter died
    there. Row counting stays with `TABLES`, where the table is known.
 4. **A table is not serialised as `<item>` rows.** When it has a named row type,
-   asXML names the rows after it, and a 19-field structure arrived as a
-   structure with one component. A repeated name is now read as a table, and
+   asXML names the rows after it, and a table arrived as a structure with one
+   component. A repeated name is now read as a table, and
    because a one-row table of a named type is indistinguishable from a
    structure, the generated code asks RTTI which results are tables and reports
    it.
@@ -129,15 +129,14 @@ after this the library cannot do at all.
   `CALL FUNCTION 'Z_SOMETHING'` gives a name, and every endpoint wants the
   **group**. The signature is worse: ADT serves it as the first statement of the
   source rather than the `*"` block SE37 shows, so answering "what does this
-  module take" meant reading 1100 lines and parsing ABAP by eye.
+  module take" meant reading the whole source and parsing ABAP by eye.
 - `getFunctionModule` takes one name, finds the group and returns the signature
   as data: importing / exporting / changing / tables / exceptions with types,
   defaults and a pass-by-value flag (`VALUE(NAME)` versus a bare name is easy to
   read backwards). The body is not returned by default.
 - `listFunctionGroup` lists a group's modules, includes and global data. So does
   `nodeContents`, but every row there carries a SAP GUI bridge link padded to 30
-  characters: 14,000 characters for a thirty-module group against about 3,000
-  here.
+  characters, multiplying the size of the answer for no added information.
 - `createFunctionModule` creates a module in an existing group together with its
   interface — otherwise the signature cannot be set, since it lives in the
   source text. A missing group is refused with a pointer to what creates one.
@@ -156,10 +155,11 @@ after this the library cannot do at all.
 
 - **`revisions`** rewritten: takes a name and type (the URL still works),
   returns the newest 20 instead of the whole history, and filters by author,
-  transport and description. On a class with 91 versions that is ~28,000
-  characters for the question "what changed last". It also names what the
-  backend does not: what it calls the "version" is the **transport request**,
-  and the version number lives only in the content URI.
+  transport and description. On a class with a long history that is tens of
+  thousands of characters saved on the question "what changed last". It also
+  names what the backend does not: what it calls the "version" is the
+  **transport request**, and the version number lives only in the content
+  URI.
 - **`compareRevisions`** shows what changed between two versions as a unified
   diff. A side can be a revision number, a request number, or the words
   `active` / `inactive` / `latest`, so an edit that is written but not activated
@@ -174,10 +174,9 @@ after this the library cannot do at all.
 - **`impactOf`** answers what depends on an object or on one of its methods:
   objects, the places inside them, each one's package, worst first.
   `usageReferences` answers the same question with a flat list that is really a
-  tree — for one 352-line class that is about 178,000 characters, past the
-  response cap. Uses from test includes are marked, standard SAP is counted but
-  hidden by default, and `depth=2` goes one step further and names the caller it
-  arrived through.
+  tree — on a widely used class it runs past the response cap. Uses from test
+  includes are marked, standard SAP is counted but hidden by default, and
+  `depth=2` goes one step further and names the caller it arrived through.
 
 ### Class members
 
@@ -227,7 +226,7 @@ after this the library cannot do at all.
 ### Six defects these runs found
 
 1. A class include with no history answered "Revision URL not found for object
-   X" — as if a class with 91 versions had no history at all. The refusal now
+   X" — as if a class with a long history had none at all. The refusal now
    names the includes that do have one.
 2. Comparing the two newest versions often comes out empty by default: releasing
    a request leaves a copy with identical text. That is now said, rather than
@@ -245,8 +244,8 @@ Plus two found by a fragment that dumps: **a dump takes the session with it**
 (the run answers 500, the next call an empty 400), so the cleanup right after it
 failed — and every failed fragment left its class behind in `$TMP`. Deletion now
 logs in again and retries. The 500 itself says nothing: the cause is in the dump
-feed, a 10,088-character ST22 HTML page, from which six fields and the failing
-source line are now extracted.
+feed, a ten-thousand-character ST22 HTML page, from which six fields and the
+failing source line are now extracted.
 
 ## [0.5.0] — SE91 messages, tables and structures, package-wide work, ATC
 

@@ -2,15 +2,13 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> **This is a fork** of [mario-andreschak/mcp-abap-abap-adt-api](https://github.com/mario-andreschak/mcp-abap-abap-adt-api) (MIT), kept at the upstream `0.1.1` and extended with additional tools, guardrails and a test suite. See the [CHANGELOG](CHANGELOG.md) for what this fork adds. It is **not** published to npm - build it from source (see below).
+> 176 tools, read-only guardrails and 635 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
 The MCP-Server `mcp-abap-abap-adt-api` is a Model Context Protocol (MCP) server designed to facilitate seamless communication between ABAP systems and MCP clients. It is a wrapper for [abap-adt-api](https://github.com/marcellourbani/abap-adt-api/) and provides a suite of tools and resources for managing ABAP objects, handling transport requests, performing code analysis, and more, enhancing the efficiency and effectiveness of ABAP development workflows.
 
-The **upstream** server is published on npm as [`mcp-abap-abap-adt-api`](https://www.npmjs.com/package/mcp-abap-abap-adt-api) and listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.mario-andreschak/mcp-abap-abap-adt-api`. Installing from either gets you upstream, not this fork — to run this one, clone the repository and build it from source.
-
-> **Related project:** For higher-level, read-oriented ABAP tools (`GetProgram`, `GetClass`, `GetTable`, …) see the separate [`mcp-abap-adt`](https://github.com/mario-andreschak/mcp-abap-adt) server. **This** server (`mcp-abap-abap-adt-api`) exposes the lower-level ADT API (lock/unlock, edit source, transports, activation, syntax checks, DDIC access, …) for full read/write development workflows.
+The server is not published to a package registry: clone the repository, build it, and point your MCP client at `dist/index.js`. [Installation](#installation) has the details.
 
 ## Features
 
@@ -23,7 +21,7 @@ The **upstream** server is published on npm as [`mcp-abap-abap-adt-api`](https:/
 - **Calling what is there**: `callFunction` takes a function module name and values, reads its signature, generates the call and runs it - the answer carries the exporting, changing and tables parameters by name, `sy-subrc` turned back into the name of the classic exception it stood for, and a class-based exception with its text. `callMethod` does the same for a static method, whose parameters `classComponents` does not report at all. Both execute code, and both end in `ROLLBACK WORK` unless `commit` is set.
 - **The dictionary, read whole**: `tableFields` answers a table with its includes spliced in where they sit - for `EKPO` that is 702 fields rather than the 307 its own definition lists - each with its data element, domain, type, length, check table, unit or currency field, conversion exit and text. `tableIndexes` and `tableKeys` answer the secondary indexes and the foreign keys with the fields they are built on. All three read dictionary tables and execute nothing.
 - **History**: `revisions` reads the version history by name (the "version" a revision carries is the transport request; the number is the `revision` field), and `compareRevisions` diffs two of them - or the active version against the inactive one, which shows an edit that is written but not activated.
-- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a tree of hundreds of rows: for `ZCL_APP_RETURN` it is 352 rows and about 178,000 characters, past the response cap.
+- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a flat list that is really a tree - on a widely used class it runs to hundreds of rows and past the response cap.
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
@@ -43,59 +41,7 @@ The **upstream** server is published on npm as [`mcp-abap-abap-adt-api`](https:/
 
 ## Installation
 
-There are three ways to use this server, from easiest to most manual. The first two install the **upstream** package from npm; only **Build from source** gives you this fork.
-
-### Integrating with FLUJO (recommended)
-
-[FLUJO](https://github.com/mario-andreschak/FLUJO) is the easiest way to use this server — no cloning, building, or hand-editing JSON config:
-
-1. In FLUJO, navigate to **MCP**.
-2. Click **Add Server**.
-3. On the **Marketplace** tab, search for **`mcp-abap-abap-adt-api`** and select it.
-4. FLUJO fetches the npm package automatically and opens the **Local Server** tab. Enter your SAP **URL**, **User**, **Password** (and optionally client/language), then click **Save**.
-
-That's it — FLUJO downloads and runs the npm package for you and keeps your SAP credentials with the installed server.
-
-#### Streamable HTTP transport (via FLUJO)
-
-`mcp-abap-abap-adt-api` runs over **stdio**. If you need to reach it over **streamable HTTP** — for example from another app on your machine or a client that only speaks HTTP — let FLUJO re-host it: install the server in FLUJO as above, then toggle **"Expose to external apps"** on the server. FLUJO's built-in mcp-proxy then serves it over HTTP at `http://localhost:4200/mcp-proxy/mcp-abap-abap-adt-api`, and any HTTP-capable MCP client can connect with a config like:
-
-```json
-{
-  "mcpServers": {
-    "mcp-abap-abap-adt-api": {
-      "type": "http",
-      "url": "http://localhost:4200/mcp-proxy/mcp-abap-abap-adt-api"
-    }
-  }
-}
-```
-
-FLUJO keeps your SAP credentials with the installed server, so the HTTP config itself carries none.
-
-### Quick start with npx (any MCP client)
-
-The upstream server is published on npm, so you don't need to clone or build anything — most MCP clients can launch it directly via `npx`. Note that this installs **upstream**, not this fork. Add it to your MCP client configuration (e.g. Cline, Claude Desktop, Claude Code):
-
-```json
-{
-  "mcpServers": {
-    "mcp-abap-abap-adt-api": {
-      "command": "npx",
-      "args": ["-y", "mcp-abap-abap-adt-api"],
-      "env": {
-        "SAP_URL": "https://your-sap-server.com:44300",
-        "SAP_USER": "YOUR_SAP_USERNAME",
-        "SAP_PASSWORD": "YOUR_SAP_PASSWORD",
-        "SAP_CLIENT": "100",
-        "SAP_LANGUAGE": "EN"
-      }
-    }
-  }
-}
-```
-
-If your SAP system uses a self-signed certificate, add `"NODE_TLS_REJECT_UNAUTHORIZED": "0"` to the `env` block (development only).
+The server runs over **stdio**. Clone it, build it, and give your MCP client the path to `dist/index.js` together with the environment variables below.
 
 ### Environment variables
 
@@ -112,7 +58,7 @@ If your SAP system uses a self-signed certificate, add `"NODE_TLS_REJECT_UNAUTHO
 
 Connection settings can also come from a `.env` file next to the server, but that is only a fallback: when several instances run against different systems, a typo in one client entry would silently connect to whatever `.env` points at. The server prints its target system and where the settings came from on startup, and `healthcheck` reports both.
 
-> **Windows tip:** if `npx` isn't found, set `"command": "npx.cmd"`, or use the full path to `node` with the absolute path to `dist/index.js` from a source install (see below).
+> **Windows tip:** give `command` the full path to `node.exe` and `args` the absolute path to `dist/index.js` — a bare `node` is not always on the PATH an MCP client starts with.
 
 ### Build from source
 
@@ -386,11 +332,9 @@ When working with ABAP objects, you may encounter errors related to unknown fiel
 *   **`ddicRepositoryAccess`:** Reads DDIC repository information for a given path.
 *   **`tableContents`:** Retrieves the *contents* (rows) of a table, not its definition. Use `runQuery` for ad-hoc `SELECT`s.
 
-> **Note:** Earlier versions of this README listed `GetTable`, `GetStructure`, and `GetTypeInfo`. Those tools are **not** part of this server — they belong to the separate [`mcp-abap-adt`](https://github.com/mario-andreschak/mcp-abap-adt) project. This server (`mcp-abap-abap-adt-api`) exposes the lower-level ADT API tools listed above instead.
-
 ## Troubleshooting
 
-*   **`npx` can't find the package / client won't start it:** ensure Node.js is installed and on your PATH (`node -v`, `npm -v`). On Windows try `"command": "npx.cmd"`, or use a source build with an absolute path to `node dist/index.js`.
+*   **The client won't start the server:** ensure Node.js is installed (`node -v`, `npm -v`) and that `npm run build` has produced `dist/index.js`. Give the client absolute paths for both `node` and the script — the PATH an MCP client starts with is not always your shell's.
 *   **SAP connection errors:** verify your credentials (`SAP_URL`, `SAP_USER`, `SAP_PASSWORD`, `SAP_CLIENT`), confirm the system is reachable, that your user has ADT authorizations, and that `/sap/bc/adt` is active in `SICF`.
 *   **TLS / self-signed certificate errors:** for development only, set `NODE_TLS_REJECT_UNAUTHORIZED=0` (env var or in the client `env` block).
 *   **Every call suddenly fails with status 400:** the ADT session died. The server detects that shape (an HTTP failure with no `exc:exception` body), re-authenticates and retries read-only calls, marking the answer `sessionRecovered`. A call that writes is not repeated: re-lock the object and try again. `healthcheck` says whether the session is alive.
@@ -418,13 +362,11 @@ SAP_URL=... SAP_USER=... SAP_PASSWORD=... SMOKE_CLASS=CL_SALV_TABLE npm run smok
 ### The changelog
 
 One working session, one version. Each session of work on this server adds a
-new version section at the top of `CHANGELOG.md` with its date, its commit
-range, how the tool and test counts moved, and what it changed - so the history
-shows what each round brought rather than only where things ended up.
-
-Up to `[0.6.0]` that file was kept in two languages, the English one on a
-branch prepared for a pull request upstream. That is not planned, so the branch
-is gone and the changelog is kept in one language.
+new version section at the top of `CHANGELOG.md`: how the tool and test counts
+moved, what it added, and - separately - what the live runs proved wrong. That
+last part is the useful one. Every defect listed there had passed the unit
+tests before a real system rejected it, so the entry records what the backend
+does rather than what its documentation implies.
 
 ## Contributing
 
