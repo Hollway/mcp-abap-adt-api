@@ -4,6 +4,7 @@ import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 import type { TransportsOfUser, TransportTarget, TransportRequest } from "abap-adt-api";
+import { filterUsers } from '../lib/userList';
 
 export class TransportHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -281,10 +282,19 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'systemUsers',
-                description: 'The users of this system, as the transport tools offer them - who a request can be handed to or shared with.',
+                description: 'The users of this system, as the transport tools offer them - who a request can be handed to or shared with. Search with filter rather than reading the whole address book of the system.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        filter: {
+                            type: 'string',
+                            description: 'Case-insensitive substring, matched against both the user id and the name. Without it the whole list comes back, which on a real system is several hundred entries.'
+                        },
+                        limit: {
+                            type: 'number',
+                            description: 'Cap on the users reported, default 50. The counts are always for everything found.'
+                        }
+                    }
                 }
             },
             {
@@ -868,7 +878,7 @@ export class TransportHandlers extends BaseHandler {
     async handleSystemUsers(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const users = await this.readClient.systemUsers();
+            const result = filterUsers(await this.readClient.systemUsers(), args);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -876,7 +886,7 @@ export class TransportHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            users
+                            ...result
                         })
                     }
                 ]

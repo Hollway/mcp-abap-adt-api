@@ -8,6 +8,97 @@ actually does — not what its documentation implies.
 The versions here were never published to npm: `package.json` stays on the
 upstream `0.1.1`, and the numbers below are the history of this fork.
 
+## [0.9.0] — what a live run found on the surfaces nobody had run
+
+Tools stay at **177**, tests 643 → **679** in 43 suites. Read-only smoke run:
+146 → **152** checks, plus two when `SMOKE_ATC_OBJECT` names a class and three
+when `SMOKE_TRACE_ID` names a readable trace.
+
+No new tools this time. ATC, the traces, the debugger and the abapGit tools had
+never been exercised against a live system; running them found five calls that
+fail on any real system, four answers that spend a caller's context on nothing,
+and several facts about the backend worth writing down. Recording a trace to
+read took four attempts, and each failure is written down below - the tools now
+say in their own descriptions what the backend will not serve.
+
+### The trace list is parsed here now
+
+- **`tracesList` worked on no system at all.** The library decodes the trace
+  feed through a codec that declares the atom title mandatory, and SAP only
+  writes a title for a trace that was given a description — a live system held
+  ten traces and one title. The backend answered correctly every time; the
+  decoding threw the answer away. The feed is parsed in `lib/traceFeed` now,
+  where a trace without a title is a trace without a title.
+- The answer is also **capped at 50 runs** (`limit`) and drops the four atom
+  links each run carries (`includeLinks` brings them back). The links are half
+  the size of the answer and lead to SAP GUI.
+- **`tracesCreateConfiguration` takes what it is given.** The backend accepts
+  `parametersId` only as the full URI `tracesSetParameters` answered with, and
+  `expires` only as an ISO-8601 timestamp with milliseconds; anything else is a
+  flat 400 that names neither field. Both are normalised before the call, and
+  an unreadable date is refused by name rather than by the backend.
+
+### And the statements of one, which no codec could read either
+
+- **`tracesStatements` failed the same way `tracesList` did.** Its codec
+  declares `callingProgram` mandatory; a statement that is an entry point has
+  no caller and carries none - two of 8051 in an ordinary trace, enough to lose
+  the other 8049. Parsed here now, in `lib/traceRead`, with the caller
+  optional.
+- **`tracesHitList` and `tracesStatements` are capped.** The same trace
+  answered 1.5 MB of hit list and 7.5 MB of statements: the first was thrown
+  away whole by the response guard, which could only say it was too big. Both
+  take `limit` (default 100) and `heaviestFirst`, and report `total`,
+  `returned` and the order they used, so what was dropped is named rather than
+  guessed at.
+
+### The debugger no longer dumps on its own default
+
+- **`debuggerListeners` failed when called with just its required arguments.**
+  The library defaults the conflict check to on, and the backend raises a short
+  dump for that check when there is no listener to conflict with — which is
+  every system where nobody happens to be debugging. The check is off unless
+  `checkConflict` asks for it.
+- It also answered a bare `{"status":"success"}` whether or not a listener was
+  found. It now says which: `listener: "none"` with the way to start one, or
+  `listener: "conflict"` with what the backend described.
+
+### Two user lists that answered with the whole system
+
+- **`atcUsers` and `systemUsers`** returned every user the system knows — some
+  450 entries and 14 kB of names on a live read, for a question about one
+  person. Both take `filter` (case-insensitive, over id and name) and `limit`
+  (default 50), and report `total`, `matched` and `returned` so nothing is
+  silently dropped.
+
+### A finding you can act on
+
+- **`atcCheck` now reports `findingUri`.** Its answer carried the
+  documentation link but not the finding's own URI, which is what
+  `atcContactUri` and the exemption tools take — so nothing it produced could
+  be fed to them.
+
+### What the run established about the backend, not the code
+
+- **A trace has to be recorded for the way it is going to be read.**
+  `tracesStatements` refuses an aggregated trace outright - the backend says so
+  in a subtype nobody surfaces, `invalidRequestForAggregatedTraces` - so a
+  trace meant to be read statement by statement has to be created with
+  `aggregate: false`. Beyond that, `tracesHitList`, `tracesDbAccess` and
+  `tracesStatements` answer "wrong input data" or "Data is invalid" for any
+  trace that is expired, still being written (`Active`), or over its size limit
+  (`Size violation`), in every id encoding - and the entry of such a trace
+  still advertises a hit list it will not serve. `tracesList` reports
+  `expiration` and `state` for exactly this reason.
+- **Tracing an ADT call is expensive.** A single `runSnippet` under
+  `processType: ANY` filled 60 MB, and the same run recorded statement by
+  statement overran 400 MB: the trace catches the whole ADT framework around
+  the snippet, not just the snippet.
+- **The abapGit tools need a plugin that need not be there.** On a system
+  without it, `/sap/bc/adt/abapgit/repos` answers a plain 404 — as does
+  `/sap/bc/adt/atc/items`, which `atcContactUri` and `atcChangeContact` are
+  built on. Nothing to fix; worth knowing before assuming a tool is broken.
+
 ## [0.8.0] — a call graph over usageReferences
 
 Tools 176 → **177**, tests 635 → **643** in 39 suites. Read-only smoke run: 146

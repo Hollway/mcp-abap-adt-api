@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 177 tools, read-only guardrails and 643 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 177 tools, read-only guardrails and 679 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -279,6 +279,44 @@ which - despite its name - opens a worklist rather than describing a variant.
 A package is checked through its SAPGUI bridge URI, because
 /sap/bc/adt/packages/ZFOO is refused with "No URI-Mapping defined for URI".
 
+`findingUri` in the report is what `atcContactUri` and the exemption tools
+take - but those are built on /sap/bc/adt/atc/items, which an older system
+answers with a plain 404. The same goes for the abapGit tools: without the
+abapGit ADT plugin, /sap/bc/adt/abapgit/repos is simply not there. Neither is
+a fault in the tool.
+
+**Traces**
+
+`tracesList` reports every trace with its `expiration` and `state`, and both
+matter: a trace past its expiration date, one still being written (`Active`),
+and one that overran its size limit (`Size violation`) are all listed but none
+of them can be read. `tracesHitList`, `tracesDbAccess` and `tracesStatements`
+answer "wrong input data" or "Data is invalid" for those - the id is not the
+problem, and no encoding of it helps.
+
+`tracesStatements` also refuses an aggregated trace, whatever its state: a
+trace to be read statement by statement has to be recorded with
+`aggregate: false`.
+
+A readable trace is still a large one - a single ADT call came to 8051
+statements and a 2548-entry hit list - so `tracesHitList` and
+`tracesStatements` cap what they report (`limit`, default 100) and can sort by
+gross time first (`heaviestFirst`), which is the order to ask for when the
+question is where the time went.
+
+Recording one takes two steps: `tracesSetParameters` answers with a parameters
+URI, and `tracesCreateConfiguration` records the next run of that user under
+it. Keep the process type narrow - `ANY` records the ADT calls of the session
+that set it up and fills the file with them. Tracing an ADT call is expensive
+either way: one `runSnippet` under `ANY` filled 60 MB, and the same run
+recorded statement by statement overran 400 MB.
+
+**The debugger**
+
+`debuggerListeners` leaves `checkConflict` off. Asking the backend to check for
+a conflict when no listener exists at all raises a short dump, so turn it on
+only once a listener is known to be there.
+
 **Transports**
 
 `userTransports` lists a user's requests, filterable by status (D
@@ -358,6 +396,11 @@ locks, writes or activates anything:
 ```bash
 SAP_URL=... SAP_USER=... SAP_PASSWORD=... SMOKE_CLASS=CL_SALV_TABLE npm run smoke
 ```
+
+`SMOKE_ATC_OBJECT=ZCL_SOMETHING` adds the ATC checks to the run. They are off
+by default: ATC over a large class takes minutes. `SMOKE_TRACE_ID=...` adds the
+trace-reading checks, which need a trace that is closed, unexpired and not
+aggregated - no system is guaranteed to hold one.
 
 ### The changelog
 

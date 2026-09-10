@@ -37,6 +37,15 @@ const FUNCTION_MODULE = (process.env.SMOKE_FUNCTION || 'GUI_UPLOAD').toUpperCase
 const CALL_FUNCTION = (process.env.SMOKE_CALL_FUNCTION || 'DATE_CHECK_PLAUSIBILITY').toUpperCase();
 const CALL_VALUES = JSON.parse(process.env.SMOKE_CALL_VALUES || '{"DATE":"20260101"}');
 const CLASS_URL = `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}/source/main`;
+// The debugger identifies a listener by terminal and IDE, both GUIDs in ADT.
+// Any pair will do for a read: nothing is registered under them.
+const SMOKE_TERMINAL = process.env.SMOKE_TERMINAL || '3C4A5B6D7E8F41A2B3C4D5E6F7A8B9C0';
+const SMOKE_IDE = process.env.SMOKE_IDE || '3C4A5B6D7E8F41A2B3C4D5E6F7A8B9C1';
+// Set SMOKE_ATC_OBJECT to a class to have the ATC checks run over it as well.
+const ATC_OBJECT = (process.env.SMOKE_ATC_OBJECT || '').toUpperCase();
+// Reading a trace needs one that is closed, unexpired and not aggregated, which
+// no system is guaranteed to hold - name one with SMOKE_TRACE_ID to check it.
+const TRACE_ID = process.env.SMOKE_TRACE_ID || '';
 const server = path.resolve(__dirname, '..', 'dist', 'index.js');
 
 const child = spawn(process.execPath, [server], {
@@ -665,6 +674,80 @@ const check = (label, condition, detail) => {
   check('tableKeys answers with a list, empty or not',
     foreign.payload.status === 'success' && Array.isArray(foreign.payload.foreignKeys),
     foreign.payload);
+
+  // Traces, users and the debugger - the surfaces a live run found broken.
+  const traces = await call('tracesList');
+  check('tracesList reads the trace feed',
+    traces.payload.status === 'success' && Array.isArray(traces.payload.runs) &&
+    typeof traces.payload.total === 'number',
+    traces.payload);
+  check('tracesList survives a trace that carries no title',
+    (traces.payload.runs || []).every(run => typeof run.title === 'string'),
+    traces.payload);
+
+  if ((traces.payload.total || 0) > 1) {
+    const oneTrace = await call('tracesList', { limit: 1 });
+    check('tracesList caps the runs and says what it left out',
+      oneTrace.payload.returned === 1 && oneTrace.payload.total === traces.payload.total &&
+      oneTrace.payload.truncated === true,
+      oneTrace.payload);
+  }
+
+  if (TRACE_ID) {
+    const hits = await call('tracesHitList', { id: TRACE_ID, limit: 3, heaviestFirst: true });
+    check('tracesHitList caps a hit list that would not fit',
+      hits.payload.status === 'success' && hits.payload.returned <= 3 &&
+      hits.payload.total >= hits.payload.returned,
+      hits.payload);
+
+    const statements = await call('tracesStatements', { id: TRACE_ID, limit: 3 });
+    check('tracesStatements survives a statement with no calling program',
+      statements.payload.status === 'success' && Array.isArray(statements.payload.entries) &&
+      statements.payload.total > 0,
+      statements.payload);
+
+    const db = await call('tracesDbAccess', { id: TRACE_ID });
+    check('tracesDbAccess reads the database side of a trace',
+      db.payload.status === 'success' && !!db.payload.dbAccess, db.payload);
+  }
+
+  const listeners = await call('debuggerListeners', {
+    debuggingMode: 'user',
+    terminalId: SMOKE_TERMINAL,
+    ideId: SMOKE_IDE,
+    user: process.env.SAP_USER.toUpperCase()
+  });
+  check('debuggerListeners answers without the conflict check dumping',
+    listeners.payload.status === 'success' &&
+    ['none', 'conflict'].includes(listeners.payload.listener),
+    listeners.payload);
+
+  const someUsers = await call('systemUsers', { filter: process.env.SAP_USER, limit: 5 });
+  check('systemUsers finds one user without listing the system',
+    someUsers.payload.status === 'success' && someUsers.payload.matched >= 1 &&
+    someUsers.payload.matched < someUsers.payload.total,
+    someUsers.payload);
+
+  const atcApprovers = await call('atcUsers', { limit: 3 });
+  check('atcUsers caps its answer and counts the rest',
+    atcApprovers.payload.status === 'success' && atcApprovers.payload.returned <= 3 &&
+    atcApprovers.payload.total >= atcApprovers.payload.returned,
+    atcApprovers.payload);
+
+  // ATC over a real object takes minutes on a large one, so it runs only when
+  // an object is named for it.
+  if (ATC_OBJECT) {
+    const atc = await call('atcCheck', { objectName: ATC_OBJECT, maxFindings: 5 });
+    check('atcCheck runs the checks and reports them',
+      atc.payload.status === 'success' && typeof atc.payload.totalFindings === 'number',
+      atc.payload);
+    const withFindings = (atc.payload.objects || []).flatMap(object => object.findings || []);
+    if (withFindings.length) {
+      check('atcCheck hands out the finding URI the exemption tools take',
+        withFindings.every(finding => typeof finding.findingUri === 'string'),
+        withFindings[0]);
+    }
+  }
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);

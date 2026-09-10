@@ -6,6 +6,7 @@ import { AtcProposal } from 'abap-adt-api';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { objectUrlFor } from '../lib/packageWalk';
 import { describeAdtError } from '../lib/adtError';
+import { filterUsers } from '../lib/userList';
 
 export class AtcHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -127,10 +128,19 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcUsers',
-                description: 'The users ATC knows for exemption approval - who can be named as an approver.',
+                description: 'The users ATC knows for exemption approval - who can be named as an approver. Search with filter rather than reading the whole address book of the system.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        filter: {
+                            type: 'string',
+                            description: 'Case-insensitive substring, matched against both the user id and the name. Without it the whole list comes back, which on a real system is several hundred entries.'
+                        },
+                        limit: {
+                            type: 'number',
+                            description: 'Cap on the users reported, default 50. The counts are always for everything found.'
+                        }
+                    }
                 }
             },
             {
@@ -346,7 +356,7 @@ export class AtcHandlers extends BaseHandler {
     async handleAtcUsers(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.readClient.atcUsers();
+            const result = filterUsers(await this.readClient.atcUsers(), args);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -354,7 +364,7 @@ export class AtcHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            ...result
                         })
                     }
                 ]
@@ -606,6 +616,10 @@ export class AtcHandlers extends BaseHandler {
                         sourceUrl: finding.location?.uri,
                         line: finding.location?.range?.start?.line,
                         ...(finding.exemptionApproval ? { exemptionApproval: finding.exemptionApproval } : {}),
+                        // The finding's own URI is what atcContactUri and the
+                        // exemption tools take. Without it here, nothing this
+                        // tool answers can be fed to them.
+                        ...(finding.uri ? { findingUri: finding.uri } : {}),
                         // The link is what atcDocumentation takes, and it is the
                         // only way to the text of the rule.
                         ...(finding.link?.href ? { documentationUri: finding.link.href } : {})
@@ -664,7 +678,7 @@ export class AtcHandlers extends BaseHandler {
                     steps,
                     ...(total === 0
                         ? { hint: `No findings at all under check variant ${variant}.` }
-                        : { note: 'Priority 1 is the worst. Read the rule behind a finding with atcDocumentation and its documentationUri.' })
+                        : { note: 'Priority 1 is the worst. Read the rule behind a finding with atcDocumentation and its documentationUri; findingUri is what atcContactUri and the exemption tools take.' })
                 })
             }]
         };

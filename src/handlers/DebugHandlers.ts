@@ -9,7 +9,7 @@ export class DebugHandlers extends BaseHandler {
         return [
             {
                 name: 'debuggerListeners',
-                description: 'Which debug listeners exist for this user and terminal - who would catch a breakpoint right now. Read this before starting one: a second listener for the same user is refused, and an old one left behind is the usual reason a debug session cannot be started.',
+                description: 'Which debug listeners exist for this user and terminal - who would catch a breakpoint right now. Read this before starting one: a second listener for the same user is refused, and an old one left behind is the usual reason a debug session cannot be started. checkConflict is off by default because the backend raises a short dump for it when no listener exists at all - turn it on only once you know one is there.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -31,7 +31,7 @@ export class DebugHandlers extends BaseHandler {
                         },
                         checkConflict: {
                             type: 'boolean',
-                            description: 'Whether to check for conflicts.'
+                            description: 'Ask the backend whether this listener would conflict with another. Default false: on a system with no listener at all, the check itself answers 500 AdiFailed.'
                         }
                     },
                     required: ['debuggingMode', 'terminalId', 'ideId', 'user']
@@ -350,21 +350,34 @@ export class DebugHandlers extends BaseHandler {
     async handleDebuggerListeners(args: any): Promise<any> {
         const startTime = performance.now();
         try {
+            // The library defaults this to true, and the backend raises a short
+            // dump for the conflict check when there is no listener to conflict
+            // with - which is every system where nobody is debugging. Ask for
+            // the check only when the caller says so.
+            const checkConflict = args.checkConflict === true;
             const result = await this.adtclient.debuggerListeners(
                 args.debuggingMode,
                 args.terminalId,
                 args.ideId,
                 args.user,
-                args.checkConflict
+                checkConflict
             );
             this.trackRequest(startTime, true);
+            // An empty answer means nobody is listening. Saying so beats a bare
+            // success that reads the same as a listener that was found.
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            debuggingMode: args.debuggingMode,
+                            user: args.user,
+                            checkConflict,
+                            listener: result ? 'conflict' : 'none',
+                            ...(result
+                                ? { result }
+                                : { note: 'No debug listener for this user and terminal. A breakpoint would not be caught: start one with debuggerListen.' })
                         })
                     }
                 ]
