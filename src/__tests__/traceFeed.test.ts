@@ -4,7 +4,7 @@ import { TraceHandlers } from '../handlers/TraceHandlers';
 /**
  * The trace list is parsed here instead of by the library, because the
  * library's codec declares the atom title mandatory and SAP only writes one for
- * a trace that was given a description. A live EUD00 run held twenty traces and
+ * a trace that was given a description. A live ECC run held twenty traces and
  * exactly one title, so the codec failed the whole call after the backend had
  * already answered correctly.
  *

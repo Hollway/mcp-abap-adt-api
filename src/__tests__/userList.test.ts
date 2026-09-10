@@ -4,7 +4,7 @@ import { TransportHandlers } from '../handlers/TransportHandlers';
 
 /**
  * Both user lists answer with the whole address book of the system - a live
- * EUD00 read of atcUsers came back with some 450 entries and 14 kB of names for
+ * ECC read of atcUsers came back with some 450 entries and 14 kB of names for
  * a question about one person. These hold the filter and the cap in place, and
  * the counts that say what was left out.
  */

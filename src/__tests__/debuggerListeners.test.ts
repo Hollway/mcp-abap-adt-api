@@ -5,7 +5,7 @@ import { DebugHandlers } from '../handlers/DebugHandlers';
  * there is no listener at all - which is every system where nobody happens to
  * be debugging. The library defaults that check to on, so the plain call, with
  * only the arguments the tool declares as required, answered 500 AdiFailed on a
- * live EUD00 run. It is off here unless the caller asks for it.
+ * live ECC run. It is off here unless the caller asks for it.
  */
 const answer = (result: any) => JSON.parse(result.content[0].text);
 
