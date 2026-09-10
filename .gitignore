@@ -35,3 +35,12 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local code-graph tooling - the indexes regenerate from source, the rest is
+# per-machine setup. CLAUDE.md here is written by the tooling installer, not by
+# hand: force-add it with `git add -f` if it ever carries real conventions.
+.codegraph
+graphify-out
+.mcp.json
+.claude
+CLAUDE.md
