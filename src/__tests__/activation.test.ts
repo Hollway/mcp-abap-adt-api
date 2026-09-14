@@ -51,10 +51,35 @@ describe('activateByName', () => {
     expect(result.hint).toMatch(/activateSafe/);
   });
 
-  it('ignores objects other than the one activated', async () => {
+  it('keeps the verdict to the object activated, and still says what else is inactive', async () => {
     const handlers = handler({ inactiveObjects: async () => [inactiveRow('ZCL_SOMETHING_ELSE')] });
     const result = answer(await handlers.handleActivateByName({ objectName: NAME, objectUrl: URL }));
-    expect(result).toMatchObject({ success: true, verified: true });
+    expect(result).toMatchObject({
+      success: true,
+      verified: true,
+      stillInactive: [],
+      othersInactive: [{ name: 'ZCL_SOMETHING_ELSE', type: 'CLAS/OC' }],
+      othersInactiveCount: 1
+    });
+    expect(result.hint).toMatch(/other object\(s\) are still inactive/);
+  });
+
+  it('does not read as a finished program when only one of its includes was activated', async () => {
+    // activateByName with mainInclude activates exactly one include per call,
+    // and the check is narrowed to the name it was given - so the other four
+    // includes of the same program came back as verified:true, stillInactive:[].
+    const includes = ['ZR_APP_F01', 'ZR_APP_F02', 'ZR_APP_F03'];
+    const handlers = handler({
+      inactiveObjects: async () => includes.slice(1).map(name => inactiveRow(name, 'PROG/I'))
+    });
+    const result = answer(await handlers.handleActivateByName({
+      objectName: includes[0],
+      objectUrl: '/sap/bc/adt/programs/includes/zr_app_f01',
+      mainInclude: '/sap/bc/adt/programs/programs/zr_app/source/main'
+    }));
+    expect(result.verified).toBe(true);
+    expect(result.othersInactive.map((entry: any) => entry.name)).toEqual(['ZR_APP_F02', 'ZR_APP_F03']);
+    expect(result.hint).toMatch(/one include per call/);
   });
 
   it('reports the activation as unverified when the list cannot be read', async () => {

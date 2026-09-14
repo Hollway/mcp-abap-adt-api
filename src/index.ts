@@ -50,9 +50,10 @@ import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
-import { isReadOnly, excludedTokens, readOnlyAllowances, maxResponseChars } from './lib/serverConfig';
-import { refusalFor, annotationsFor } from './lib/toolFilter';
+import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars } from './lib/serverConfig';
+import { refusalFor, annotationsFor, presetGroups, TOOL_PRESETS } from './lib/toolFilter';
 import type { ToolProfile } from './lib/toolFilter';
+
 import { metrics } from './lib/metrics';
 import { lockRegistry } from './lib/lockRegistry';
 import { currentSession } from './lib/sessionContext';
@@ -82,6 +83,14 @@ const HEALTHCHECK_TOOL: ToolDefinition = {
     properties: {}
   }
 };
+
+/**
+ * The groups and tools this server serves, if it was told to narrow them:
+ * the preset named in SAP_TOOLS_PROFILE and whatever SAP_TOOLS_INCLUDE adds.
+ * Empty means everything, which is the default.
+ */
+const servedTokens = (): Set<string> =>
+  new Set([...presetGroups(toolProfileName()), ...includedTokens()]);
 
 /** Where the settings came from, so a misdirected instance is obvious. */
 export function configSource(): 'client environment' | '.env file' {
@@ -123,6 +132,17 @@ export function announceTarget(mode: 'stdio' | 'http' = 'stdio'): void {
   const excluded = [...excludedTokens()];
   if (excluded.length) {
     console.error(`[config] SAP_TOOLS_EXCLUDE hides: ${excluded.join(', ')}`);
+  }
+  const profileName = toolProfileName();
+  if (profileName && presetGroups(profileName).length === 0) {
+    console.error(
+      `[config] WARNING: SAP_TOOLS_PROFILE=${profileName} names no preset, so it narrows nothing. ` +
+      `Known presets: ${Object.keys(TOOL_PRESETS).join(', ')}.`
+    );
+  }
+  const served = [...servedTokens()];
+  if (served.length) {
+    console.error(`[config] serving only: ${served.join(', ')} (plus healthcheck)`);
   }
 }
 
@@ -620,6 +640,7 @@ export class AbapAdtServer extends Server {
             case 'impactOf':
             case 'abapPath':
             case 'callsFrom':
+            case 'abapGraph':
                 result = await this.impactHandlers.handle(toolName, args);
                 break;
             case 'addMethod':
@@ -710,7 +731,8 @@ export class AbapAdtServer extends Server {
     return {
       readOnly: isReadOnly(),
       excluded: excludedTokens(),
-      allowed: readOnlyAllowances()
+      allowed: readOnlyAllowances(),
+      included: servedTokens()
     };
   }
 
@@ -764,11 +786,20 @@ export class AbapAdtServer extends Server {
     const pooled = owner ? { user: owner.user, since: owner.since } : undefined;
     const excluded = [...excludedTokens()];
     const allowed = [...readOnlyAllowances()];
+    const served = [...servedTokens()];
+    const exposed = this.exposedTools();
     const profile = {
       readOnly: isReadOnly(),
       excluded: excluded.length ? excluded : undefined,
       readOnlyAllow: allowed.length ? allowed : undefined,
-      toolsExposed: this.exposedTools().length
+      toolsProfile: toolProfileName() || undefined,
+      serving: served.length ? served : undefined,
+      toolsExposed: exposed.length,
+      toolsTotal: this.toolGroups().reduce((count, group) => count + group.tools.length, 0),
+      // What the tool list costs the caller before a word is said. The whole
+      // list is some 160,000 characters, and narrowing it is the only way to
+      // spend less - so the number is worth stating rather than guessing at.
+      toolListChars: JSON.stringify(exposed).length
     };
     const session = {
       loggedin: this.adtClient.loggedin,

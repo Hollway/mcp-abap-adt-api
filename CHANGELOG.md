@@ -8,6 +8,113 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.3.0] — the graph of a whole package
+
+### `abapGraph`: a package, not an object at a time
+
+`callsFrom` answers for one object. Asked for every object of a package, the
+answers stop being a list and become a shape — and that shape is the thing
+worth having:
+
+- **entry points**, the objects nothing inside the package calls, which is
+  where work comes in from outside;
+- **hubs**, the objects everything calls, which is what cannot be changed
+  cheaply;
+- **orphans**, connected to nothing, which is where dead code shows;
+- **cycles**, the circles the calls run in;
+- **what the package depends on outside itself**, gathered from every object
+  rather than looked up one at a time.
+
+A function module is matched to the group that defines it, which the group's
+own source says: `CALL FUNCTION 'Z_APP_SAVE'` names a module, and the package
+list names a group, so without that step the edge would point outside the
+package it is inside. A call an object makes to itself is counted on the
+object and left off the graph.
+
+The cost is one source read per object — a function group also reads its
+includes — so this is a call to make once for a package being worked on, not
+a lookup. Sources this session already read are reused (`fresh` reads them
+again, for a package changed from ADT since), the answer says how many came
+that way, and every budget it stops at is named rather than left to look like
+the package is smaller than it is. Statements are quoted only with `places`.
+
+### The tool list is context, and now it can be narrowed
+
+180 tools are described to the model before it is asked anything: about
+158,000 characters, spent on every session, most of it on tools that session
+will never call. `SAP_TOOLS_EXCLUDE` could hide a group, which is the wrong
+way round when what is wanted is ten tools out of a hundred and eighty.
+
+`SAP_TOOLS_INCLUDE` serves a list and nothing else, and `SAP_TOOLS_PROFILE`
+names a ready-made one: `min` (21 tools, 22k — find an object, read it, walk
+its package), `ddic` (40, 47k), `read` (79, 86k — everything that reads) and
+`dev` (132, 130k — no debugger, traces, ATC, git, RAP or service bindings).
+Exclusion still wins over inclusion, a tool left out is refused if called
+anyway and says what is served instead, and `healthcheck` is served whatever
+the list says: a server that cannot say which system it is on is a worse trade
+than one extra tool. It reports `toolsExposed`, `toolsTotal` and
+`toolListChars`, so the cost of the list is a number rather than a guess.
+
+No tool was merged away to make the list shorter. Names that are already being
+called keep working; the four parameter lists of `createFunctionModule`, which
+were the same schema written out four times, are the one piece of length that
+was duplication rather than knowledge.
+
+### Two answers that read as success and were not
+
+**An activation reports what it did not do.** `activateByName` checks itself
+against the name it was given, and with `mainInclude` it activates exactly one
+include per call — so a program with five changed includes answered
+`verified: true, stillInactive: []` four times over while it was still
+inactive. The answer now carries `othersInactive` as well: what is still
+inactive that this call did not cover. `activateSafe` reports the same, for
+the same reason.
+
+**A syntax check on an include was an error about the wrong object.** This
+backend reads the content it is given as the main program, so an include's own
+text came back as `REPORT/PROGRAM statement missing` — a syntax error on an
+include that is perfectly fine. An include is compiled as part of its program
+and cannot be checked any other way, so for an include URL the main program is
+looked up, its stored source is what gets checked, and the answer says so in
+`checkedAgainst` (write the include first: what is not saved cannot be checked
+this way).
+
+Two more things that call needed and would not say: the source, which it now
+reads when it was neither passed nor read this session, and `mainUrl`, which
+for anything that is not an include can only ever be the URL itself — a check
+on a class with nothing but its URL used to be refused outright.
+
+### What a declaration reaches
+
+`callsFrom` read statements that act — a call, a select, a perform — and not
+the ones that only declare. A report that types its work area over `ZORDERS`
+and passes it to a function module was reported as depending on the function
+module and not on the table, though changing the table is what breaks it.
+
+Declarations are read now, under the new kind `type`:
+
+- `TYPE zorders`, `TYPE zde_order_id`, `LIKE zorders-id`, and the same over a
+  table type: `TYPE STANDARD TABLE OF zorders`, `TYPE RANGE OF zorders-id`;
+- `SELECT-OPTIONS s_id FOR zorders-id` and `RANGES`, where the dictionary name
+  is the only thing that says what the selection is over.
+
+`TYPE REF TO` stays out: it is already read as the class behind a reference,
+and so as the calls made through it — reporting it again would say the same
+thing twice. So do the built-in types, which are the language rather than the
+dictionary, and every name the source declares itself, because `TYPE ty_row`
+is local and only the declarations tell the two apart. A type owned by a class
+(`TYPE zcl_return=>tt_return`) remains a `reference` to that class.
+
+### Macros are named instead of passing silently
+
+A macro expands to code that is not on the line that expands it. The body of
+one defined in the object's own source was already scanned, so what it reaches
+was found — but whatever the call site passes in was not, and nothing said so.
+A line that expands a macro the object defines is now reported as `unresolved`
+with the kind `macro`, naming the macro and the line it was defined on. A
+macro defined in a type pool or an include that was not read still cannot be
+recognised at all: there, the word is a word like any other.
+
 ## [1.2.0] — what an object calls, read from its own source
 
 `impactOf` and `abapPath` both answer the same question from the same data:

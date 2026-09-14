@@ -1,7 +1,7 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
 import { wrapAdtError } from '../lib/adtError';
-import { activateAndVerify, selectInactive } from '../lib/activation';
+import { activateAndVerify, selectInactive, splitInactive, MAX_OTHERS_LISTED } from '../lib/activation';
 import type {
   ActivationResult,
   InactiveObject,
@@ -43,7 +43,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       },
       {
         name: 'activateByName',
-        description: 'Activate an ABAP object by name and URL, then check the inactive list to see whether it really happened. The backend call behind this answers success:true for objects that stay inactive - notably a freshly created class - so the answer carries verified/stillInactive as well, and success is lowered to false when anything is left inactive. activateSafe is still the better tool: it activates exactly the rows inactiveObjects reports, including method fragments.',
+        description: 'Activate an ABAP object by name and URL, then check the inactive list to see whether it really happened. The backend call behind this answers success:true for objects that stay inactive - notably a freshly created class - so the answer carries verified/stillInactive as well, and success is lowered to false when anything is left inactive. That check covers the name it was given and nothing else, so the answer also carries othersInactive: with mainInclude this activates exactly one include per call, and a program with five changed includes would otherwise read as verified four times while it is still inactive. activateSafe is still the better tool: it activates exactly the rows inactiveObjects reports, including method fragments.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -219,14 +219,13 @@ export class ObjectManagementHandlers extends BaseHandler {
   private async verifyActivation(
     objectName?: string,
     objectUrl?: string
-  ): Promise<ObjectRef[] | undefined> {
+  ): Promise<{ forObject: ObjectRef[]; others: ObjectRef[] } | undefined> {
     try {
       // Deliberately the stateful client - see handleInactiveObjects: the two
       // sessions answer differently, and only the one that did the editing
       // answers about it.
       const after: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
-      return selectInactive(after, objectName, objectUrl)
-        .map(e => ({ name: e['adtcore:name'], type: e['adtcore:type'] }));
+      return splitInactive(after, objectName, objectUrl);
     } catch (error: any) {
       this.logger.warn('Could not read the inactive list to verify the activation', {
         error: error?.message
@@ -253,7 +252,13 @@ export class ObjectManagementHandlers extends BaseHandler {
       // seen returning success:true, inactive:[] for a class that was still
       // inactive afterwards, so the old code kept running while the caller was
       // told the activation had worked. The inactive list is the only proof.
-      const stillInactive = await this.verifyActivation(args.objectName, args.objectUrl);
+      const checked = await this.verifyActivation(args.objectName, args.objectUrl);
+      const stillInactive = checked?.forObject;
+      // What else is inactive matters here more than anywhere: with
+      // mainInclude this call activates exactly one include, and the check is
+      // narrowed to the name it was given - so a program with five changed
+      // includes answers "verified" four times while it is still inactive.
+      const others = checked?.others || [];
       const verified = stillInactive ? stillInactive.length === 0 : undefined;
 
       this.trackRequest(startTime, true);
@@ -266,8 +271,16 @@ export class ObjectManagementHandlers extends BaseHandler {
             reportedSuccess: result.success,
             verified,
             stillInactive,
+            ...(others.length
+              ? {
+                othersInactive: others.slice(0, MAX_OTHERS_LISTED),
+                othersInactiveCount: others.length
+              }
+              : {}),
             hint: verified === true
-              ? undefined
+              ? others.length
+                ? `${args.objectName} is active. ${others.length} other object(s) are still inactive - this call activates only what it was given, one include per call when mainInclude is used. inactiveObjects lists them; activateSafe activates them.`
+                : undefined
               : verified === false
                 ? 'Still inactive after the call. activateByName does not activate every object; use activateSafe, which passes the rows from inactiveObjects.'
                 : 'The inactive list could not be read, so this answer is unverified - and this call is known to report success without activating anything.'

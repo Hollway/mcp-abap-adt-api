@@ -1,5 +1,6 @@
 import { rollUpUsages, ownerFromUri } from '../lib/impact';
 import { ImpactHandlers } from '../handlers/ImpactHandlers';
+import { sourceCache } from '../lib/sourceCache';
 
 /**
  * Rows shaped exactly like a live where-used answer for ZCL_APP_RETURN on
@@ -610,6 +611,26 @@ describe('callsFrom', () => {
     expect(result.sourcesScanned.map((entry: any) => entry.name)).toEqual(['ZAPP_FG', 'LZAPP_FGTOP', 'LZAPP_FGU01']);
   });
 
+  it('follows the include chain of a group to the end, where the function modules are', async () => {
+    // A group names LZAPP_FGUXX in its main source, and that include is
+    // nothing but the INCLUDE lines of the function module bodies. Stopping at
+    // the first level reads the forms and misses every module the group has.
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => {
+        read.push(url);
+        if (url.includes('lzapp_fguxx')) return 'INCLUDE lzapp_fgu01.';
+        if (url.includes('lzapp_fgu01')) return GROUP_INCLUDE;
+        if (url.includes('/includes/')) return '';
+        return 'FUNCTION-POOL zapp_fg.\nINCLUDE lzapp_fgtop.\nINCLUDE lzapp_fguxx.';
+      }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZAPP_FG', objectType: 'FUGR/F' }));
+    expect(result.sourcesScanned.map((entry: any) => entry.name))
+      .toEqual(['ZAPP_FG', 'LZAPP_FGTOP', 'LZAPP_FGUXX', 'LZAPP_FGU01']);
+    expect(result.calls.some((entry: any) => entry.target === 'ZCL_APP_HELPER')).toBe(true);
+  });
+
   it('falls back to the report include collection when the group does not serve one, and reports one it cannot read', async () => {
     const read: string[] = [];
     const { handler } = handlers({
@@ -669,5 +690,155 @@ describe('callsFrom', () => {
     }));
     expect(result.target.object).toBe('ZR_APP_DAILY');
     expect(result.calls.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A package as nodeContents answers it: three readable objects, a sub-package,
+ * and a domain, which has no source ADT will serve and so is not walked.
+ */
+const PACKAGE_NODES: Record<string, any[]> = {
+  ZAPP: [
+    { OBJECT_TYPE: 'CLAS/OC', OBJECT_NAME: 'ZCL_APP_CALLER' },
+    { OBJECT_TYPE: 'CLAS/OC', OBJECT_NAME: 'ZCL_APP_HELPER' },
+    { OBJECT_TYPE: 'FUGR/F', OBJECT_NAME: 'ZAPP_FG' },
+    { OBJECT_TYPE: 'DOMA/DD', OBJECT_NAME: 'ZDOM_APP' },
+    { OBJECT_TYPE: 'DEVC/K', OBJECT_NAME: 'ZAPP_SUB' }
+  ],
+  ZAPP_SUB: [{ OBJECT_TYPE: 'CLAS/OC', OBJECT_NAME: 'ZCL_APP_SUB' }]
+};
+
+const HELPER_SOURCE = 'CLASS zcl_app_helper DEFINITION PUBLIC.\nENDCLASS.';
+
+const graphHandlers = (over: Record<string, unknown> = {}) => {
+  const read: string[] = [];
+  const { handler } = handlers({
+    nodeContents: async (_type: string, name: string) => ({ nodes: PACKAGE_NODES[name.toUpperCase()] || [] }),
+    getObjectSource: async (url: string) => {
+      read.push(url);
+      if (url.includes('zcl_app_caller')) return CALLER_SOURCE;
+      if (url.includes('zcl_app_helper') || url.includes('zcl_app_sub')) return HELPER_SOURCE;
+      if (url.includes('/includes/lzapp_fgu01')) return GROUP_INCLUDE;
+      if (url.includes('/includes/')) return '';
+      if (url.includes('/groups/zapp_fg/source/main')) return GROUP_MAIN;
+      throw new Error('404 not found');
+    },
+    ...over
+  });
+  return { handler, read };
+};
+
+describe('abapGraph', () => {
+  // The cache belongs to the session, and outside one there is a single
+  // fallback - so each test starts from a session that has read nothing.
+  beforeEach(() => sourceCache.clear());
+
+  it('reads every object of the package and answers with the calls between them', async () => {
+    const { handler, read } = graphHandlers();
+    const result = answer(await handler.handleAbapGraph({ packageName: 'zapp' }));
+
+    expect(result.packageName).toBe('ZAPP');
+    expect(read).toContain('/sap/bc/adt/oo/classes/zcl_app_caller/source/main');
+    // The domain is not walked: ADT serves no source for it.
+    expect(read.some(url => url.includes('zdom_app'))).toBe(false);
+    expect(result.scanned.objects).toBe(3);
+    expect(result.nodes.map((node: any) => node.name).sort())
+      .toEqual(['ZAPP_FG', 'ZCL_APP_CALLER', 'ZCL_APP_HELPER']);
+
+    const toHelper = result.edges.find((edge: any) => edge.from === 'ZCL_APP_CALLER' && edge.to === 'ZCL_APP_HELPER');
+    expect(toHelper).toMatchObject({ kinds: ['method'], calls: 2 });
+    expect(toHelper.places).toBeUndefined();
+    expect(result.entryPoints).toEqual(['ZCL_APP_CALLER']);
+    expect(result.hubs[0]).toEqual({ name: 'ZCL_APP_HELPER', callsIn: 2 });
+    expect(result.cycles).toEqual([]);
+  });
+
+  it('matches a call made by function module name to the group that defines it', async () => {
+    const { handler } = graphHandlers();
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(result.edges.find((edge: any) => edge.to === 'ZAPP_FG')).toMatchObject({
+      from: 'ZCL_APP_CALLER',
+      kinds: ['function']
+    });
+    expect(result.outside.some((entry: any) => entry.target === 'Z_APP_SAVE')).toBe(false);
+  });
+
+  it('reports what the package depends on outside itself, and counts the standard calls it left out', async () => {
+    const { handler } = graphHandlers();
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    const outside = result.outside.map((entry: any) => entry.target);
+    expect(outside).toContain('ZORDERS');
+    expect(outside).toContain('ZCL_APP_WRITER');
+    expect(result.summary.standardTargetsHidden).toBeGreaterThan(0);
+  });
+
+  it('quotes the statements behind the edges when asked', async () => {
+    const { handler } = graphHandlers();
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', places: true }));
+    const toHelper = result.edges.find((edge: any) => edge.to === 'ZCL_APP_HELPER' && edge.from === 'ZCL_APP_CALLER');
+    expect(toHelper.places[0].statement).toContain('mo_helper->add');
+  });
+
+  it('reuses what this session already read, and reads again when told the system changed', async () => {
+    const first = graphHandlers();
+    await first.handler.handleAbapGraph({ packageName: 'ZAPP' });
+    const readCount = first.read.length;
+    expect(readCount).toBeGreaterThan(0);
+
+    const second = graphHandlers();
+    const reused = answer(await second.handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(second.read).toHaveLength(0);
+    expect(reused.scanned.fromCache).toBe(readCount);
+
+    const third = graphHandlers();
+    await third.handler.handleAbapGraph({ packageName: 'ZAPP', fresh: true });
+    expect(third.read).toHaveLength(readCount);
+  });
+
+  it('reports the object it could not read instead of losing the rest of the package', async () => {
+    const { handler } = graphHandlers({
+      getObjectSource: async (url: string) => {
+        if (url.includes('zcl_app_helper')) throw new Error('Request failed with status code 403');
+        if (url.includes('zcl_app_caller')) return CALLER_SOURCE;
+        if (url.includes('/includes/lzapp_fgu01')) return GROUP_INCLUDE;
+        if (url.includes('/includes/')) return '';
+        return GROUP_MAIN;
+      }
+    });
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(result.unread).toHaveLength(1);
+    expect(result.unread[0].name).toBe('ZCL_APP_HELPER');
+    expect(result.nodes.map((node: any) => node.name)).toContain('ZCL_APP_CALLER');
+  });
+
+  it('walks the sub-packages only when the depth allows it, and names the ones it left closed', async () => {
+    const { handler } = graphHandlers();
+    const shallow = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(shallow.packagesNotWalked).toEqual(['ZAPP_SUB']);
+
+    const deep = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', maxDepth: 2 }));
+    expect(deep.packages).toEqual(['ZAPP', 'ZAPP_SUB']);
+    expect(deep.nodes.map((node: any) => node.name)).toContain('ZCL_APP_SUB');
+  });
+
+  it('says it stopped short rather than answering as if the package were smaller', async () => {
+    const { handler } = graphHandlers();
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', maxObjects: 1 }));
+    expect(result.truncated).toBe(true);
+    expect(result.truncatedNote).toMatch(/missing from the graph, not absent from the package/);
+  });
+
+  it('asks for the package, and rejects a kind the scan does not know', async () => {
+    const { handler } = graphHandlers();
+    await expect(handler.handleAbapGraph({})).rejects.toThrow(/Which package\?/);
+    await expect(handler.handleAbapGraph({ packageName: 'ZAPP', kinds: ['calls'] }))
+      .rejects.toThrow(/not one of method, constructor/);
+  });
+
+  it('says what an empty answer means, since a package that does not exist gives the same one', async () => {
+    const { handler } = graphHandlers({ nodeContents: async () => ({ nodes: [] }) });
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZNOPE' }));
+    expect(result.scanned.objects).toBe(0);
+    expect(result.emptyNote).toMatch(/packageTree/);
   });
 });

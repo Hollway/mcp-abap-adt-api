@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 179 tools, read-only guardrails and 913 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 180 tools, read-only guardrails and 961 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -21,7 +21,7 @@ The server is not published to a package registry: clone the repository, build i
 - **Calling what is there**: `callFunction` takes a function module name and values, reads its signature, generates the call and runs it - the answer carries the exporting, changing and tables parameters by name, `sy-subrc` turned back into the name of the classic exception it stood for, and a class-based exception with its text. `callMethod` does the same for a static method, whose parameters `classComponents` does not report at all. Both execute code, and both end in `ROLLBACK WORK` unless `commit` is set.
 - **The dictionary, read whole**: `tableFields` answers a table with its includes spliced in where they sit - for `EKPO` that is 702 fields rather than the 307 its own definition lists - each with its data element, domain, type, length, check table, unit or currency field, conversion exit and text. `tableIndexes` and `tableKeys` answer the secondary indexes and the foreign keys with the fields they are built on. All three read dictionary tables and execute nothing.
 - **History**: `revisions` reads the version history by name (the "version" a revision carries is the transport request; the number is the `revision` field), and `compareRevisions` diffs two of them - or the active version against the inactive one, which shows an edit that is written but not activated.
-- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a flat list that is really a tree - on a widely used class it runs to hundreds of rows and past the response cap. `snippets` fetches the source of the places actually listed, in the same call. `abapPath` walks that same data as a chain instead of a roll-up, breadth-first from the target back through its callers, to answer whether and how one object's code reaches another. `callsFrom` answers the other direction, which no backend call does: it reads the object's own source and reports what that code reaches - methods, constructors, function modules, forms and programs, transactions, database tables, what it inherits and implements - with every dynamic call listed as unresolved rather than dropped.
+- **Impact**: `impactOf` rolls a where-used answer up into the objects that depend on one, with the places inside them and their packages. Raw, that answer is a flat list that is really a tree - on a widely used class it runs to hundreds of rows and past the response cap. `snippets` fetches the source of the places actually listed, in the same call. `abapPath` walks that same data as a chain instead of a roll-up, breadth-first from the target back through its callers, to answer whether and how one object's code reaches another. `callsFrom` answers the other direction, which no backend call does: it reads the object's own source and reports what that code reaches - methods, constructors, function modules, forms and programs, transactions, database tables, the dictionary types its declarations name, what it inherits and implements - with every dynamic call listed as unresolved rather than dropped. `abapGraph` runs that scan over a whole package and turns the answers into a shape: the edges between its objects, the entry points nothing inside calls, the hubs everything does, the objects connected to nothing, the call circles, and what the package as a whole depends on outside itself.
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
@@ -57,7 +57,9 @@ Clone it, build it, and point your client at `dist/main.js` with the environment
 | `SAP_CLIENT`, `SAP_LANGUAGE` | Logon client and language. |
 | `SAP_READONLY` | `1` hides every tool that changes the system and refuses it if called anyway. Use it for a system that must only be read. |
 | `SAP_READONLY_ALLOW` | Groups or tool names let through the read-only fence, e.g. `debugger` for a system that must not be developed on but does need debugging. Exclusion wins over an allowance, and these tools keep `readOnlyHint: false`. |
-| `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
+| `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, enhancement, textElement, messageClass, package, rap, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
+| `SAP_TOOLS_INCLUDE` | The other way round: groups or tool names to serve, to the exclusion of everything else. Cheaper to write when a session needs ten tools rather than all of them. Exclusion still wins, and `healthcheck` is served either way. |
+| `SAP_TOOLS_PROFILE` | A ready-made include list: `min`, `ddic`, `read` or `dev`. See [the tool list is context](#the-tool-list-is-context). |
 | `SAP_MAX_RESPONSE_CHARS` | Cap on a single answer (default 200000). Over it, the answer is replaced by an envelope with the size and a preview. |
 | `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr - over stdio, stdout carries the protocol. Over HTTP, `info` adds one line per request carrying its id, the caller and the tool. |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `0` accepts a self-signed certificate (development only). |
@@ -65,6 +67,22 @@ Clone it, build it, and point your client at `dist/main.js` with the environment
 Connection settings can also come from a `.env` file next to the server, but that is only a fallback: when several instances run against different systems, a typo in one client entry would silently connect to whatever `.env` points at. The server prints its target system and where the settings came from on startup, and `healthcheck` reports both.
 
 The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `MCP_MAX_BODY_MB`, `MCP_REQUEST_TIMEOUT`, `MCP_ALLOWED_ORIGINS`, `SAP_SESSION_IDLE_TTL`, `SAP_SESSION_IDLE_TTL_LOCKED`, `SAP_ASSUMED_SESSION_TIMEOUT`, `SAP_MAX_SESSIONS`, `SAP_MAX_CONCURRENT`, `SAP_ADMIN_TOKEN`. Each is explained in `.env.example` and in the section below.
+
+### The tool list is context
+
+Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **158,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
+
+| Profile | Tools | Tool list | What it serves |
+| --- | --- | --- | --- |
+| *(none)* | 180 | 158k | Everything. |
+| `min` | 21 | 22k | Find an object, read it, walk its package. |
+| `ddic` | 40 | 47k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
+| `read` | 79 | 86k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
+| `dev` | 132 | 130k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+
+`healthcheck` is served whatever the list says — a server that cannot say which system it is on is a worse trade than one extra tool — and it reports `toolsExposed`, `toolsTotal` and `toolListChars`, so the cost is a number rather than a guess. A tool left out is refused if called anyway, naming what is served instead.
+
+A narrowed list is the only real lever: what is left is not padding. Every description here records something the backend does that its documentation does not, which is what keeps a model from calling `activateByName` and believing it.
 
 > **Windows tip:** give `command` the full path to `node.exe` and `args` the absolute path to `dist/main.js` — a bare `node` is not always on the PATH an MCP client starts with.
 
@@ -222,7 +240,7 @@ Set `terminationGracePeriodSeconds` above the drain: on `SIGTERM` the server tur
 
 Per session: the locks held, the source cache and the per-caller counters. `unlockAll` releases only its own caller's locks, and a cached read is never served to another user - two people do not have the same authorisations.
 
-Shared by the whole server: `SAP_READONLY`, `SAP_TOOLS_EXCLUDE`, `SAP_READONLY_ALLOW`, `SAP_MAX_RESPONSE_CHARS`. They describe the system this server talks to, not the person calling.
+Shared by the whole server: `SAP_READONLY`, `SAP_TOOLS_EXCLUDE`, `SAP_TOOLS_INCLUDE`, `SAP_TOOLS_PROFILE`, `SAP_READONLY_ALLOW`, `SAP_MAX_RESPONSE_CHARS`. They describe the system this server talks to, not the person calling.
 
 ## Custom Instruction
 
@@ -472,7 +490,7 @@ When working with ABAP objects, you may encounter errors related to unknown fiel
 *   **A change seems to have no effect:** it is probably still inactive. `getObjectSource` serves the inactive version by default - read it with `version="active"`, and check `inactiveObjects` is empty after activating. Prefer `activateSafe`.
 *   **`logout` and then nothing works:** the underlying client cannot log in again after `logout`; restart the server process. Use `dropSession` to release a session instead.
 *   **An answer comes back as `{"status":"truncated"}`:** it exceeded `SAP_MAX_RESPONSE_CHARS`. Narrow the request (`startLine`/`maxLines`, `rowNumber`, the `userTransports` filters) or raise the limit.
-*   **A tool is missing from the list:** check `SAP_READONLY` and `SAP_TOOLS_EXCLUDE` - `healthcheck` reports the active profile.
+*   **A tool is missing from the list:** check `SAP_READONLY`, `SAP_TOOLS_EXCLUDE` and `SAP_TOOLS_PROFILE`/`SAP_TOOLS_INCLUDE` - `healthcheck` reports the active profile, and calling the tool anyway answers with the reason it is not served.
 
 ## Development
 

@@ -134,7 +134,8 @@ describe('extractCalls', () => {
 
   it('does not read a constructor expression over a type as a call', () => {
     // VALUE zcl_x=>tt_row( ) wears the parentheses of a method call and is a
-    // type of that class - found live on ZCL_YTRACKER_ZB_NOTIFIER.
+    // type of that class - found live on a notifier class that built its
+    // return table this way.
     const found = extractCalls([
       '  DATA(lt_return) = VALUE zcl_mm_return=>tt_return( ).',
       '  DATA(lv_one) = zcl_mm_return=>build( ).'
@@ -219,6 +220,91 @@ describe('extractCalls', () => {
   it('reports the dynamic form, program and table of a report instead of dropping them', () => {
     const report = extractCalls(REPORT_SOURCE);
     expect(report.unresolved.map(entry => entry.kind).sort()).toEqual(['form', 'program', 'table']);
+  });
+});
+
+describe('types named in declarations', () => {
+  const typed = (source: string) =>
+    extractCalls(source).calls.filter(call => call.kind === 'type')
+      .map(call => `${call.target}${call.member ? `-${call.member}` : ''}`);
+
+  it('reads the dictionary type a declaration names, in each form it is written', () => {
+    expect(typed('DATA lt_orders TYPE STANDARD TABLE OF zorders.')).toEqual(['ZORDERS']);
+    expect(typed('DATA lv_id TYPE zde_order_id.')).toEqual(['ZDE_ORDER_ID']);
+    expect(typed('DATA lv_id LIKE zorders-id.')).toEqual(['ZORDERS-ID']);
+    expect(typed('DATA lt_r TYPE RANGE OF zorders-id.')).toEqual(['ZORDERS-ID']);
+    expect(typed('METHODS save IMPORTING is_order TYPE zorders.')).toEqual(['ZORDERS']);
+  });
+
+  it('reads the table a selection screen declares its range over', () => {
+    expect(typed('SELECT-OPTIONS s_id FOR zorders-id.')).toEqual(['ZORDERS-ID']);
+    expect(typed('RANGES r_id FOR zorders-id.')).toEqual(['ZORDERS-ID']);
+  });
+
+  it('leaves the language and the source\'s own names out of it', () => {
+    // TYPE REF TO belongs to the declaration scan, which turns it into the
+    // calls made through the reference - reporting it here would say the same
+    // thing twice.
+    expect(typed('DATA lo_x TYPE REF TO zcl_app_helper.')).toEqual([]);
+    expect(typed('DATA lv_text TYPE string.')).toEqual([]);
+    expect(typed('DATA lv_flag TYPE c LENGTH 8.')).toEqual([]);
+    expect(typed('DATA lv_subrc LIKE sy-subrc.')).toEqual([]);
+    expect(typed('TYPES ty_row TYPE zorders.\nDATA ls_row TYPE ty_row.')).toEqual(['ZORDERS']);
+  });
+
+  it('does not read the definition of a structure as a dependency on itself', () => {
+    // How this backend serves a TABL/DT source: found when every table of a
+    // package came out of the graph calling itself.
+    expect(typed('define type zorders { key mandt : mandt not null; }')).toEqual([]);
+  });
+
+  it('keeps a type owned by a class a reference to that class, not a type of its own', () => {
+    const found = extractCalls('DATA lt_return TYPE zcl_mm_return=>tt_return.');
+    expect(found.calls.map(call => `${call.kind}/${call.target}`)).toEqual(['reference/ZCL_MM_RETURN']);
+  });
+
+  it('counts a type as its own kind, so a table read and a table typed are told apart', () => {
+    const found = extractCalls(CLASS_SOURCE);
+    expect(found.calls.filter(call => call.kind === 'table' && call.target === 'ZORDERS')).toHaveLength(3);
+    expect(found.calls.filter(call => call.kind === 'type' && call.target === 'ZORDERS')).toHaveLength(1);
+  });
+});
+
+describe('macros', () => {
+  const WITH_MACRO = [
+    'DEFINE add_row.',
+    '  CALL FUNCTION \'Z_APP_ADD\'',
+    '    EXPORTING iv_id = &1.',
+    'END-OF-DEFINITION.',
+    '',
+    'START-OF-SELECTION.',
+    '  add_row lv_id.',
+    '  add_row = 5.'
+  ].join('\n');
+
+  it('reports the line that expands a macro, and still reports what the body reaches', () => {
+    const found = extractCalls(WITH_MACRO);
+    expect(found.calls.map(call => `${call.kind}:${call.target}`)).toEqual(['function:Z_APP_ADD']);
+    const macros = found.unresolved.filter(entry => entry.kind === 'macro');
+    expect(macros).toHaveLength(1);
+    expect(macros[0].line).toBe(7);
+    expect(macros[0].reason).toMatch(/expands the macro ADD_ROW, defined at line 1/);
+  });
+
+  it('leaves a macro out of the kinds a scan was narrowed to', () => {
+    const found = extractCalls(WITH_MACRO, { kinds: ['function'] });
+    expect(found.unresolved).toHaveLength(0);
+  });
+
+  it('finds a macro defined in one include of an object and expanded in another', () => {
+    const top = 'DEFINE add_row.\n  WRITE &1.\nEND-OF-DEFINITION.';
+    const f01 = 'FORM run.\n  add_row lv_id.\nENDFORM.';
+    const together = extractCallsAcross([
+      { name: 'LZAPPTOP', source: top },
+      { name: 'LZAPPF01', source: f01 }
+    ]);
+    const macros = together.unresolved.filter(entry => entry.kind === 'macro');
+    expect(macros.map(entry => entry.source)).toEqual(['LZAPPF01']);
   });
 });
 

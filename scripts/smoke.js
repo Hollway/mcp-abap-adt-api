@@ -95,6 +95,59 @@ const call = async (name, args = {}) => {
   return { isError: response.result.isError === true, payload };
 };
 
+/**
+ * A second server, started with extra environment, driven once and stopped.
+ *
+ * The tool list is the one thing a server decides before anything is asked of
+ * it, so the only way to check that narrowing it works is to start one that
+ * way. Answers whatever the given call returns; with no call, the tool list.
+ */
+const onServer = async (env, name, args) => {
+  const other = spawn(process.execPath, [server], {
+    env: { ...process.env, ...env },
+    stdio: ['pipe', 'pipe', 'ignore']
+  });
+  let rest = '';
+  const waiting = new Map();
+  other.stdout.on('data', chunk => {
+    rest += chunk.toString();
+    let cut;
+    while ((cut = rest.indexOf('\n')) >= 0) {
+      const line = rest.slice(0, cut).trim();
+      rest = rest.slice(cut + 1);
+      if (!line) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.id !== undefined && waiting.has(message.id)) {
+          waiting.get(message.id)(message);
+          waiting.delete(message.id);
+        }
+      } catch { /* not a protocol line */ }
+    }
+  });
+  const ask = (id, method, params) => new Promise((resolve, reject) => {
+    waiting.set(id, resolve);
+    other.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    setTimeout(() => reject(new Error(`timeout waiting for ${method}`)), 60000);
+  });
+  try {
+    await ask(1, 'initialize', {
+      protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'smoke', version: '0' }
+    });
+    other.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    if (!name) return (await ask(2, 'tools/list', {})).result.tools;
+    const response = await ask(2, 'tools/call', { name, arguments: args || {} });
+    const item = response.result && response.result.content && response.result.content[0];
+    let payload = item && item.text;
+    try { payload = JSON.parse(item.text); } catch { /* plain text */ }
+    return { isError: response.result.isError === true, payload };
+  } finally {
+    other.kill();
+  }
+};
+const toolsListOf = env => onServer(env);
+const callOn = (env, name, args) => onServer(env, name, args);
+
 let failures = 0;
 const check = (label, condition, detail) => {
   if (condition) {
@@ -126,7 +179,7 @@ const check = (label, condition, detail) => {
                       'getStructureSource', 'createStructure',
                       'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
                       'changePackagePreview', 'rapGenIsAvailable',
-                      'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'addMethod', 'deleteMethod', 'addAttribute',
+                      'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'abapGraph', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
                       'runSnippet', 'callFunction', 'callMethod',
                       'tableFields', 'tableIndexes', 'tableKeys']) {
@@ -195,6 +248,22 @@ const check = (label, condition, detail) => {
     objectSourceUrl: CLASS_URL, pattern: '(unclosed', regex: true
   });
   check('findInSource refuses a broken regular expression', badRegex.isError === true, badRegex.payload);
+
+  // A syntax check with nothing but the URL. This used to be refused with
+  // "mainUrl and content are required", two parameters that for a class can
+  // only ever hold the URL itself and the source behind it.
+  const syntax = await call('syntaxCheckCode', { objectSourceUrl: CLASS_URL, url: CLASS_URL });
+  check(`syntaxCheckCode checks ${CLASS_NAME} from its URL alone`,
+    syntax.payload.status === 'success' && Array.isArray(syntax.payload.result),
+    syntax.payload);
+  check('syntaxCheckCode says where the source it checked came from',
+    syntax.payload.readSource === true || syntax.payload.usedCachedSource === true,
+    syntax.payload);
+
+  const syntaxGone = await call('syntaxCheckCode', { url: '/sap/bc/adt/oo/classes/zsmoke_no_such_class/source/main' });
+  check('syntaxCheckCode says so when there is no source to check',
+    syntaxGone.isError === true && /reading it failed/.test(JSON.stringify(syntaxGone.payload)),
+    syntaxGone.payload);
 
   // Refusals that never reach the backend, so they stay read-only
   const badFragment = await call('fragmentMappings', {
@@ -575,6 +644,56 @@ const check = (label, condition, detail) => {
     callsNothing.isError === true && /Whose calls/.test(JSON.stringify(callsNothing.payload)),
     callsNothing.payload);
 
+  // abapGraph: the same scan over a whole package. Kept small on purpose -
+  // this is one source read per object, and the package here is whatever the
+  // system has, not one written for the test.
+  const graph = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false
+  });
+  check(`abapGraph reads ${PACKAGE_NAME} and answers with a node per object it read`,
+    graph.payload.status === 'success'
+    && graph.payload.scanned.objects > 0
+    && graph.payload.nodes.length === graph.payload.scanned.objects,
+    graph.payload);
+  check('abapGraph reads no more objects than it was allowed to',
+    graph.payload.scanned.objects <= 8, graph.payload);
+  check('abapGraph draws every edge between two objects it actually read',
+    (graph.payload.edges || []).every(edge =>
+      graph.payload.nodes.some(node => node.name === edge.from)
+      && graph.payload.nodes.some(node => node.name === edge.to)),
+    graph.payload.edges);
+  check('abapGraph counts the degree of a node from the edges it drew',
+    graph.payload.nodes.every(node =>
+      node.callsIn === (graph.payload.edges || []).filter(edge => edge.to === node.name).length
+      || graph.payload.edgesHidden > 0),
+    graph.payload.nodes);
+  check('abapGraph says which objects nothing inside the package calls',
+    Array.isArray(graph.payload.entryPoints) && Array.isArray(graph.payload.orphans)
+    && graph.payload.entryPoints.length + graph.payload.orphans.length <= graph.payload.nodes.length,
+    graph.payload);
+  check('abapGraph leaves the statements out until they are asked for',
+    (graph.payload.edges || []).every(edge => edge.places === undefined), graph.payload.edges);
+
+  const graphAgain = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false, places: true
+  });
+  check('abapGraph reuses the sources this session already read',
+    graphAgain.payload.scanned.fromCache > 0, graphAgain.payload.scanned);
+  check('abapGraph quotes the statement behind an edge when asked',
+    (graphAgain.payload.edges || []).length === 0
+    || (graphAgain.payload.edges[0].places || []).every(place => typeof place.line === 'number' && !!place.statement),
+    graphAgain.payload.edges);
+
+  const graphUnknown = await call('abapGraph', { packageName: 'ZSMOKE_NO_SUCH_PACKAGE' });
+  check('abapGraph says an empty package and a missing one look the same',
+    graphUnknown.payload.status === 'success' && /packageTree/.test(String(graphUnknown.payload.emptyNote)),
+    graphUnknown.payload);
+
+  const graphBadKind = await call('abapGraph', { packageName: PACKAGE_NAME, kinds: ['calls'] });
+  check('abapGraph rejects a kind that does not exist',
+    graphBadKind.isError === true && /not one of method/.test(JSON.stringify(graphBadKind.payload)),
+    graphBadKind.payload);
+
   // Function modules by name alone, and the group they live in.
   const fm = await call('getFunctionModule', { name: FUNCTION_MODULE });
   check(`getFunctionModule finds ${FUNCTION_MODULE} without being told its group`,
@@ -782,6 +901,29 @@ const check = (label, condition, detail) => {
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
+
+  // A second server, started the way an operator would start a narrowed one.
+  // The whole tool list is the largest single thing this server sends, and
+  // this is the check that narrowing it actually narrows it.
+  const narrowed = await toolsListOf({ SAP_TOOLS_PROFILE: 'min' });
+  check(`SAP_TOOLS_PROFILE=min serves fewer tools than the full list (${narrowed.length} of ${tools.length})`,
+    narrowed.length > 0 && narrowed.length < tools.length);
+  check('a narrowed server still serves healthcheck, so it can say what it is',
+    narrowed.some(tool => tool.name === 'healthcheck'));
+  check('a narrowed server drops the groups the preset leaves out',
+    !narrowed.some(tool => tool.name.startsWith('debugger') || tool.name.startsWith('traces')));
+  check('a narrowed tool list is smaller in characters, which is the point of it',
+    JSON.stringify(narrowed).length < JSON.stringify(tools).length);
+
+  const named = await toolsListOf({ SAP_TOOLS_INCLUDE: 'impactOf' });
+  check('SAP_TOOLS_INCLUDE serves a single tool named on its own',
+    named.length === 2 && named.some(tool => tool.name === 'impactOf'),
+    named.map(tool => tool.name));
+
+  const refused = await callOn({ SAP_TOOLS_INCLUDE: 'impactOf' }, 'packageTree', { packageName: PACKAGE_NAME });
+  check('a tool left out of the list is refused when called anyway',
+    refused.isError === true && /not in SAP_TOOLS_INCLUDE/.test(JSON.stringify(refused.payload)),
+    refused.payload);
 
   console.log(failures === 0 ? '\nall smoke checks pass' : `\n${failures} smoke check(s) failed`);
   child.kill();
