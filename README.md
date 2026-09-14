@@ -168,6 +168,35 @@ Sessions are closed when they have been idle past a limit, when a caller runs `l
 
 The locked limit is measured from the last use of the **stateful** session, not from the last request: reads travel on the clone, so somebody who spends half an hour reading is busy the whole time while the session holding their locks sits untouched - and SAP times each session out separately. It must also stay comfortably under the backend timeout (`SAP_ASSUMED_SESSION_TIMEOUT`, 1800 s by default in SAP), or the session will be gone before the server can release its locks; the server warns at startup when it is not.
 
+### Matching the log against SAP's own session list
+
+Every `session opened`, `stateless clone opened` and `session closed` line
+carries the id of the SAP session it is about:
+
+```
+[pool] JSMITH: session opened (1/25) [sap-session=DB883C5FADA111F18000005056A2C8B3]
+```
+
+That value is `SECURITY_CONTEXT-LINK` - the handle SAP keeps for an HTTP
+security session, listed in **SM05** and readable directly:
+
+```sql
+SELECT * FROM security_context WHERE link = 'DB883C5FADA111F18000005056A2C8B3'
+```
+
+Sessions SAP lists that no log line claims were **abandoned**: a process
+killed rather than stopped leaves them behind until the backend times them
+out. That is what the id is for.
+
+Note it is not SM04's "session key" (`T82_U11195_M0`). That is an internal
+dialogue-session key and nothing an HTTP client holds corresponds to it; in
+SM04 these sessions are recognised by user, client host and start time.
+
+The id is half of the `SAP_SESSIONID` cookie - the half that identifies.
+The other half authenticates and is never written anywhere: a log that
+carried it would hand whoever reads it the session, and logs outlive
+sessions.
+
 ### Endpoints
 
 | Endpoint | Purpose |

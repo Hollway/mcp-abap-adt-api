@@ -25,6 +25,7 @@ import type { BasicCredentials } from './auth';
 import { passwordFingerprint } from './auth';
 import { describeAdtError, isSessionFailure } from './adtError';
 import { trackAdtClient } from './trackedClient';
+import { sessionLink } from './sessionId';
 
 export interface PooledSession {
   readonly key: string;
@@ -69,6 +70,16 @@ export interface PooledSession {
    * marked here and closed as soon as the request holding it lets go.
    */
   retired?: CloseReason;
+  /**
+   * Set once the stateless clone has been reported in the log.
+   *
+   * The clone is a second SAP session and it appears later than the first -
+   * on the first read, whenever that happens - so the line announcing the
+   * session cannot name it. Without a line of its own, half of what this
+   * server costs the backend would show up in a session list with nothing in
+   * the log to account for it.
+   */
+  cloneAnnounced?: boolean;
 }
 
 /** What a session looks like from outside: no client, no credentials. */
@@ -81,6 +92,17 @@ export interface SessionSummary {
   lockedObjects: string[];
   /** Idle time of the stateful session, which is what SAP times out. */
   statefulIdleMs: number;
+  /**
+   * This session as SAP knows it: SECURITY_CONTEXT-LINK, the handle SM05
+   * lists and `SELECT ... FROM security_context WHERE link = ...` finds.
+   *
+   * Here so a session on the backend can be matched to one this pool holds -
+   * and, by elimination, so one that no pool claims can be recognised as
+   * abandoned. Undefined for a client with no session cookie yet.
+   */
+  sapSessionId?: string;
+  /** Same, for the stateless clone; absent while no clone has been built. */
+  cloneSessionId?: string;
 }
 
 export type CloseReason =
@@ -142,6 +164,20 @@ export interface PoolOptions {
 const existingClone = (client: ADTClient): ADTClient | undefined =>
   (client as unknown as { pClone?: ADTClient }).pClone;
 
+/**
+ * The `sap-session=...` tail of a log line, or nothing at all.
+ *
+ * Left out entirely when there is no id rather than printed as "unknown":
+ * the only sessions worth naming are the ones SAP can also see.
+ */
+const sessionIdClause = (stateful?: string, clone?: string): string => {
+  const parts = [
+    stateful ? `sap-session=${stateful}` : undefined,
+    clone ? `clone=${clone}` : undefined
+  ].filter(Boolean);
+  return parts.length ? ` [${parts.join(' ')}]` : '';
+};
+
 export class SessionPool {
   private readonly sessions = new Map<string, PooledSession>();
   /** In-flight creations, so two parallel first calls open one session. */
@@ -195,7 +231,11 @@ export class SessionPool {
       statefulIdleMs: now - session.lastStatefulUse,
       inFlight: session.inFlight,
       locks: session.state.locks.count(),
-      lockedObjects: session.state.locks.all().map(lock => lock.objectUrl)
+      lockedObjects: session.state.locks.all().map(lock => lock.objectUrl),
+      sapSessionId: sessionLink(session.client),
+      // existingClone, not the getter: asking the getter would build a clone
+      // - a second SAP session - purely in order to describe it.
+      cloneSessionId: sessionLink(existingClone(session.client))
     };
   }
 
@@ -277,7 +317,8 @@ export class SessionPool {
     this.sessions.set(key, session);
     this.log(
       `[pool] ${session.user}: session opened ` +
-      `(${this.sessions.size}/${this.options.maxSessions()})`
+      `(${this.sessions.size}/${this.options.maxSessions()})` +
+      sessionIdClause(sessionLink(client))
     );
     return session;
   }
@@ -304,6 +345,29 @@ export class SessionPool {
   release(session: PooledSession): void {
     session.inFlight = Math.max(0, session.inFlight - 1);
     session.lastUsed = this.now();
+    this.announceClone(session);
+  }
+
+  /**
+   * Say so the first time a read has built the stateless clone.
+   *
+   * Checked here rather than observed on the client because the pool hands
+   * the clone out through a getter that must stay free of side effects: a
+   * read on the clone is not use of the stateful session, and making the
+   * getter report anything risks that distinction. Looking afterwards costs
+   * one property read per request and cannot get it wrong.
+   */
+  private announceClone(session: PooledSession): void {
+    if (session.cloneAnnounced) return;
+    const clone = existingClone(session.client);
+    if (!clone) return;
+    session.cloneAnnounced = true;
+    const id = sessionLink(clone);
+    this.log(
+      `[pool] ${session.user}: stateless clone opened` +
+      (id ? ` [clone=${id}]` : '') +
+      ' (reads go through it; it is a second SAP session)'
+    );
   }
 
   /**
@@ -394,6 +458,10 @@ export class SessionPool {
     // find the same session and close it a second time.
     this.sessions.delete(session.key);
 
+    // Read before anything is logged off: logout clears the cookie, and a
+    // line saying which session was closed is worth nothing without its id.
+    const ids = sessionIdClause(summary.sapSessionId, summary.cloneSessionId);
+
     const lockErrors: { objectUrl: string; error: string }[] = [];
     let sessionAlreadyGone = false;
     for (const lock of session.state.locks.all()) {
@@ -422,16 +490,18 @@ export class SessionPool {
     if (summary.locks > 0 && sessionAlreadyGone) {
       this.log(
         `[pool] ${session.user}: SAP had already closed this session; its ` +
-        `${summary.locks} lock(s) went with it: ${summary.lockedObjects.join(', ')}`
+        `${summary.locks} lock(s) went with it: ${summary.lockedObjects.join(', ')}` +
+        ids
       );
     } else if (summary.locks > 0) {
       this.log(
         `[pool] WARNING ${session.user}: session closed (${reason}) holding ` +
         `${summary.locks} lock(s): ${summary.lockedObjects.join(', ')}` +
-        (lockErrors.length ? ` - ${lockErrors.length} could not be released` : '')
+        (lockErrors.length ? ` - ${lockErrors.length} could not be released` : '') +
+        ids
       );
     } else {
-      this.log(`[pool] ${session.user}: session closed (${reason})`);
+      this.log(`[pool] ${session.user}: session closed (${reason})${ids}`);
     }
     return { ...summary, reason, lockErrors, sessionAlreadyGone };
   }

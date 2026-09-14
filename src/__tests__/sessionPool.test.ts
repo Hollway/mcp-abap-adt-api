@@ -23,14 +23,22 @@ interface FakeClient {
   baseUrl: string;
   stateful: unknown;
   pClone?: FakeClient;
+  sessionID: string[];
 }
 
+// The real getter hands back the cookie already split on '=', which is why
+// the fake speaks in the same shape. The value has to be real base64 of at
+// least 16 bytes, because what gets logged is its tail decoded.
+let cookieCounter = 0;
+const fakeCookie = (n: number): string =>
+  Buffer.from(`session-${String(n).padStart(3, '0')}-abcdef`).toString('base64');
 const makeClient = (): FakeClient => ({
   logout: jest.fn().mockResolvedValue(undefined),
   unLock: jest.fn().mockResolvedValue(undefined),
   lock: jest.fn().mockResolvedValue({ LOCK_HANDLE: 'HANDLE' }),
   baseUrl: 'https://sap.example.test/DEV00',
-  stateful: undefined
+  stateful: undefined,
+  sessionID: ['SAP_SESSIONID_DEV_100', fakeCookie(++cookieCounter)]
 });
 
 const creds = (user: string, password = 'pw'): BasicCredentials => ({ user, password });
@@ -296,6 +304,61 @@ describe('SessionPool closing', () => {
     expect(clone.logout).toHaveBeenCalled();
   });
 
+  /**
+   * A session list on the backend cannot be reconciled with the log unless
+   * both name the same thing, and what both can name is SECURITY_CONTEXT-LINK
+   * - the tail of the cookie. The head is the secret and stays out.
+   */
+  it('names the SAP session when it opens one', async () => {
+    const h = harness();
+    await acquire(h.pool, 'JSMITH');
+
+    const line = h.logs.find(l => l.includes('session opened'));
+    const cookie = h.clients[0].sessionID[1];
+    const link = Buffer.from(cookie, 'base64').subarray(-16).toString('hex').toUpperCase();
+    expect(line).toContain(`sap-session=${link}`);
+    // The other half of the cookie authenticates and must not be anywhere.
+    const head = Buffer.from(cookie, 'base64').subarray(0, 16).toString('hex').toUpperCase();
+    expect(line).not.toContain(head);
+  });
+
+  it('names the SAP session when it closes one', async () => {
+    const h = harness();
+    const session = await acquire(h.pool, 'JSMITH');
+    h.pool.release(session);
+
+    await h.pool.close(session.key);
+
+    expect(h.logs.find(l => l.includes('session closed'))).toMatch(/sap-session=[0-9A-F]{32}/);
+  });
+
+  /**
+   * The clone is born on the first read, long after the session was
+   * announced, so without a line of its own half of what this server costs
+   * the backend would appear in a session list unaccounted for.
+   */
+  it('reports the stateless clone once a read has built it', async () => {
+    const h = harness();
+    const session = await acquire(h.pool, 'JSMITH');
+    h.clients[0].pClone = makeClient();
+
+    h.pool.release(session);
+    const again = await acquire(h.pool, 'JSMITH');
+    h.pool.release(again);
+
+    const announcements = h.logs.filter(l => l.includes('stateless clone opened'));
+    expect(announcements).toHaveLength(1);
+    expect(announcements[0]).toMatch(/clone=[0-9A-F]{32}/);
+  });
+
+  it('says nothing about a clone that does not exist', async () => {
+    const h = harness();
+    const session = await acquire(h.pool, 'JSMITH');
+    h.pool.release(session);
+
+    expect(h.logs.some(l => l.includes('stateless clone opened'))).toBe(false);
+  });
+
   it('does not conjure a clone that was never built', async () => {
     const h = harness();
     const session = await acquire(h.pool, 'JSMITH');
@@ -389,7 +452,11 @@ describe('SessionPool.describe', () => {
       statefulIdleMs: 5_000,
       inFlight: 1,
       locks: 1,
-      lockedObjects: ['/sap/bc/adt/oo/classes/zcl_thing']
+      lockedObjects: ['/sap/bc/adt/oo/classes/zcl_thing'],
+      // The identifying half only: /sessions is behind an admin token, but
+      // a token buys the right to see who holds what - not to act as them.
+      sapSessionId: expect.stringMatching(/^[0-9A-F]{32}$/),
+      cloneSessionId: undefined
     });
     expect(JSON.stringify(described)).not.toContain('pw');
   });
