@@ -8,6 +8,91 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.1.0] — text elements on a system that serves none
+
+`getTextElements` and `setTextElements` were written against an endpoint that
+half the releases do not have. On the classic ERP system
+`/sap/bc/adt/textelements` is not there at all — ADT itself reaches text
+elements there only through the SAPGUI bridge — so both tools answered 404 and
+the texts of a program written through this server stayed as numbered fields and
+empty selection screens.
+
+They now fall back to the text pool: `READ TEXTPOOL` and `INSERT TEXTPOOL`, run
+as a snippet in a throwaway class. Every answer says which way it went in `via`
+(`adt` or `textpool`).
+
+### What the pool actually holds
+
+Measured on two systems rather than guessed: a scan of 1,835 standard reports
+yielded exactly five `ID` letters — `I` text symbols, `S` selection texts, `R`
+the program title, `T` the list header, `H` the column headers. Three of them
+contradicted what the fallback was going to assume:
+
+- **`headings` is two letters at once.** ADT answers it as five elements —
+  `listHeader` (the `T` row) and `columnHeader_1..4` (the `H` rows, keys
+  `001..004`) — and answers with all five even when the program has none. The
+  fallback fills the missing ones in as empty texts, because that is what the
+  endpoint does.
+- **The program title is not in any category.** ADT never serves the `R` row, so
+  neither does the fallback; the title cannot be changed over ADT at all.
+- **The eight characters in front of a selection text are flags, not
+  indentation.** A `D` in the first position means the text comes from the data
+  dictionary. Writing eight blanks over them — which is what "pad the text to
+  the stored width" would have done — cuts that link without saying so. An
+  update therefore keeps the flags the row already has, and the lookup happens
+  inside the generated ABAP, against the pool as it stands at the moment of the
+  write.
+
+### Writing
+
+- Read, change and write happen **in one snippet**. `INSERT TEXTPOOL` replaces
+  the pool whole, so a write built on a pool read in an earlier call would drop
+  every text of the categories the call is not about.
+- `STATE 'A'` writes the active version outright: this path needs neither a lock
+  nor an activation, which is the one way it is simpler than the ADT one.
+- The category is replaced by default, as over ADT. The new `merge` changes only
+  the elements named and leaves the rest of the category alone.
+- `LENGTH` is the declared maximum, not the length of the text: it comes from
+  `maxLength` when given, otherwise from the text. A text longer than that
+  maximum **widens the length instead of being cut**, and the answer says so in
+  `notes` — losing the tail of a text silently is the worse of the two.
+- An empty text removes its row rather than writing an empty one, because a
+  program without a list header has no `T` row at all.
+- A `transport` on this path is **not** honoured, and the answer says so rather
+  than implying the change was registered: the pool is written directly, and
+  registering an object in a request is a separate job that is not built yet.
+  Outside `$TMP` the entry has to be added by hand or the texts stay in this
+  system.
+
+### Where the fallback is decided, and where it is refused
+
+- On a write the 404 arrives at the **lock** of the text elements resource,
+  before anything is written, so the decision is taken around the whole ADT
+  attempt rather than inside the write.
+- Running ABAP is a write whatever it is used for — reading the pool creates,
+  activates, runs and deletes a class — so the read-only fence stands **inside
+  the fallback branch**. A read-only server refuses the ABAP way and says why,
+  while the ADT read, which changes nothing, keeps working. `getTextElements`
+  stays out of the mutating list for exactly that reason.
+- A function group keeps its texts in `SAPL<group>` and a class in its class
+  pool (`<NAME>` padded to thirty with `=` plus `CP`); the fallback resolves the
+  program accordingly.
+- `language` accepts either form — the one-character SAP key (`R`) or the
+  two-character ISO code (`RU`, converted by the system, because the mapping is
+  not "take the first letter": Chinese is `ZH` and `1`). Without it, the
+  language of the session.
+
+### Tests
+
+`src/lib/textPool.ts` holds every decision above as pure functions, so the
+generated ABAP is tested without a system: 30 new tests there and 8 around the
+fallback in the handler. 847 tests in 50 suites, green.
+
+One trap is held by a test of its own: `out->write` is a method call and resets
+`sy-subrc`, so the subrc of a pool statement is taken on the very next line.
+A snippet that printed first once reported a clean run of a call that had
+failed.
+
 ## [1.0.0] — one server for everybody
 
 The server now speaks two transports. **stdio** is unchanged: one process per
