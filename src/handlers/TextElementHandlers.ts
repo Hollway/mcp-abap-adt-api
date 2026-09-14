@@ -1,6 +1,7 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
 import { SnippetHandlers } from './SnippetHandlers';
+import { TransportHandlers } from './TransportHandlers';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { session_types, textElementsUrl } from 'abap-adt-api';
@@ -16,6 +17,7 @@ import {
   parsePoolPrint,
   poolProgramFor,
   readPoolSnippet,
+  transportObjectFor,
   writePoolSnippet,
   writesFor,
   type PoolCategory
@@ -70,6 +72,7 @@ const asNotServed = (error: unknown): EndpointNotServed | undefined => {
  */
 export class TextElementHandlers extends BaseHandler {
   private readonly snippets: SnippetHandlers;
+  private readonly transports: TransportHandlers;
 
   constructor(client: ADTClient) {
     super(client);
@@ -77,6 +80,10 @@ export class TextElementHandlers extends BaseHandler {
     // create a class, activate it, run it, delete it again. That handler
     // carries it, so this one borrows it rather than repeating it.
     this.snippets = new SnippetHandlers(client);
+    // INSERT TEXTPOOL registers nothing, so the pool write has to put the
+    // object into the request itself - and say so when there is no request to
+    // put it in.
+    this.transports = new TransportHandlers(client);
   }
 
   getTools(): ToolDefinition[] {
@@ -113,7 +120,7 @@ export class TextElementHandlers extends BaseHandler {
       },
       {
         name: 'setTextElements',
-        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements, or pass merge to change only the ones you name. On a release that does not serve /sap/bc/adt/textelements the pool is written with INSERT TEXTPOOL instead, through a throwaway class: that way needs neither a lock nor an activation, and it cannot put the change into a transport yet. The lock is taken on the text elements resource - not on the object - and released again, unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Pass activate to finish the job, or run activateSafe afterwards: a text write leaves both the object and its text pool inactive.',
+        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements, or pass merge to change only the ones you name. On a release that does not serve /sap/bc/adt/textelements the pool is written with INSERT TEXTPOOL instead, through a throwaway class: that way needs neither a lock nor an activation, and INSERT TEXTPOOL registers nothing by itself - so pass transport and the object is put into your own task in that request and the entry verified in E071. Without one, the answer says so when the object is in no open request at all, which is how texts quietly stay behind in the development system. The lock is taken on the text elements resource - not on the object - and released again, unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Pass activate to finish the job, or run activateSafe afterwards: a text write leaves both the object and its text pool inactive.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -524,14 +531,52 @@ export class TextElementHandlers extends BaseHandler {
     const print = parsePoolPrint(output);
     const written = answer?.ran === true && print.steps.insert === 0;
     const transport = String(args?.transport || '').trim();
-    if (transport) {
-      // Saying nothing here would be the dangerous kind of quiet: the texts
-      // change, the request stays empty, and the next system never sees them.
-      notes.push(
-        `The change was not put into ${transport}: this path writes the pool directly and cannot register ` +
-        'an object in a request yet. Outside $TMP the entry has to be added by hand (SE38 -> Goto -> Text elements, ' +
-        'or SE03) or the texts stay in this system.'
-      );
+    const steps: Record<string, unknown>[] = [];
+    let registered: boolean | undefined;
+
+    if (written) {
+      // INSERT TEXTPOOL registers nothing, and a text that is not in a request
+      // simply stays in this system - which is the failure nobody sees until
+      // the next system is missing it.
+      const target = transportObjectFor(objectType, objectName);
+      try {
+        if (transport) {
+          const outcome = JSON.parse((await this.transports.handleRegisterInTransport({
+            pgmid: 'R3TR',
+            object: target.object,
+            objName: target.objName,
+            transport
+          })).content[0].text);
+          registered = outcome?.registered === true;
+          steps.push({ step: 'registerInTransport', ...outcome });
+          if (!registered) {
+            notes.push(
+              `The texts are written, but R3TR ${target.object} ${target.objName} did not get into ${transport}: ` +
+              `${outcome?.hint || 'the registration was refused'} Nothing was rolled back - the pool keeps the new texts.`
+            );
+          }
+        } else {
+          const state = await this.transports.registrationState({
+            pgmid: 'R3TR',
+            object: target.object,
+            objName: target.objName
+          });
+          if (!state.local && state.openRequests.length === 0) {
+            notes.push(
+              `R3TR ${target.object} ${target.objName} is in no open request` +
+              (state.devclass ? ` (package ${state.devclass})` : '') +
+              ', so these texts stay in this system. Pass transport to register it, or add it by hand in SE09. ' +
+              'The includes of a program do not carry its text pool: the main program has to be in the request.'
+            );
+          }
+        }
+      } catch (error: any) {
+        // The texts are already written; failing to say where they travel must
+        // not turn into an error that hides that.
+        notes.push(
+          `The texts are written, but the transport side could not be checked: ${describeAdtError(error).error}`
+        );
+      }
     }
 
     if (!written) {
@@ -543,7 +588,7 @@ export class TextElementHandlers extends BaseHandler {
         objectName,
         program,
         category,
-        steps: answer?.steps,
+        steps: [...(answer?.steps || []), ...steps],
         ...(answer?.runError?.error ? { error: answer.runError.error } : {}),
         ...(print.steps.insert !== undefined ? { insertSubrc: print.steps.insert } : {}),
         ...(notes.length ? { notes } : {}),
@@ -555,7 +600,7 @@ export class TextElementHandlers extends BaseHandler {
 
     const textElements = elementsFromRows(print.rows, category as PoolCategory);
     return this.answer({
-      status: 'success',
+      status: registered === false ? 'error' : 'success',
       via: 'textpool',
       written: true,
       url,
@@ -567,6 +612,8 @@ export class TextElementHandlers extends BaseHandler {
       count: elements.length,
       textElements,
       activated: true,
+      ...(registered !== undefined ? { registered, transport } : {}),
+      ...(steps.length ? { steps } : {}),
       ...(notes.length ? { notes } : {}),
       hint: merge
         ? 'The elements passed were updated and the rest of the pool was left as it was. INSERT TEXTPOOL wrote the ' +

@@ -480,6 +480,23 @@ export function writePoolSnippet(spec: WriteSnippetSpec): string[] {
  * padded to thirty characters with equals signs and CP on the end. That naming
  * is the system's, not a convention of this server.
  */
+/**
+ * The object a transport request carries, which is not the pool program.
+ *
+ * The texts of a function group live in `SAPL<group>`, but what travels is
+ * `R3TR FUGR <group>`; a class keeps them in its class pool and travels as
+ * `R3TR CLAS <name>`. Registering the pool program itself would put a name in
+ * the request that the transport system does not recognise as an object.
+ */
+export function transportObjectFor(objectType: string, objectName: string): { object: string; objName: string } {
+  const name = String(objectName || '').trim().toUpperCase();
+  const type = String(objectType || 'PROG/P').trim().toUpperCase();
+  if (type.startsWith('FUGR')) return { object: 'FUGR', objName: name };
+  if (type.startsWith('CLAS')) return { object: 'CLAS', objName: name };
+  if (type.startsWith('INTF')) return { object: 'INTF', objName: name };
+  return { object: 'PROG', objName: name };
+}
+
 export function poolProgramFor(objectType: string, objectName: string): string {
   const name = String(objectName || '').trim().toUpperCase();
   const type = String(objectType || 'PROG/P').trim().toUpperCase();

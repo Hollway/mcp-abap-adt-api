@@ -165,8 +165,13 @@ describe('setTextElements', () => {
 describe('the text pool fallback', () => {
   const notServed = () => new AdtErrorException(404, {}, 'ExceptionResourceNotFound', 'Resource not found');
 
-  const fallbackHarness = (output: string, over: Record<string, unknown> = {}) => {
+  const fallbackHarness = (
+    output: string,
+    over: Record<string, unknown> = {},
+    transport: { registered?: boolean; hint?: string; openRequests?: Record<string, string>[]; local?: boolean } = {}
+  ) => {
     const ran: string[][] = [];
+    const registrations: any[] = [];
     const { handlers, calls } = harness({
       getTextElements: async () => { throw notServed(); },
       lock: async () => { throw notServed(); },
@@ -178,7 +183,32 @@ describe('the text pool fallback', () => {
         return { content: [{ type: 'text', text: JSON.stringify({ status: 'success', ran: true, output }) }] };
       }
     };
-    return { handlers, ran, calls };
+    // The transport side is a handler of its own, with a function module and
+    // two queries behind it; what belongs here is what this handler does with
+    // its answer.
+    (handlers as any).transports = {
+      handleRegisterInTransport: async (args: any) => {
+        registrations.push(args);
+        const registered = transport.registered !== false;
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              status: registered ? 'success' : 'error',
+              registered,
+              task: 'EUDK900124',
+              hint: transport.hint || (registered ? 'in the task.' : 'The object is locked in another request.')
+            })
+          }]
+        };
+      },
+      registrationState: async () => ({
+        row: {},
+        local: transport.local === true,
+        devclass: transport.local === true ? '$TMP' : 'ZMM',
+        openRequests: transport.openRequests || []
+      })
+    };
+    return { handlers, ran, calls, registrations };
   };
 
   const READ_PRINT = [
@@ -227,14 +257,52 @@ describe('the text pool fallback', () => {
     expect(result.insertSubrc).toBe(4);
   });
 
-  // The texts change either way; a transport that was asked for and silently
-  // not used is how a change stays behind in one system.
-  it('says outright that it cannot put the change into a transport', async () => {
-    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1');
+  // INSERT TEXTPOOL registers nothing of its own, so the write has to put the
+  // object into the request itself or the texts never leave this system.
+  it('registers the object in the request it was given', async () => {
+    const { handlers, registrations } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1');
     const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
 
+    expect(registrations).toEqual([{
+      pgmid: 'R3TR', object: 'PROG', objName: PROGRAM, transport: 'EUDK900123'
+    }]);
     expect(result.status).toBe('success');
-    expect(result.notes.join(' ')).toMatch(/not put into EUDK900123/);
+    expect(result.registered).toBe(true);
+    expect(result.steps.some((step: any) => step.step === 'registerInTransport')).toBe(true);
+  });
+
+  // The texts are on the system by then and nothing takes them back, so a
+  // refused registration is an error to report, not one to hide.
+  it('reports a refused registration without pretending the texts are unwritten', async () => {
+    const { handlers } = fallbackHarness(
+      'READ~#~0~#~0\nINSERT~#~0~#~1', {}, { registered: false, hint: 'The object is locked in EUDK900999.' }
+    );
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
+
+    expect(result.written).toBe(true);
+    expect(result.registered).toBe(false);
+    expect(result.status).toBe('error');
+    expect(result.notes.join(' ')).toMatch(/did not get into EUDK900123/);
+  });
+
+  // Measured in a live task: the request held the includes of a program and not
+  // the program itself, and the text pool of the main program would have stayed
+  // behind without a word.
+  it('warns when the object is in no open request at all', async () => {
+    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1', {}, { openRequests: [] });
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(result.status).toBe('success');
+    expect(result.notes.join(' ')).toMatch(/in no open request/);
+    expect(result.notes.join(' ')).toMatch(/includes of a program do not carry its text pool/);
+  });
+
+  it('says nothing about transports for a local object', async () => {
+    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1', {}, { local: true });
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(result.status).toBe('success');
+    expect(result.notes).toBeUndefined();
   });
 
   it('leaves the rest of the category alone with merge', async () => {

@@ -37,6 +37,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'transportRelease',
   'transportSetOwner',
   'transportAddUser',
+  'registerInTransport',
   'setTransportsConfig',
   'createTransportsConfig',
   // code execution
