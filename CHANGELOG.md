@@ -170,15 +170,23 @@ removes it; the length follows the same rule as an element.
   wipe the texts the caller never mentioned — but the answer repeated the
   `merge` flag it was given rather than the one it used. What the answer says
   is now what happened.
-- **The version history is not written by this.** A pool write sets the change
-  stamp on the pool itself (`REPOTEXT`: user, date, time) but creates no entry
-  in version management (`VRSD`), where a snapshot is taken when a request is
-  released. No callable API for creating one was found: `RPY_TEXTPOOL_*` does
-  not exist on this release, `RS_TEXTPOOL_ADD` is the dialog (it takes a
-  `CL_WB_TEXTPOOL` and can answer `ACTION_CANCELLED`), and `RS_CORR_INSERT` is
-  the one that does not work from an ADT class. So the "active" line of the
-  version list stays blank until the request is released. Worth knowing before
-  reading that screen as proof of anything.
+- **The version list says nothing about a pool write, and that is SAP's own
+  doing.** A write sets the change stamp on the pool itself (`REPOTEXT`: user,
+  date, time) and creates no entry in version management (`VRSD`) — but neither
+  does saving in SE38. Versions are snapshots taken when a **request is
+  released**, which is where every numbered row in that list comes from; each
+  one carries a released request, while an open one has no row yet.
+
+  The blank date, time and author on the *active* line are not a trace of how
+  the pool was written either. That line is built by `extract_info`, which
+  clears the three fields and then fills them through the definition in
+  `VERSOBJ`: for `REPS` it names `TRDIR` with `UDAT` and `UNAM` and the line
+  gets a date; for `REPT` the `INFOSUBOBJ`, `FIELD_DATE`, `FIELD_TIME` and
+  `FIELD_AUTH` columns are **empty in every row**, and
+  `SVRS_EXTRACT_INFO_FROM_OBJECT` has a special case for `CUAD`, `CLSD`, `CPUB`
+  and others but none for a text pool. So that line is blank for every text
+  pool on the system, whoever changed it and however. Nothing here can fill it,
+  and nothing should try.
 
 ### Tests
 
