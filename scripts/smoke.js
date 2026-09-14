@@ -126,7 +126,7 @@ const check = (label, condition, detail) => {
                       'getStructureSource', 'createStructure',
                       'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
                       'changePackagePreview', 'rapGenIsAvailable',
-                      'compareRevisions', 'impactOf', 'abapPath', 'addMethod', 'deleteMethod', 'addAttribute',
+                      'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
                       'runSnippet', 'callFunction', 'callMethod',
                       'tableFields', 'tableIndexes', 'tableKeys']) {
@@ -543,6 +543,37 @@ const check = (label, condition, detail) => {
   check('abapPath asks for the target when toName/toUrl are both missing',
     pathMissingTarget.isError === true && /What is the target object/.test(JSON.stringify(pathMissingTarget.payload)),
     pathMissingTarget.payload);
+
+  // callsFrom: the other direction, read from the source itself. CLASS_NAME is
+  // a standard class on any system, so this asks for standard targets too -
+  // with the default filter a standard class calls nothing by definition.
+  const calls = await call('callsFrom', { objectName: CLASS_NAME, onlyCustom: false, maxTargets: 5 });
+  check(`callsFrom scans the real source of ${CLASS_NAME} and reports what it calls`,
+    calls.payload.status === 'success' && calls.payload.summary.statements > 0
+    && (calls.payload.calls || []).length > 0,
+    calls.payload);
+  check('callsFrom lists no more targets than asked for, and says what it left out',
+    (calls.payload.calls || []).length <= 5
+    && (calls.payload.summary.targets >= (calls.payload.calls || []).length),
+    calls.payload);
+  check('callsFrom quotes the statement each call was found in, with its line',
+    ((calls.payload.calls || [])[0].places || []).every(place => typeof place.line === 'number' && !!place.statement),
+    calls.payload);
+
+  const callsFiltered = await call('callsFrom', { objectName: CLASS_NAME, onlyCustom: false, kinds: ['method'] });
+  check('callsFrom keeps only the kinds asked for',
+    (callsFiltered.payload.calls || []).every(entry => entry.kind === 'method'),
+    callsFiltered.payload);
+
+  const callsBadKind = await call('callsFrom', { objectName: CLASS_NAME, kinds: ['methods'] });
+  check('callsFrom rejects a kind that does not exist, naming the ones that do',
+    callsBadKind.isError === true && /not one of method/.test(JSON.stringify(callsBadKind.payload)),
+    callsBadKind.payload);
+
+  const callsNothing = await call('callsFrom', {});
+  check('callsFrom asks whose calls to scan',
+    callsNothing.isError === true && /Whose calls/.test(JSON.stringify(callsNothing.payload)),
+    callsNothing.payload);
 
   // Function modules by name alone, and the group they live in.
   const fm = await call('getFunctionModule', { name: FUNCTION_MODULE });

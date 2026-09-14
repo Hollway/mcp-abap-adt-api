@@ -28,6 +28,13 @@ describe('codeOf', () => {
     expect(codeOf("  WRITE: / 'say \"hello\"'.").trim()).toBe("WRITE: / 'say \"hello\"'.");
   });
 
+  it('keeps a quote that lives inside a string template or a backtick literal', () => {
+    // Building JSON in a template is the everyday case: cutting at the first
+    // quote would hide the rest of the line from every scan.
+    expect(codeOf('  lv_json = |{ "id": 1 }|. "note').trim()).toBe('lv_json = |{ "id": 1 }|.');
+    expect(codeOf('  lv_text = `say "hello"`.').trim()).toBe('lv_text = `say "hello"`.');
+  });
+
   it('treats a star in the first column as a whole-line comment', () => {
     expect(codeOf('* PERFORM x.')).toBe('');
     expect(isCommentLine('* PERFORM x.')).toBe(true);

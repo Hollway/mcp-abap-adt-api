@@ -8,6 +8,77 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.2.0] — what an object calls, read from its own source
+
+`impactOf` and `abapPath` both answer the same question from the same data:
+who calls this. The backend has no answer for the other direction. ADT has
+none either — the arrows in its dependency diagrams come out of the same
+where-used index, read one object at a time — so the only place the answer
+exists is the source text.
+
+`callsFrom` reads it. Given an object it returns what that code reaches,
+grouped by target, with the line and the statement each call was found in:
+
+- static and instance method calls, the instance ones resolved through the
+  `TYPE REF TO` the source declares — a call written `lo_ref->add( )` names no
+  class anywhere on that line, and the declaration is the only thing that does;
+- an interface-qualified call is reported against the **interface**
+  (`lo_ref->zif_log~write( )` is a dependency on ZIF_LOG), because that is the
+  edge that survives a change of implementation;
+- `NEW`, `CREATE OBJECT` and `RAISE EXCEPTION TYPE`;
+- `CALL FUNCTION`, `PERFORM … IN PROGRAM`, `SUBMIT`, `CALL TRANSACTION`;
+- database tables, from `SELECT`/`JOIN`/`UPDATE`/`INSERT`/`MODIFY`/`DELETE`
+  and from `TABLES`;
+- `INHERITING FROM`, `INTERFACES` and `INCLUDE`;
+- `zcl_x=>co_value` and `zcl_x=>ty_row`, which are a dependency on the class
+  without being a call, kept apart under the kind `reference`.
+
+Each finding carries a `kind`, and `kinds` narrows the answer to the ones
+wanted. Targets outside `Z*`, `Y*` and `/namespace/` are counted rather than
+listed, as in `impactOf`: a class that calls `CL_GUI` and `CX_ROOT` everywhere
+would otherwise bury its own dependencies.
+
+### What it does not know, said rather than hidden
+
+A name assembled at runtime cannot be resolved before the program runs, and a
+reference whose type is declared somewhere else cannot be resolved from this
+source alone. Both are reported in `unresolved`, with the reason and the line:
+`CALL METHOD (lv_class)=>(lv_meth)`, `CALL FUNCTION lv_fm`, `SELECT … FROM
+(lv_table)`, a chained call on what another call returned, a variable this
+source never declares. A missing edge that is named can be settled with
+`usageReferences` on the suspected target; a missing edge that is silent
+reads as proof that nothing is there. Macros are not expanded, and no target
+is checked against the repository.
+
+### Statements, not lines
+
+The scan works on logical ABAP statements. `CALL FUNCTION` with its parameters
+runs over a dozen lines and `SELECT` often carries its `FROM` on the next one,
+so a line-by-line regular expression would miss both. Chain statements are
+split into their parts, each keeping the line it was written on, and a period
+inside a literal ends nothing.
+
+A function group is read together with its includes whether or not
+`followIncludes` was passed: its own source holds nothing but `INCLUDE` lines,
+and every function module body lives in one of them. Sources read together are
+also scanned together: a group declares its globals in the TOP include and uses
+them in another, so every call through `gs_screen-handler` would otherwise be
+unresolvable. Each source still prefers its own declarations, because a name
+reused in one include means what that include says it means. They are served under the
+group (`/functions/groups/<group>/includes/<include>`), with the report include
+collection as a fallback; one that cannot be read is reported by name instead
+of losing the rest. A program's includes are read only when asked, because
+each is a call of its own.
+
+### Fixed along the way: a string template was cut short
+
+`codeOf`, which strips comments before any scan, knew `'` literals only. ABAP
+has three delimiters, and a `"` inside a string template is not a comment —
+`|{ "id": 1 }|`, the everyday way JSON is built, was cut at the first quote.
+It now tracks `'`, `` ` `` and `|` with their escapes, which also fixes
+`findInSource` with `skipComments` and `sourceOutline` on any line that builds
+a template containing a quote.
+
 ## [1.1.0] — text elements on a system that serves none, and the transport they travel in
 
 `getTextElements` and `setTextElements` were written against an endpoint that

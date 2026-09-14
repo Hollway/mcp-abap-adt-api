@@ -619,6 +619,7 @@ export class AbapAdtServer extends Server {
                 break;
             case 'impactOf':
             case 'abapPath':
+            case 'callsFrom':
                 result = await this.impactHandlers.handle(toolName, args);
                 break;
             case 'addMethod':

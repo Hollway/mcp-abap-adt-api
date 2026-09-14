@@ -522,3 +522,152 @@ describe('abapPath', () => {
       .rejects.toThrow(/What is the starting object/);
   });
 });
+
+/**
+ * Sources shaped like the real thing: a class that calls a helper, a function
+ * group whose own source is nothing but INCLUDE lines, and the include that
+ * holds the function module body.
+ */
+const CALLER_SOURCE = [
+  'CLASS zcl_app_caller DEFINITION PUBLIC.',
+  '  PUBLIC SECTION.',
+  '    DATA mo_helper TYPE REF TO zcl_app_helper.',
+  'ENDCLASS.',
+  'CLASS zcl_app_caller IMPLEMENTATION.',
+  '  METHOD run.',
+  '    mo_helper->add( 1 ).',
+  '    mo_helper->add( 2 ).',
+  "    CALL FUNCTION 'Z_APP_SAVE'.",
+  '    SELECT * FROM zorders INTO TABLE @DATA(lt_any).',
+  '    DATA(lo_writer) = NEW zcl_app_writer( ).',
+  '    CALL METHOD (lv_class)=>(lv_method).',
+  '    cl_gui_frontend_services=>file_exist( ).',
+  '  ENDMETHOD.',
+  'ENDCLASS.'
+].join('\n');
+
+const GROUP_MAIN = [
+  'FUNCTION-POOL zapp_fg.',
+  'INCLUDE lzapp_fgtop.',
+  'INCLUDE lzapp_fgu01.'
+].join('\n');
+
+const GROUP_INCLUDE = [
+  'FUNCTION z_app_save.',
+  '  zcl_app_helper=>store( ).',
+  'ENDFUNCTION.'
+].join('\n');
+
+describe('callsFrom', () => {
+  it('reads the source of the object and groups what it calls by target', async () => {
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => { read.push(url); return CALLER_SOURCE; }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'zcl_app_caller' }));
+    expect(read).toEqual(['/sap/bc/adt/oo/classes/zcl_app_caller/source/main']);
+    expect(result.target.object).toBe('ZCL_APP_CALLER (CLAS/OC)');
+    const helper = result.calls.find((entry: any) => entry.target === 'ZCL_APP_HELPER');
+    expect(helper.calls).toBe(2);
+    expect(helper.members).toEqual(['ADD']);
+    expect(result.summary.byKind).toMatchObject({ method: 2, function: 1, table: 1 });
+    expect(result.standardTargetsHidden).toBe(1);
+  });
+
+  it('counts constructors as a number, the one kind whose name a plain object already holds', async () => {
+    const { handler } = handlers({ getObjectSource: async () => CALLER_SOURCE });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZCL_APP_CALLER', onlyCustom: false }));
+    expect(result.summary.byKind.constructor).toBe(1);
+    expect(JSON.stringify(result.summary.byKind)).not.toMatch(/native code/);
+  });
+
+  it('lists the dynamic call it cannot name instead of leaving the edge out', async () => {
+    const { handler } = handlers({ getObjectSource: async () => CALLER_SOURCE });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZCL_APP_CALLER' }));
+    expect(result.unresolved).toHaveLength(1);
+    expect(result.unresolved[0].reason).toMatch(/both in variables/);
+    expect(result.unresolvedNote).toMatch(/cannot name/);
+  });
+
+  it('reads the includes of a function group without being asked, and says which source each call is in', async () => {
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => {
+        read.push(url);
+        if (url.includes('/includes/lzapp_fgu01')) return GROUP_INCLUDE;
+        if (url.includes('/includes/')) return '';
+        return GROUP_MAIN;
+      }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZAPP_FG', objectType: 'FUGR/F' }));
+    expect(read).toEqual([
+      '/sap/bc/adt/functions/groups/zapp_fg/source/main',
+      '/sap/bc/adt/functions/groups/zapp_fg/includes/lzapp_fgtop/source/main',
+      '/sap/bc/adt/functions/groups/zapp_fg/includes/lzapp_fgu01/source/main'
+    ]);
+    const helper = result.calls.find((entry: any) => entry.target === 'ZCL_APP_HELPER');
+    expect(helper.places[0].source).toBe('LZAPP_FGU01');
+    expect(result.sourcesScanned.map((entry: any) => entry.name)).toEqual(['ZAPP_FG', 'LZAPP_FGTOP', 'LZAPP_FGU01']);
+  });
+
+  it('falls back to the report include collection when the group does not serve one, and reports one it cannot read', async () => {
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => {
+        read.push(url);
+        if (url.includes('/functions/groups/zapp_fg/includes/')) throw new Error('404 not found');
+        if (url.includes('/programs/includes/lzapp_fgu01')) return GROUP_INCLUDE;
+        if (url.includes('/programs/includes/')) throw new Error('404 not found');
+        return GROUP_MAIN;
+      }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZAPP_FG', objectType: 'FUGR/F' }));
+    expect(read).toContain('/sap/bc/adt/programs/includes/lzapp_fgu01/source/main');
+    expect(result.calls.some((entry: any) => entry.target === 'ZCL_APP_HELPER')).toBe(true);
+    expect(result.includesUnread.map((entry: any) => entry.name)).toEqual(['LZAPP_FGTOP']);
+  });
+
+  it('leaves the includes of a program alone unless asked, and says so when nothing was found', async () => {
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => { read.push(url); return 'REPORT zr_app.\nINCLUDE zr_app_f01.'; }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZR_APP', objectType: 'PROG/P', kinds: ['method'] }));
+    expect(read).toHaveLength(1);
+    expect(result.calls).toHaveLength(0);
+    expect(result.emptyNote).toMatch(/followIncludes/);
+  });
+
+  it('keeps the standard targets when asked to', async () => {
+    const { handler } = handlers({ getObjectSource: async () => CALLER_SOURCE });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZCL_APP_CALLER', onlyCustom: false }));
+    expect(result.calls.some((entry: any) => entry.target === 'CL_GUI_FRONTEND_SERVICES')).toBe(true);
+    expect(result.standardTargetsHidden).toBeUndefined();
+  });
+
+  it('rejects a kind that does not exist, naming the ones that do', async () => {
+    const { handler } = handlers();
+    await expect(handler.handleCallsFrom({ objectName: 'ZCL_APP_CALLER', kinds: ['methods'] }))
+      .rejects.toThrow(/not one of method, constructor/);
+  });
+
+  it('says what to pass when nothing names the object', async () => {
+    const { handler } = handlers();
+    await expect(handler.handleCallsFrom({})).rejects.toThrow(/Whose calls\?/);
+  });
+
+  it('says so when the type has no source to read', async () => {
+    const { handler } = handlers();
+    await expect(handler.handleCallsFrom({ objectName: 'ZAPP_DOMAIN', objectType: 'DOMA/DD' }))
+      .rejects.toThrow(/No ADT source is served for a DOMA\/DD/);
+  });
+
+  it('scans a source URL on its own, taking the name from it', async () => {
+    const { handler } = handlers({ getObjectSource: async () => CALLER_SOURCE });
+    const result = answer(await handler.handleCallsFrom({
+      sourceUrl: '/sap/bc/adt/programs/programs/zr_app_daily/source/main'
+    }));
+    expect(result.target.object).toBe('ZR_APP_DAILY');
+    expect(result.calls.length).toBeGreaterThan(0);
+  });
+});
