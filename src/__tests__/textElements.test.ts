@@ -313,6 +313,29 @@ describe('the text pool fallback', () => {
     expect(ran[0].some(line => line === "DELETE lt_pool WHERE id = 'I'.")).toBe(false);
   });
 
+  // Measured live: a title-only call reported merge:false and "the whole set of
+  // symbols was replaced", when it had replaced nothing at all. What the answer
+  // says has to be what happened.
+  it('says what a title-only write actually did', async () => {
+    const { handlers, ran } = fallbackHarness(['READ~#~0~#~0', 'INSERT~#~0~#~1'].join('\n'));
+    const result = answer(await handlers.handleSetTextElements({
+      objectName: PROGRAM, objectType: 'PROG/P', title: 'A report'
+    }));
+
+    expect(result.written).toBe(true);
+    expect(result.merge).toBe(true);
+    expect(result.hint).toMatch(/nothing else in the pool was touched/);
+    // No category may be emptied by a call that named no elements.
+    expect(ran[0].some(line => line === "DELETE lt_pool WHERE id = 'I'.")).toBe(false);
+    expect(ran[0]).toEqual(expect.arrayContaining(['ls_new-entry = `A report`.']));
+  });
+
+  it('refuses a write that names neither elements nor a title', async () => {
+    const { handlers } = fallbackHarness('');
+    await expect(handlers.handleSetTextElements({ objectName: PROGRAM }))
+      .rejects.toThrow(/nothing to write/);
+  });
+
   it('does not fall back on a failure that is not the missing endpoint', async () => {
     const { handlers } = fallbackHarness('', {
       getTextElements: async () => { throw new Error('Program ZDEV_MCP_TXT does not exist'); }

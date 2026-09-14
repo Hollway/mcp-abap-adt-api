@@ -550,6 +550,11 @@ export class TextElementHandlers extends BaseHandler {
     const notes: string[] = [];
 
     const hasTitle = typeof args?.title === 'string';
+    const titleOnly = hasTitle && elements.length === 0;
+    // With no elements to write, replacing the category as well would wipe the
+    // texts the caller never mentioned - and the answer has to say that this is
+    // what happened, rather than repeating the merge flag it was given.
+    const effectiveMerge = merge || elements.length === 0;
     let code: string[];
     try {
       const writes = writesFor(category as PoolCategory, elements as any, notes);
@@ -561,9 +566,7 @@ export class TextElementHandlers extends BaseHandler {
         category: category as PoolCategory,
         writes,
         language,
-        // With only a title to write, replacing the category as well would
-        // wipe the texts the caller never mentioned.
-        merge: merge || elements.length === 0
+        merge: effectiveMerge
       });
     } catch (error: any) {
       if (error instanceof TextPoolError) throw new McpError(ErrorCode.InvalidParams, error.message);
@@ -652,7 +655,7 @@ export class TextElementHandlers extends BaseHandler {
       program,
       category,
       ...(language ? { language } : {}),
-      merge,
+      merge: effectiveMerge,
       count: elements.length,
       textElements,
       ...(title ? { title: title.text, titleMaxLength: title.maxLength } : {}),
@@ -660,11 +663,14 @@ export class TextElementHandlers extends BaseHandler {
       ...(registered !== undefined ? { registered, transport } : {}),
       ...(steps.length ? { steps } : {}),
       ...(notes.length ? { notes } : {}),
-      hint: merge
-        ? 'The elements passed were updated and the rest of the pool was left as it was. INSERT TEXTPOOL wrote the ' +
-          'active version straight away, so there is nothing to activate.'
-        : `The whole set of ${category} was replaced; the other categories and the program title were kept. ` +
-          'INSERT TEXTPOOL wrote the active version straight away, so there is nothing to activate.'
+      hint: titleOnly
+        ? 'The title was written and nothing else in the pool was touched. INSERT TEXTPOOL wrote the active ' +
+          'version straight away, so there is nothing to activate.'
+        : effectiveMerge
+          ? 'The elements passed were updated and the rest of the pool was left as it was. INSERT TEXTPOOL wrote ' +
+            'the active version straight away, so there is nothing to activate.'
+          : `The whole set of ${category} was replaced; the other categories and the program title were kept. ` +
+            'INSERT TEXTPOOL wrote the active version straight away, so there is nothing to activate.'
     });
   }
 
