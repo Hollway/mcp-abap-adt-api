@@ -90,8 +90,8 @@ twice on the same day, from both ends.
 - **A new selection text lost its first eight characters.** With no existing
   row the flags are eight blanks, the template turned them into nothing, and
   the bare text went in at offset 0 - so the read, cutting eight characters off
-  as it must, handed back `" в ТС ПиоТ"` for a text that read
-  `"Проверка в ТС ПиоТ"`. Writing it a second time made it worse: the corrupted
+  as it must, handed back `"ck in the plant"` for a text that read
+  `"Stock check in the plant"`. Writing it a second time made it worse: the corrupted
   row's first eight characters were now letters, and they were carried over as
   flags.
 - **An existing text with a dictionary flag came back as the last two letters
@@ -158,7 +158,7 @@ removes it; the length follows the same rule as an element.
 
 - **A class pool is all equals signs.** `ZCL_FOO=======================CP` was
   refused by the name pattern, which is to say every class on the system was.
-  Function groups were right first time (`SAPLZ1C_UPLOAD`, read live).
+  Function groups were right first time (`SAPL<group>`, read live).
 - **Against ADT itself**, on the system where the endpoint does exist: the same
   program answers with the same five headings in the same order, empties
   included. Two deliberate differences remain — the fallback adds `maxLength`

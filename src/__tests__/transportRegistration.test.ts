@@ -24,11 +24,11 @@ import {
  * means the call worked. RS_CORR_INSERT, the obvious alternative, answers
  * subrc 1 from an ADT class whatever it is passed.
  */
-const row = { PGMID: 'R3TR', OBJECT: 'PROG', OBJ_NAME: 'ZR_MM_NC_PG' };
+const row = { PGMID: 'R3TR', OBJECT: 'PROG', OBJ_NAME: 'ZR_APP_FOO' };
 
 describe('buildE071Row', () => {
   it('takes what the transport system spells, and uppercases it', () => {
-    expect(buildE071Row({ object: 'prog', objName: 'zr_mm_nc_pg' })).toEqual(row);
+    expect(buildE071Row({ object: 'prog', objName: 'zr_app_foo' })).toEqual(row);
     expect(buildE071Row({ pgmid: 'limu', object: 'rept', objName: 'zr_foo' }))
       .toEqual({ PGMID: 'LIMU', OBJECT: 'REPT', OBJ_NAME: 'ZR_FOO' });
   });
@@ -73,7 +73,7 @@ describe('isNoiseMessage', () => {
   // reading it as a failure is the mistake.
   it('knows the message a successful call leaves behind', () => {
     expect(isNoiseMessage('SCTS_CTO_CUST_SYNC/003')).toBe(true);
-    expect(isNoiseMessage('Object EUDK9A3P1S locked')).toBe(false);
+    expect(isNoiseMessage('Object EUDK900123 locked')).toBe(false);
   });
 });
 
@@ -81,7 +81,7 @@ describe('the queries', () => {
   it('read the request, its tasks, the registration and the package', () => {
     expect(headerSql('eudk900123')).toContain("trkorr = 'EUDK900123'");
     expect(tasksSql('EUDK900123')).toContain("strkorr = 'EUDK900123'");
-    expect(registeredSql('EUDK900124', row)).toContain("obj_name = 'ZR_MM_NC_PG'");
+    expect(registeredSql('EUDK900124', row)).toContain("obj_name = 'ZR_APP_FOO'");
     expect(packageSql(row)).toContain('FROM tadir');
     // An object lives in one open request at a time, and which one is the
     // answer OB_LOCKED_BY_OTHER does not give.
@@ -91,7 +91,7 @@ describe('the queries', () => {
   it('refuse a number that is not one', () => {
     expect(() => transportNumber("EUDK900123' OR '1'='1")).toThrow(TransportRegistrationError);
     expect(() => transportNumber('nonsense')).toThrow(TransportRegistrationError);
-    expect(transportNumber('eudk9a3p1s')).toBe('EUDK9A3P1S');
+    expect(transportNumber('eudk900101')).toBe('EUDK900101');
   });
 });
 
@@ -105,42 +105,42 @@ describe('isLocalPackage', () => {
 });
 
 describe('chooseTask', () => {
-  const request = { TRKORR: 'EUDK9A3P1R', STRKORR: '', TRSTATUS: 'D', TRFUNCTION: 'K' };
-  const mine = { TRKORR: 'EUDK9A3P1S', STRKORR: 'EUDK9A3P1R', TRSTATUS: 'D', AS4USER: 'VKRIVOROT' };
-  const theirs = { TRKORR: 'EUDK9A3P1T', STRKORR: 'EUDK9A3P1R', TRSTATUS: 'D', AS4USER: 'OTHER' };
+  const request = { TRKORR: 'EUDK900100', STRKORR: '', TRSTATUS: 'D', TRFUNCTION: 'K' };
+  const mine = { TRKORR: 'EUDK900101', STRKORR: 'EUDK900100', TRSTATUS: 'D', AS4USER: 'TESTER' };
+  const theirs = { TRKORR: 'EUDK900102', STRKORR: 'EUDK900100', TRSTATUS: 'D', AS4USER: 'OTHER' };
 
   it('resolves a request to the caller\'s own open task', () => {
-    expect(chooseTask('EUDK9A3P1R', request, [mine, theirs], 'VKRIVOROT'))
-      .toEqual({ task: 'EUDK9A3P1S', request: 'EUDK9A3P1R', resolvedFrom: 'request' });
+    expect(chooseTask('EUDK900100', request, [mine, theirs], 'TESTER'))
+      .toEqual({ task: 'EUDK900101', request: 'EUDK900100', resolvedFrom: 'request' });
   });
 
   it('uses a task as it stands', () => {
-    expect(chooseTask('EUDK9A3P1S', mine, [], 'VKRIVOROT'))
-      .toEqual({ task: 'EUDK9A3P1S', request: 'EUDK9A3P1R', resolvedFrom: 'task' });
+    expect(chooseTask('EUDK900101', mine, [], 'TESTER'))
+      .toEqual({ task: 'EUDK900101', request: 'EUDK900100', resolvedFrom: 'task' });
   });
 
   it('refuses somebody else\'s task and points at the request instead', () => {
-    expect(() => chooseTask('EUDK9A3P1T', theirs, [], 'VKRIVOROT'))
-      .toThrow(/task of OTHER.*EUDK9A3P1R/);
+    expect(() => chooseTask('EUDK900102', theirs, [], 'TESTER'))
+      .toThrow(/task of OTHER.*EUDK900100/);
   });
 
   it('names the open tasks when none of them is the caller\'s', () => {
-    expect(() => chooseTask('EUDK9A3P1R', request, [theirs], 'VKRIVOROT'))
-      .toThrow(/no open task of VKRIVOROT.*EUDK9A3P1T \(OTHER\)/);
+    expect(() => chooseTask('EUDK900100', request, [theirs], 'TESTER'))
+      .toThrow(/no open task of TESTER.*EUDK900102 \(OTHER\)/);
   });
 
   // Guessing between two tasks of one user puts the object in the one the
   // caller is not looking at.
   it('refuses to choose between two of the caller\'s own tasks', () => {
-    const second = { ...mine, TRKORR: 'EUDK9A3P1U' };
-    expect(() => chooseTask('EUDK9A3P1R', request, [mine, second], 'VKRIVOROT'))
-      .toThrow(/EUDK9A3P1S, EUDK9A3P1U/);
+    const second = { ...mine, TRKORR: 'EUDK900103' };
+    expect(() => chooseTask('EUDK900100', request, [mine, second], 'TESTER'))
+      .toThrow(/EUDK900101, EUDK900103/);
   });
 
   it('refuses a released request and a number that is not there', () => {
-    expect(() => chooseTask('EUDK9A3P1R', { ...request, TRSTATUS: 'R' }, [], 'VKRIVOROT'))
+    expect(() => chooseTask('EUDK900100', { ...request, TRSTATUS: 'R' }, [], 'TESTER'))
       .toThrow(/released/);
-    expect(() => chooseTask('EUDK9A3P1R', undefined, [], 'VKRIVOROT'))
+    expect(() => chooseTask('EUDK900100', undefined, [], 'TESTER'))
       .toThrow(/does not exist/);
   });
 });

@@ -174,7 +174,7 @@ describe('writesFor', () => {
 
 describe('writePoolSnippet', () => {
   const snippet = (over: Partial<Parameters<typeof writePoolSnippet>[0]> = {}) => writePoolSnippet({
-    program: 'ZR_DELIV_MONITOR',
+    program: 'ZR_APP_FOO',
     category: 'selections',
     writes: writesFor('selections', [{ id: 'P_WERKS', text: 'Plant', maxLength: 20 }]),
     ...over
@@ -193,7 +193,7 @@ describe('writePoolSnippet', () => {
   it('reads, changes and writes in one run, sorted, into the active state', () => {
     const lines = snippet();
     const insert = lines.findIndex(line => line.startsWith('INSERT TEXTPOOL'));
-    expect(lines[insert]).toBe("INSERT TEXTPOOL 'ZR_DELIV_MONITOR' FROM lt_pool LANGUAGE lv_langu STATE 'A'.");
+    expect(lines[insert]).toBe("INSERT TEXTPOOL 'ZR_APP_FOO' FROM lt_pool LANGUAGE lv_langu STATE 'A'.");
     expect(lines.indexOf('SORT lt_pool BY id key.')).toBeLessThan(insert);
     expect(lines.findIndex(line => line.startsWith('READ TEXTPOOL'))).toBeLessThan(insert);
   });
@@ -337,8 +337,8 @@ describe('programLiteral and stringLiteral', () => {
     expect(programLiteral('/dune/zfoo')).toBe("'/DUNE/ZFOO'");
     // Measured: a class pool is all equals signs, and the first pattern here
     // refused every class on the system.
-    expect(programLiteral('ZCL_AOC_CHECK_01==============CP'))
-      .toBe("'ZCL_AOC_CHECK_01==============CP'");
+    expect(programLiteral('ZCL_APP_FOO===================CP'))
+      .toBe("'ZCL_APP_FOO===================CP'");
   });
 
   it('refuses a text with a line break, which no pool entry has', () => {
