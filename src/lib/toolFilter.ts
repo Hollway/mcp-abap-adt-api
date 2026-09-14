@@ -12,12 +12,48 @@ export interface ToolProfile {
   excluded: ReadonlySet<string>;
   /** Groups or tool names allowed through the read-only fence. */
   allowed: ReadonlySet<string>;
+  /** Groups or tool names served to the exclusion of everything else; empty means everything. */
+  included?: ReadonlySet<string>;
 }
 
 export interface RefusalReason {
-  reason: 'readOnly' | 'excluded';
+  reason: 'readOnly' | 'excluded' | 'notIncluded';
   message: string;
 }
+
+/**
+ * Ready-made sets of groups, for the common shapes of session.
+ *
+ * The whole tool list costs some 160,000 characters of context before any
+ * work starts, and a session that reads code never calls the debugger, the
+ * traces, ATC or git. These are the sets worth naming; anything else is a
+ * SAP_TOOLS_INCLUDE list of groups, which is what these are made of.
+ */
+export const TOOL_PRESETS: Readonly<Record<string, readonly string[]>> = {
+  /** Find an object, read it, walk its package. */
+  min: ['health', 'auth', 'object', 'source', 'package'],
+  /** Everything that only reads: the above plus the dictionary, history and analysis. */
+  read: [
+    'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
+    'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement'
+  ],
+  /** Reading plus writing, activation, transports and tests - no debugger, traces, ATC, git or RAP. */
+  dev: [
+    'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
+    'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement',
+    'lock', 'activation', 'registration', 'deletion', 'transport', 'unitTest',
+    'prettyPrinter', 'refactor', 'rename', 'messageClass'
+  ],
+  /** Dictionary work: tables, structures, data elements, domains, and the sources around them. */
+  ddic: ['health', 'auth', 'ddic', 'object', 'source', 'package', 'node', 'revision']
+};
+
+/** The groups a preset name stands for; unknown names stand for nothing. */
+export const presetGroups = (name: string): readonly string[] =>
+  TOOL_PRESETS[String(name || '').trim().toLowerCase()] || [];
+
+/** healthcheck is served whatever the include list says: it reads nothing but this server's own state. */
+const ALWAYS_SERVED = new Set(['healthcheck']);
 
 const named = (tool: string, group: string | undefined, tokens: ReadonlySet<string>): boolean =>
   tokens.has(tool) || (!!group && tokens.has(group));
@@ -44,6 +80,16 @@ export function refusalFor(
     return {
       reason: 'excluded',
       message: `${tool}${group ? ` (group ${group})` : ''} is disabled by SAP_TOOLS_EXCLUDE on this server.`
+    };
+  }
+  if (
+    profile.included && profile.included.size > 0
+    && !ALWAYS_SERVED.has(tool)
+    && !named(tool, group, profile.included)
+  ) {
+    return {
+      reason: 'notIncluded',
+      message: `${tool}${group ? ` (group ${group})` : ''} is not in SAP_TOOLS_INCLUDE/SAP_TOOLS_PROFILE on this server, which serves: ${[...profile.included].sort().join(', ')}.`
     };
   }
   if (profile.readOnly && isMutatingTool(tool) && !isAllowedDespiteReadOnly(tool, group, profile)) {

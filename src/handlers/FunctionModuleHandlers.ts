@@ -24,22 +24,34 @@ import type { FunctionParameter } from '../lib/functionModule';
  * 1,100-line source and reading the ABAP by eye.
  */
 
-const PARAMETER_SCHEMA = (what: string) => ({
+/**
+ * One parameter list of the interface.
+ *
+ * Written out once, for importing, and named from the other three: the shape
+ * is the same for all four, and four copies of it were the largest tool
+ * definition this server serves - context spent on every session that never
+ * creates a function module.
+ */
+const PARAMETER_SCHEMA = (what: string, brief = false) => ({
   type: 'array',
-  description: `${what} as data: [{name, type, byValue?, optional?, default?}]. byValue writes VALUE(NAME); the default is by reference, which is what ADT writes for a bare name.`,
-  items: {
-    type: 'object',
-    properties: {
-      name: { type: 'string' },
-      type: { type: 'string', description: 'ABAP type, e.g. LGNUM, STRING, ZAPP_INVOICE_LIST_TT.' },
-      byValue: { type: 'boolean', description: 'Pass by value: VALUE(NAME).' },
-      optional: { type: 'boolean', description: 'OPTIONAL.' },
-      default: { type: 'string', description: `DEFAULT <this>, written as ABAP: 'X', SPACE, ABAP_TRUE.` },
-      structure: { type: 'string', description: 'TABLES only: STRUCTURE <dictionary type>, the older form.' },
-      like: { type: 'string', description: 'LIKE <data object>, for an interface written that way.' }
-    },
-    required: ['name']
-  }
+  description: brief
+    ? `${what}, same shape as importing.`
+    : `${what} as data: [{name, type, byValue?, optional?, default?}]. byValue writes VALUE(NAME); the default is by reference, which is what ADT writes for a bare name. structure is TABLES only (STRUCTURE <dictionary type>, the older form), and like writes LIKE <data object>.`,
+  items: brief
+    ? { type: 'object' }
+    : {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        type: { type: 'string', description: 'ABAP type, e.g. LGNUM, STRING, ZAPP_INVOICE_LIST_TT.' },
+        byValue: { type: 'boolean', description: 'Pass by value: VALUE(NAME).' },
+        optional: { type: 'boolean', description: 'OPTIONAL.' },
+        default: { type: 'string', description: `DEFAULT <this>, written as ABAP: 'X', SPACE, ABAP_TRUE.` },
+        structure: { type: 'string' },
+        like: { type: 'string' }
+      },
+      required: ['name']
+    }
 });
 
 export class FunctionModuleHandlers extends BaseHandler {
@@ -102,9 +114,9 @@ export class FunctionModuleHandlers extends BaseHandler {
             functionGroup: { type: 'string', description: 'The group it goes into. Must exist.' },
             description: { type: 'string', description: 'Short text for the module.' },
             importing: PARAMETER_SCHEMA('Importing parameters'),
-            exporting: PARAMETER_SCHEMA('Exporting parameters'),
-            changing: PARAMETER_SCHEMA('Changing parameters'),
-            tables: PARAMETER_SCHEMA('Tables parameters'),
+            exporting: PARAMETER_SCHEMA('Exporting parameters', true),
+            changing: PARAMETER_SCHEMA('Changing parameters', true),
+            tables: PARAMETER_SCHEMA('Tables parameters', true),
             exceptions: {
               type: 'array',
               description: 'Classic exceptions, e.g. ["NOT_FOUND","NO_AUTHORITY"].',

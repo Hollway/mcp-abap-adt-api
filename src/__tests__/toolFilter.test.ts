@@ -1,6 +1,7 @@
-import { refusalFor, isAllowedDespiteReadOnly, annotationsFor } from '../lib/toolFilter';
+import { refusalFor, isAllowedDespiteReadOnly, annotationsFor, presetGroups, TOOL_PRESETS } from '../lib/toolFilter';
 import type { ToolProfile } from '../lib/toolFilter';
-import { readOnlyAllowances } from '../lib/serverConfig';
+import { MUTATING_TOOLS } from '../lib/toolClasses';
+import { readOnlyAllowances, includedTokens, toolProfileName } from '../lib/serverConfig';
 
 const profile = (over: Partial<ToolProfile> = {}): ToolProfile => ({
   readOnly: false,
@@ -81,6 +82,81 @@ describe('read-only allowance', () => {
     });
     expect(isAllowedDespiteReadOnly('debuggerAttach', 'debugger', conflicting)).toBe(false);
     expect(refusalFor('debuggerAttach', 'debugger', conflicting, SYSTEM)?.reason).toBe('excluded');
+  });
+});
+
+describe('serving a narrowed list', () => {
+  it('serves what is included and refuses the rest, saying what it does serve', () => {
+    const p = profile({ included: new Set(['source', 'package']) });
+    expect(refusalFor('getObjectSource', 'source', p, SYSTEM)).toBeUndefined();
+    expect(refusalFor('packageTree', 'package', p, SYSTEM)).toBeUndefined();
+    const refusal = refusalFor('debuggerAttach', 'debugger', p, SYSTEM);
+    expect(refusal?.reason).toBe('notIncluded');
+    expect(refusal?.message).toContain('package, source');
+  });
+
+  it('serves a tool named on its own, without its group', () => {
+    const p = profile({ included: new Set(['impactOf']) });
+    expect(refusalFor('impactOf', 'codeAnalysis', p, SYSTEM)).toBeUndefined();
+    expect(refusalFor('usageReferences', 'codeAnalysis', p, SYSTEM)?.reason).toBe('notIncluded');
+  });
+
+  it('keeps healthcheck whatever the list says, and lets exclusion win over inclusion', () => {
+    const p = profile({ included: new Set(['source']), excluded: new Set(['source']) });
+    expect(refusalFor('healthcheck', 'health', p, SYSTEM)).toBeUndefined();
+    expect(refusalFor('getObjectSource', 'source', p, SYSTEM)?.reason).toBe('excluded');
+  });
+
+  it('narrows nothing when no list was given', () => {
+    expect(refusalFor('debuggerAttach', 'debugger', profile({ included: new Set() }), SYSTEM)).toBeUndefined();
+  });
+});
+
+describe('presets', () => {
+  it('names the groups of a known preset and nothing for an unknown one', () => {
+    expect(presetGroups('read')).toContain('source');
+    expect(presetGroups('READ')).toContain('source');
+    expect(presetGroups('dev')).toContain('activation');
+    expect(presetGroups('read')).not.toContain('debugger');
+    expect(presetGroups('nope')).toEqual([]);
+    expect(presetGroups('')).toEqual([]);
+  });
+
+  it('gives every preset the health group, so a narrowed server can still say what it is', () => {
+    for (const groups of Object.values(TOOL_PRESETS)) expect(groups).toContain('health');
+  });
+
+  it('keeps read to tools that read: nothing in it changes the system', () => {
+    // The preset is a promise about the list it serves, and MUTATING_TOOLS is
+    // where that promise is kept or broken.
+    const writesInRead = [...MUTATING_TOOLS].filter(tool =>
+      ['runClass', 'setObjectSource', 'lock', 'activateSafe', 'setTextElements', 'createTransport']
+        .includes(tool));
+    expect(writesInRead.length).toBeGreaterThan(0);
+    const p = profile({ readOnly: true, included: new Set(TOOL_PRESETS.read) });
+    // codeAnalysis carries runClass, and textElement carries setTextElements:
+    // the preset narrows the list, and SAP_READONLY is what forbids writing.
+    expect(refusalFor('runClass', 'codeAnalysis', p, SYSTEM)?.reason).toBe('readOnly');
+    expect(refusalFor('setTextElements', 'textElement', p, SYSTEM)?.reason).toBe('readOnly');
+  });
+});
+
+describe('SAP_TOOLS_INCLUDE and SAP_TOOLS_PROFILE parsing', () => {
+  const saved = { ...process.env };
+  afterEach(() => { process.env = { ...saved }; });
+
+  it('is empty unless set, and splits on commas and whitespace', () => {
+    delete process.env.SAP_TOOLS_INCLUDE;
+    expect(includedTokens().size).toBe(0);
+    process.env.SAP_TOOLS_INCLUDE = 'source, package  impactOf';
+    expect([...includedTokens()].sort()).toEqual(['impactOf', 'package', 'source']);
+  });
+
+  it('reads the preset name in any case, and empty when there is none', () => {
+    delete process.env.SAP_TOOLS_PROFILE;
+    expect(toolProfileName()).toBe('');
+    process.env.SAP_TOOLS_PROFILE = ' Read ';
+    expect(toolProfileName()).toBe('read');
   });
 });
 

@@ -38,6 +38,28 @@ again, for a package changed from ADT since), the answer says how many came
 that way, and every budget it stops at is named rather than left to look like
 the package is smaller than it is. Statements are quoted only with `places`.
 
+### The tool list is context, and now it can be narrowed
+
+180 tools are described to the model before it is asked anything: about
+158,000 characters, spent on every session, most of it on tools that session
+will never call. `SAP_TOOLS_EXCLUDE` could hide a group, which is the wrong
+way round when what is wanted is ten tools out of a hundred and eighty.
+
+`SAP_TOOLS_INCLUDE` serves a list and nothing else, and `SAP_TOOLS_PROFILE`
+names a ready-made one: `min` (21 tools, 22k — find an object, read it, walk
+its package), `ddic` (40, 47k), `read` (79, 86k — everything that reads) and
+`dev` (132, 130k — no debugger, traces, ATC, git, RAP or service bindings).
+Exclusion still wins over inclusion, a tool left out is refused if called
+anyway and says what is served instead, and `healthcheck` is served whatever
+the list says: a server that cannot say which system it is on is a worse trade
+than one extra tool. It reports `toolsExposed`, `toolsTotal` and
+`toolListChars`, so the cost of the list is a number rather than a guess.
+
+No tool was merged away to make the list shorter. Names that are already being
+called keep working; the four parameter lists of `createFunctionModule`, which
+were the same schema written out four times, are the one piece of length that
+was duplication rather than knowledge.
+
 ### Two answers that read as success and were not
 
 **An activation reports what it did not do.** `activateByName` checks itself

@@ -26,10 +26,24 @@ const tokenSet = (raw: string | undefined): Set<string> => {
 
 /**
  * Tool groups or individual tool names to hide, comma or space separated
- * (SAP_TOOLS_EXCLUDE=debugger,traces,atc,git). 132 tools is a lot of context
- * to spend when a session only ever needs a handful of them.
+ * (SAP_TOOLS_EXCLUDE=debugger,traces,atc,git). The whole list is some 160,000
+ * characters of tool definitions, spent on every session before a word is
+ * said, and most sessions need a fraction of it.
  */
 export const excludedTokens = (): Set<string> => tokenSet(process.env.SAP_TOOLS_EXCLUDE);
+
+/**
+ * Tool groups or names to serve, to the exclusion of everything else
+ * (SAP_TOOLS_INCLUDE=source,package,codeAnalysis). The other way round from
+ * the exclusion list, and the cheaper one to write when a session needs ten
+ * tools out of a hundred and eighty; SAP_TOOLS_PROFILE names a ready-made set.
+ * Exclusion still wins, and healthcheck is served either way - a server that
+ * cannot say which system it is on is a worse trade than one extra tool.
+ */
+export const includedTokens = (): Set<string> => tokenSet(process.env.SAP_TOOLS_INCLUDE);
+
+/** Named set of groups to serve (SAP_TOOLS_PROFILE=read), expanded by toolFilter. */
+export const toolProfileName = (): string => (process.env.SAP_TOOLS_PROFILE || '').trim().toLowerCase();
 
 /**
  * Groups or tool names allowed through despite SAP_READONLY

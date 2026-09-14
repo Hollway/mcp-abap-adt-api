@@ -95,6 +95,59 @@ const call = async (name, args = {}) => {
   return { isError: response.result.isError === true, payload };
 };
 
+/**
+ * A second server, started with extra environment, driven once and stopped.
+ *
+ * The tool list is the one thing a server decides before anything is asked of
+ * it, so the only way to check that narrowing it works is to start one that
+ * way. Answers whatever the given call returns; with no call, the tool list.
+ */
+const onServer = async (env, name, args) => {
+  const other = spawn(process.execPath, [server], {
+    env: { ...process.env, ...env },
+    stdio: ['pipe', 'pipe', 'ignore']
+  });
+  let rest = '';
+  const waiting = new Map();
+  other.stdout.on('data', chunk => {
+    rest += chunk.toString();
+    let cut;
+    while ((cut = rest.indexOf('\n')) >= 0) {
+      const line = rest.slice(0, cut).trim();
+      rest = rest.slice(cut + 1);
+      if (!line) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.id !== undefined && waiting.has(message.id)) {
+          waiting.get(message.id)(message);
+          waiting.delete(message.id);
+        }
+      } catch { /* not a protocol line */ }
+    }
+  });
+  const ask = (id, method, params) => new Promise((resolve, reject) => {
+    waiting.set(id, resolve);
+    other.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    setTimeout(() => reject(new Error(`timeout waiting for ${method}`)), 60000);
+  });
+  try {
+    await ask(1, 'initialize', {
+      protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'smoke', version: '0' }
+    });
+    other.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    if (!name) return (await ask(2, 'tools/list', {})).result.tools;
+    const response = await ask(2, 'tools/call', { name, arguments: args || {} });
+    const item = response.result && response.result.content && response.result.content[0];
+    let payload = item && item.text;
+    try { payload = JSON.parse(item.text); } catch { /* plain text */ }
+    return { isError: response.result.isError === true, payload };
+  } finally {
+    other.kill();
+  }
+};
+const toolsListOf = env => onServer(env);
+const callOn = (env, name, args) => onServer(env, name, args);
+
 let failures = 0;
 const check = (label, condition, detail) => {
   if (condition) {
@@ -848,6 +901,29 @@ const check = (label, condition, detail) => {
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
+
+  // A second server, started the way an operator would start a narrowed one.
+  // The whole tool list is the largest single thing this server sends, and
+  // this is the check that narrowing it actually narrows it.
+  const narrowed = await toolsListOf({ SAP_TOOLS_PROFILE: 'min' });
+  check(`SAP_TOOLS_PROFILE=min serves fewer tools than the full list (${narrowed.length} of ${tools.length})`,
+    narrowed.length > 0 && narrowed.length < tools.length);
+  check('a narrowed server still serves healthcheck, so it can say what it is',
+    narrowed.some(tool => tool.name === 'healthcheck'));
+  check('a narrowed server drops the groups the preset leaves out',
+    !narrowed.some(tool => tool.name.startsWith('debugger') || tool.name.startsWith('traces')));
+  check('a narrowed tool list is smaller in characters, which is the point of it',
+    JSON.stringify(narrowed).length < JSON.stringify(tools).length);
+
+  const named = await toolsListOf({ SAP_TOOLS_INCLUDE: 'impactOf' });
+  check('SAP_TOOLS_INCLUDE serves a single tool named on its own',
+    named.length === 2 && named.some(tool => tool.name === 'impactOf'),
+    named.map(tool => tool.name));
+
+  const refused = await callOn({ SAP_TOOLS_INCLUDE: 'impactOf' }, 'packageTree', { packageName: PACKAGE_NAME });
+  check('a tool left out of the list is refused when called anyway',
+    refused.isError === true && /not in SAP_TOOLS_INCLUDE/.test(JSON.stringify(refused.payload)),
+    refused.payload);
 
   console.log(failures === 0 ? '\nall smoke checks pass' : `\n${failures} smoke check(s) failed`);
   child.kill();
