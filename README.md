@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 180 tools, read-only guardrails and 942 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 180 tools, read-only guardrails and 944 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 

@@ -611,6 +611,26 @@ describe('callsFrom', () => {
     expect(result.sourcesScanned.map((entry: any) => entry.name)).toEqual(['ZAPP_FG', 'LZAPP_FGTOP', 'LZAPP_FGU01']);
   });
 
+  it('follows the include chain of a group to the end, where the function modules are', async () => {
+    // A group names LZAPP_FGUXX in its main source, and that include is
+    // nothing but the INCLUDE lines of the function module bodies. Stopping at
+    // the first level reads the forms and misses every module the group has.
+    const read: string[] = [];
+    const { handler } = handlers({
+      getObjectSource: async (url: string) => {
+        read.push(url);
+        if (url.includes('lzapp_fguxx')) return 'INCLUDE lzapp_fgu01.';
+        if (url.includes('lzapp_fgu01')) return GROUP_INCLUDE;
+        if (url.includes('/includes/')) return '';
+        return 'FUNCTION-POOL zapp_fg.\nINCLUDE lzapp_fgtop.\nINCLUDE lzapp_fguxx.';
+      }
+    });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZAPP_FG', objectType: 'FUGR/F' }));
+    expect(result.sourcesScanned.map((entry: any) => entry.name))
+      .toEqual(['ZAPP_FG', 'LZAPP_FGTOP', 'LZAPP_FGUXX', 'LZAPP_FGU01']);
+    expect(result.calls.some((entry: any) => entry.target === 'ZCL_APP_HELPER')).toBe(true);
+  });
+
   it('falls back to the report include collection when the group does not serve one, and reports one it cannot read', async () => {
     const read: string[] = [];
     const { handler } = handlers({

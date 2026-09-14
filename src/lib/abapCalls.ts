@@ -561,7 +561,12 @@ function scan(
       if (BUILT_IN_TYPE.has(upper) || locals.declared.has(upper)) return;
       add(statement, 'type', upper, field);
     };
-    for (const match of text.matchAll(TYPED)) namesAType(match[1], match[2]);
+    for (const match of text.matchAll(TYPED)) {
+      // `define type zytrproj { ... }` is how this backend serves the source of
+      // a structure: the object naming itself, not a dependency on anything.
+      if (/\bDEFINE\s*$/i.test(text.slice(0, match.index))) continue;
+      namesAType(match[1], match[2]);
+    }
     const forField = FOR_FIELD.exec(text);
     if (forField) namesAType(forField[1], forField[2]);
 

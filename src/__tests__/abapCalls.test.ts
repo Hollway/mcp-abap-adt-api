@@ -251,6 +251,12 @@ describe('types named in declarations', () => {
     expect(typed('TYPES ty_row TYPE zorders.\nDATA ls_row TYPE ty_row.')).toEqual(['ZORDERS']);
   });
 
+  it('does not read the definition of a structure as a dependency on itself', () => {
+    // How this backend serves a TABL/DT source - found on ZYTRPROJ, which
+    // came out of the package graph calling itself.
+    expect(typed('define type zytrproj { key mandt : mandt not null; }')).toEqual([]);
+  });
+
   it('keeps a type owned by a class a reference to that class, not a type of its own', () => {
     const found = extractCalls('DATA lt_return TYPE zcl_mm_return=>tt_return.');
     expect(found.calls.map(call => `${call.kind}/${call.target}`)).toEqual(['reference/ZCL_MM_RETURN']);

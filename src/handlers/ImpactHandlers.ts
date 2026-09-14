@@ -32,6 +32,9 @@ const MAX_UNRESOLVED_LISTED = 25;
 /** BFS budget for abapPath: how many objects it will fetch usageReferences for before giving up. */
 const MAX_PATH_NODES = 300;
 const DEFAULT_MAX_PATH_DEPTH = 8;
+/** How far an include chain is followed, and how many includes are read in all. */
+const MAX_INCLUDE_DEPTH = 5;
+const MAX_INCLUDES = 60;
 /** How many objects of a package abapGraph reads, and how many sources in all. */
 const DEFAULT_GRAPH_OBJECTS = 60;
 const DEFAULT_GRAPH_SOURCES = 200;
@@ -530,6 +533,11 @@ export class ImpactHandlers extends BaseHandler {
    * asked for, and its includes live under the group rather than among the
    * report includes. A report is followed only when asked, because its
    * includes are one call each.
+   *
+   * Followed to the end, not one level: a function group names LZFOOUXX in its
+   * main source, and LZFOOUXX is nothing but the INCLUDE lines of the function
+   * module bodies. Stopping at the first level reads the group's forms and
+   * misses every function module it has - which is most of what a group is.
    */
   private async readIncludes(
     main: string,
@@ -540,27 +548,38 @@ export class ImpactHandlers extends BaseHandler {
     const sources: Array<{ name: string; source: string }> = [];
     const unread: Array<{ name: string; error: string }> = [];
     const isGroup = objectType.startsWith('FUGR');
-    for (const name of includedPrograms(main)) {
-      const urls = isGroup && groupName
-        ? [
-          `/sap/bc/adt/functions/groups/${encodeURIComponent(groupName.toLowerCase())}/includes/${encodeURIComponent(name.toLowerCase())}/source/main`,
-          includeSourceUrl(name)
-        ]
-        : [includeSourceUrl(name)];
-      let lastError = '';
-      let wasRead = false;
-      for (const url of urls) {
-        try {
-          sources.push({ name, source: await read(url) });
-          wasRead = true;
-          break;
-        } catch (error: any) {
-          lastError = error?.message || `${error}`;
+    const seen = new Set<string>();
+    let level = includedPrograms(main);
+
+    for (let depth = 0; depth < MAX_INCLUDE_DEPTH && level.length; depth++) {
+      const next: string[] = [];
+      for (const name of level) {
+        if (seen.has(name) || sources.length >= MAX_INCLUDES) continue;
+        seen.add(name);
+        const urls = isGroup && groupName
+          ? [
+            `/sap/bc/adt/functions/groups/${encodeURIComponent(groupName.toLowerCase())}/includes/${encodeURIComponent(name.toLowerCase())}/source/main`,
+            includeSourceUrl(name)
+          ]
+          : [includeSourceUrl(name)];
+        let lastError = '';
+        let wasRead = false;
+        for (const url of urls) {
+          try {
+            const source = await read(url);
+            sources.push({ name, source });
+            next.push(...includedPrograms(source));
+            wasRead = true;
+            break;
+          } catch (error: any) {
+            lastError = error?.message || `${error}`;
+          }
         }
+        // An include that cannot be read is reported, not thrown: one generated
+        // or system include among twenty is no reason to lose the other nineteen.
+        if (!wasRead) unread.push({ name, error: lastError });
       }
-      // An include that cannot be read is reported, not thrown: one generated
-      // or system include among twenty is no reason to lose the other nineteen.
-      if (!wasRead) unread.push({ name, error: lastError });
+      level = next;
     }
     return { sources, unread };
   }
