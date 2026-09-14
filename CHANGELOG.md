@@ -84,17 +84,33 @@ contradicted what the fallback was going to assume:
 
 ### What the live run found
 
-The first run against a real program wrote a selection text back as the last
-two letters of itself. `|{ lv_prefix }| && text` looks like the obvious way to
-put the eight flag characters in front of a text, and a string template
-converts the C field and **drops its trailing blanks**: the `D` of a dictionary
-flag landed straight against the text, the row was written as `DText` instead of
-`D       Text`, and the next read - cutting the eight characters off, as it
-must - handed back the text minus its first seven letters.
+`|{ lv_prefix }| && text` looks like the obvious way to put the eight flag
+characters in front of a selection text, and it is wrong: a string template
+converts the C field and **drops its trailing blanks**. The bug showed itself
+twice on the same day, from both ends.
 
-The flags now go in by offset (`ls_new-entry(8) = lv_prefix.`), which keeps
-every blank, and a test holds the string template out. Nothing else in the
-generated ABAP interpolates a character field whose blanks matter.
+- **A new selection text lost its first eight characters.** With no existing
+  row the flags are eight blanks, the template turned them into nothing, and
+  the bare text went in at offset 0 - so the read, cutting eight characters off
+  as it must, handed back `" в ТС ПиоТ"` for a text that read
+  `"Проверка в ТС ПиоТ"`. Writing it a second time made it worse: the corrupted
+  row's first eight characters were now letters, and they were carried over as
+  flags.
+- **An existing text with a dictionary flag came back as the last two letters
+  of itself.** The `D` landed straight against the text - `DText` instead of
+  `D       Text` - and the read cut into the text.
+
+So `setTextElements` could edit an existing unflagged text and nothing else.
+The flags now go in by offset, which keeps every blank:
+
+```abap
+ls_new-entry(8) = lv_prefix.
+ls_new-entry+8 = `text`.
+```
+
+A test holds the string template out of that spot. Nothing else in the
+generated ABAP interpolates a character field whose blanks matter - the row
+printing drops only the trailing blanks of a text, which are padding.
 
 ### Tests
 
