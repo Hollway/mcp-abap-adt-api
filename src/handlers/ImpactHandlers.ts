@@ -7,6 +7,9 @@ import { objectUrlFor, sourceUrlFor } from '../lib/packageWalk';
 import { locateMethod, classSourceUrl, interfaceSourceUrl } from '../lib/symbolPosition';
 import { rollUpUsages } from '../lib/impact';
 import type { ImpactObject, ImpactPlace, UsageRow } from '../lib/impact';
+import { includedPrograms, includeSourceUrl } from '../lib/sourceScan';
+import { extractCalls, groupCalls, CALL_KINDS } from '../lib/abapCalls';
+import type { CallSite, UnresolvedCall } from '../lib/abapCalls';
 
 /**
  * What depends on an object - the question asked before changing one.
@@ -19,6 +22,8 @@ import type { ImpactObject, ImpactPlace, UsageRow } from '../lib/impact';
  */
 
 const MAX_BRANCHES = 25;
+/** How many unresolved calls callsFrom lists before it only counts them. */
+const MAX_UNRESOLVED_LISTED = 25;
 /** BFS budget for abapPath: how many objects it will fetch usageReferences for before giving up. */
 const MAX_PATH_NODES = 300;
 const DEFAULT_MAX_PATH_DEPTH = 8;
@@ -107,6 +112,53 @@ export class ImpactHandlers extends BaseHandler {
           },
           required: []
         }
+      },
+      {
+        name: 'callsFrom',
+        description: 'What an object\'s own code calls: the other direction of impactOf. No backend call answers this - the where-used index only knows who calls whom, one object at a time - so the source is read and scanned. Answers with the objects reached, grouped by target, each with the lines that reach it: methods and constructors, function modules, forms and programs, transactions, database tables, what the class inherits and implements, and the includes it pulls in. This is scanning, not parsing: a macro hides what it expands to, and a name built at runtime cannot be known before the program runs - every such call is listed as unresolved with the reason, so a missing edge is named rather than silently absent.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            objectName: {
+              type: 'string',
+              description: 'Object whose code to scan, e.g. ZCL_APP_ORDER. Use with objectType.'
+            },
+            objectType: {
+              type: 'string',
+              description: 'ADT type: CLAS/OC, INTF/OI, PROG/P, PROG/I, FUGR/F. Defaults to CLAS/OC.'
+            },
+            sourceUrl: {
+              type: 'string',
+              description: 'Source URL to scan instead, e.g. /sap/bc/adt/programs/programs/zr_app/source/main.'
+            },
+            kinds: {
+              type: 'array',
+              description: `Only these kinds of call: ${CALL_KINDS.join(', ')}. All of them by default.`,
+              items: { type: 'string' }
+            },
+            onlyCustom: {
+              type: 'boolean',
+              description: 'Keep only Z*, Y* and /namespace/ targets (default true). Standard SAP calls are counted, not listed - a class that calls CL_GUI and CX_ROOT everywhere would otherwise bury its own dependencies.'
+            },
+            followIncludes: {
+              type: 'boolean',
+              description: 'Also read the includes the source names. A function group is read this way whichever way this is set: its main source holds nothing but INCLUDE lines, and every function module body lives in one of them.'
+            },
+            maxTargets: {
+              type: 'number',
+              description: 'How many targets to list. Default 100.'
+            },
+            maxPlacesPerTarget: {
+              type: 'number',
+              description: 'How many call sites to list per target. Default 8; the rest are counted.'
+            },
+            maxStatementChars: {
+              type: 'number',
+              description: 'How much of each statement to quote, default 160.'
+            }
+          },
+          required: []
+        }
       }
     ];
   }
@@ -117,6 +169,8 @@ export class ImpactHandlers extends BaseHandler {
         return this.handleImpactOf(args);
       case 'abapPath':
         return this.handleAbapPath(args);
+      case 'callsFrom':
+        return this.handleCallsFrom(args);
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown impact tool: ${toolName}`);
     }
@@ -364,6 +418,180 @@ export class ImpactHandlers extends BaseHandler {
       this.trackRequest(startTime, false);
       if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to work out what depends on ${label}`);
+    }
+  }
+
+  /** Where the text of the object to scan lives, and what to call it in the answer. */
+  private resolveSource(args: any): { sourceUrl: string; label: string; objectType: string; name: string } {
+    const name = String(args?.objectName || '').trim();
+    const objectType = String(args?.objectType || 'CLAS/OC').trim().toUpperCase();
+    if (name) {
+      const url = sourceUrlFor(objectType, name);
+      if (!url) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `No ADT source is served for a ${objectType}. Pass sourceUrl instead, or use a type that has text.`
+        );
+      }
+      return { sourceUrl: url, label: `${name.toUpperCase()} (${objectType})`, objectType, name: name.toUpperCase() };
+    }
+    const sourceUrl = String(args?.sourceUrl || '').trim();
+    if (!sourceUrl) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Whose calls? Pass objectName (with objectType) or sourceUrl.'
+      );
+    }
+    const fromUrl = decodeURIComponent(
+      sourceUrl.split('#')[0].replace(/\/source\/main$/, '').split('/').filter(Boolean).pop() || ''
+    ).toUpperCase();
+    return { sourceUrl, label: fromUrl || sourceUrl, objectType, name: fromUrl };
+  }
+
+  /**
+   * The includes of an object, where its code really sits.
+   *
+   * A function group serves nothing but INCLUDE lines at its own URL - every
+   * function module body is in an include - so it is followed whatever was
+   * asked for, and its includes live under the group rather than among the
+   * report includes. A report is followed only when asked, because its
+   * includes are one call each.
+   */
+  private async readIncludes(
+    main: string,
+    objectType: string,
+    groupName: string
+  ): Promise<{ sources: Array<{ name: string; source: string }>; unread: Array<{ name: string; error: string }> }> {
+    const sources: Array<{ name: string; source: string }> = [];
+    const unread: Array<{ name: string; error: string }> = [];
+    const isGroup = objectType.startsWith('FUGR');
+    for (const name of includedPrograms(main)) {
+      const urls = isGroup && groupName
+        ? [
+          `/sap/bc/adt/functions/groups/${encodeURIComponent(groupName.toLowerCase())}/includes/${encodeURIComponent(name.toLowerCase())}/source/main`,
+          includeSourceUrl(name)
+        ]
+        : [includeSourceUrl(name)];
+      let lastError = '';
+      let read = false;
+      for (const url of urls) {
+        try {
+          sources.push({ name, source: await this.readClient.getObjectSource(url) });
+          read = true;
+          break;
+        } catch (error: any) {
+          lastError = error?.message || `${error}`;
+        }
+      }
+      // An include that cannot be read is reported, not thrown: one generated
+      // or system include among twenty is no reason to lose the other nineteen.
+      if (!read) unread.push({ name, error: lastError });
+    }
+    return { sources, unread };
+  }
+
+  /**
+   * Read the object's text and scan it for what it reaches.
+   *
+   * The whole answer comes from the source, so what is in the source is what
+   * can be found: nothing here asks the backend to confirm that a target
+   * exists, and nothing is filtered out by whether it does.
+   */
+  async handleCallsFrom(args: any): Promise<any> {
+    const { sourceUrl, label, objectType, name } = this.resolveSource(args);
+    const kinds = Array.isArray(args?.kinds)
+      ? args.kinds.map((kind: any) => String(kind).trim().toLowerCase())
+      : undefined;
+    const unknownKind = kinds?.find((kind: string) => !CALL_KINDS.includes(kind as any));
+    if (unknownKind) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `kinds: '${unknownKind}' is not one of ${CALL_KINDS.join(', ')}.`
+      );
+    }
+    const onlyCustom = args?.onlyCustom !== false;
+    const wantIncludes = args?.followIncludes === true || objectType.startsWith('FUGR');
+
+    const startTime = performance.now();
+    try {
+      const main = await this.readClient.getObjectSource(sourceUrl);
+      const scanned: Array<{ name: string; source: string }> = [{ name: name || label, source: main }];
+      let includesUnread: Array<{ name: string; error: string }> = [];
+      if (wantIncludes) {
+        const read = await this.readIncludes(main, objectType, name);
+        scanned.push(...read.sources);
+        includesUnread = read.unread;
+      }
+
+      const calls: CallSite[] = [];
+      const unresolved: UnresolvedCall[] = [];
+      let statements = 0;
+      let standardTargetsHidden = 0;
+      for (const source of scanned) {
+        const found = extractCalls(source.source, { onlyCustom, kinds });
+        const many = scanned.length > 1;
+        for (const call of found.calls) calls.push(many ? { ...call, source: source.name } : call);
+        for (const entry of found.unresolved) unresolved.push(many ? { ...entry, source: source.name } : entry);
+        statements += found.statements;
+        standardTargetsHidden += found.standardTargetsHidden;
+      }
+
+      const { targets, targetsHidden } = groupCalls(calls, {
+        maxTargets: Number(args?.maxTargets) || undefined,
+        maxPlacesPerTarget: Number(args?.maxPlacesPerTarget) || undefined,
+        maxStatementChars: Number(args?.maxStatementChars) || undefined
+      });
+
+      const byKind: Record<string, number> = {};
+      for (const call of calls) byKind[call.kind] = (byKind[call.kind] || 0) + 1;
+
+      this.trackRequest(startTime, true);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            status: 'success',
+            target: { object: label, sourceUrl },
+            sourcesScanned: scanned.map(source => ({
+              name: source.name,
+              lines: source.source.split(/\r?\n/).length
+            })),
+            ...(includesUnread.length ? { includesUnread } : {}),
+            summary: {
+              targets: targets.length + targetsHidden,
+              calls: calls.length,
+              statements,
+              byKind
+            },
+            ...(standardTargetsHidden ? { standardTargetsHidden } : {}),
+            ...(targetsHidden
+              ? {
+                targetsHidden,
+                note: `Listing ${targets.length} targets; raise maxTargets to see the rest.`
+              }
+              : {}),
+            calls: targets,
+            ...(unresolved.length
+              ? {
+                unresolved: unresolved.slice(0, MAX_UNRESOLVED_LISTED),
+                unresolvedNote: `${unresolved.length} call(s) name their target at runtime, or through a reference this source does not declare${unresolved.length > MAX_UNRESOLVED_LISTED ? `; listing the first ${MAX_UNRESOLVED_LISTED}` : ''}. Each is a real edge this answer cannot name - usageReferences on the suspected target, or impactOf, is how to settle one.`
+              }
+              : {}),
+            ...(calls.length === 0
+              ? {
+                emptyNote: wantIncludes
+                  ? 'Nothing was found in the source or its includes. An object that only declares data, or one whose work is all in macros, looks exactly like this.'
+                  : 'Nothing was found in this source. A program whose code lives in its includes looks exactly like this - pass followIncludes to read them.'
+              }
+              : {}),
+            scanNote: 'Read from the source text, not from the where-used index: what a macro expands to is not seen, and no target is checked against the repository. Targets outside Z*, Y* and /namespace/ are counted only, unless onlyCustom is false.'
+          }, null, 2)
+        }]
+      };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      if (error instanceof McpError) throw error;
+      throw wrapAdtError(error, `Failed to work out what ${label} calls`);
     }
   }
 
