@@ -1,10 +1,10 @@
 {
   "name": "mcp-abap-adt-api",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "mcpName": "io.github.hollway/mcp-abap-adt-api",
-  "main": "dist/index.js",
+  "main": "dist/main.js",
   "bin": {
-    "mcp-abap-adt-api": "dist/index.js"
+    "mcp-abap-adt-api": "dist/main.js"
   },
   "files": [
     "dist"
@@ -14,8 +14,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "build": "tsc -p tsconfig.json",
-    "start": "node ./dist/index.js",
-    "dev": "npx @modelcontextprotocol/inspector ./dist/index.js",
+    "start": "node ./dist/main.js",
+    "dev": "npx @modelcontextprotocol/inspector ./dist/main.js",
     "smoke": "node scripts/smoke.js"
   },
   "keywords": [

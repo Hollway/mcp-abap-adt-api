@@ -25,7 +25,7 @@ const RAW = [
     version: 'DEVK9A3NT8',
     versionTitle: 'TASK-1002 Новый интерфейс',
     date: '2026-08-27T07:19:44Z',
-    author: 'ABELICHENKO'
+    author: 'JSMITH'
   }
 ];
 
@@ -115,7 +115,7 @@ describe('revisions', () => {
 
   it('filters by author, transport and description', async () => {
     const { handler } = handlers();
-    const byAuthor = answer(await handler.handleRevisions({ objectName: 'zcl_app', author: 'abelichenko' }));
+    const byAuthor = answer(await handler.handleRevisions({ objectName: 'zcl_app', author: 'jsmith' }));
     expect(byAuthor).toMatchObject({ total: 3, matched: 1 });
     expect(byAuthor.revisions[0].revision).toBe('00088');
 

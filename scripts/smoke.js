@@ -46,7 +46,7 @@ const ATC_OBJECT = (process.env.SMOKE_ATC_OBJECT || '').toUpperCase();
 // Reading a trace needs one that is closed, unexpired and not aggregated, which
 // no system is guaranteed to hold - name one with SMOKE_TRACE_ID to check it.
 const TRACE_ID = process.env.SMOKE_TRACE_ID || '';
-const server = path.resolve(__dirname, '..', 'dist', 'index.js');
+const server = path.resolve(__dirname, '..', 'dist', 'main.js');
 
 const child = spawn(process.execPath, [server], {
   env: process.env,

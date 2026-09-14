@@ -1,12 +1,75 @@
 # Changelog
 
-This fork adds tools, guardrails and tests on top of the upstream server. Every
-version below was developed against live SAP systems (a classic ERP system, an
-S/4 system and a read-only QA system), and the entries record what the backend
-actually does — not what its documentation implies.
+Every version below was developed against live SAP systems (a classic ERP
+system, an S/4 system and a read-only QA system), and the entries record what
+the backend actually does — not what its documentation implies.
 
-The versions here were never published to npm: `package.json` stays on the
-upstream `0.1.1`, and the numbers below are the history of this fork.
+The versions here are not published to a registry; the numbers track the work
+rather than a release.
+
+## [1.0.0] — one server for everybody
+
+The server now speaks two transports. **stdio** is unchanged: one process per
+user, started by the MCP client, credentials from the environment. **http**
+(`MCP_TRANSPORT=http`) makes one process serve everybody, with each caller
+sending their own SAP credentials as HTTP Basic on every request.
+
+### Sessions, and why they are pooled
+
+The credentials name a **pooled SAP session**, reused across requests. A
+session per request - the obvious translation, and the one this replaces -
+leaves a session behind on the backend for every call ever made, and makes a
+lock taken by one request unusable by the next, because the handle dies with
+the session that took it.
+
+- Sessions are keyed by user, closed on idle limits, on `logout`, by an
+  operator, or on shutdown. Closing releases the locks first, deliberately,
+  and names them in the log.
+- **Both** sessions a user costs are logged off: the stateful one and the
+  stateless clone the reads travel on. Missing the clone would leave half the
+  sessions behind.
+- Two idle limits: 15 minutes with no locks, 28 minutes with them. The locked
+  one is measured from the last use of the *stateful* session - reads keep the
+  clone alive while the session holding the locks quietly expires - and stays
+  inside the backend timeout so the locks come off deliberately rather than by
+  expiry. The server warns at startup if it does not.
+- That last use is observed on the client rather than inferred from which
+  tool was called. The first attempt listed the tools known to use the
+  stateful session, and the list was quietly wrong: `healthcheck`, `atcCheck`
+  and `inactiveObjects` read through it too, so their calls kept the SAP
+  session alive while the pool believed it idle - and would have closed it,
+  locks and all, under somebody still working.
+- The pool never pings SAP to keep a session warm: a keep-alive would turn a
+  forgotten lock into a permanent one.
+- Writes on one session are serialised; reads are not, and go to the clone.
+
+### One caller cannot see another
+
+Locks, the source cache and the per-caller counters resolve per session
+(`AsyncLocalStorage`). `unlockAll` releases only its own caller's locks, and a
+cached read is never handed to another user - two people do not have the same
+authorisations. Over stdio the behaviour is exactly as before.
+
+### The endpoint
+
+`POST /mcp` with HTTP Basic; `401` with `WWW-Authenticate` when it is missing,
+`413` above the body limit, `503` with `Retry-After` when the pool is full -
+naming who holds it - or when too many calls are already running. `/health`,
+`/ready`, `/metrics`, and `GET`/`DELETE /sessions` behind `SAP_ADMIN_TOKEN`.
+
+Neither probe reports on SAP: it is a dependency every replica shares, and
+failing on it would empty the service of endpoints without helping. The state
+of the backend is a passive signal on `/metrics`, built from real traffic - no
+probe, no technical user.
+
+### Operational
+
+- Graceful shutdown on SIGTERM and SIGINT, and on an uncaught error: stop
+  taking work, let what is in flight finish, then log every session off.
+- Every log line written while serving a request carries the request id, the
+  caller and the tool.
+- Deploy **one replica**: the pool lives in the memory of one process, so a
+  lock taken through one pod and a write routed to another would not meet.
 
 ## [0.9.1] — the project goes by one name
 
@@ -335,8 +398,8 @@ after this the library cannot do at all.
 
 ### Tool descriptions
 
-- **112 of 171** tools carried upstream one-line stubs ("Runs a class.", "Lock
-  an object", "Deletes a trace."). The description is the only thing a model
+- **112 of 171** tools carried one-line stubs ("Runs a class.", "Lock an
+  object", "Deletes a trace."). The description is the only thing a model
   picks a tool by, and not one measured limit had made it in. They are now
   detailed where behaviour is non-obvious (locks, deletion, activation,
   transports, debugger, refactorings, reading data) and one exact line where the
