@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 177 tools, read-only guardrails and 679 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 178 tools, read-only guardrails and 870 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -25,9 +25,9 @@ The server is not published to a package registry: clone the repository, build i
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
-- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools.
+- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools. `registerInTransport` puts an object into a request by hand, for the writes that do not register themselves - it resolves a request to your own open task, names what each of the 67 exceptions of `TR_APPEND_TO_COMM_OBJS_KEYS` means, and verifies the entry in `E071` instead of trusting `sy-subrc`.
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC - `atcCheck` runs the checks over an object or a package and reports the findings, `atcDocumentation` gives the rule text - traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
-- **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it - the write locks the text pool rather than the object, and activates both rows it leaves inactive.
+- **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it - the write locks the text pool rather than the object, and activates both rows it leaves inactive. On a release that serves no `/sap/bc/adt/textelements` at all they fall back to `READ`/`INSERT TEXTPOOL` in a throwaway class, which needs neither lock nor activation; the answer says which way it went in `via`. That path also writes the program title, which ADT serves nowhere, and registers the object in a request - `registerInTransport` does that on its own too, resolving a request to your own task and verifying the entry in `E071` rather than trusting `sy-subrc`.
 - **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
 - **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.

@@ -5,8 +5,37 @@ import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 import type { TransportsOfUser, TransportTarget, TransportRequest } from "abap-adt-api";
 import { filterUsers } from '../lib/userList';
+import { CallHandlers } from './CallHandlers.js';
+import { QueryHandlers } from './QueryHandlers.js';
+import {
+    TransportRegistrationError,
+    buildE071Row,
+    chooseTask,
+    diagnose,
+    headerSql,
+    holdersSql,
+    isLocalPackage,
+    packageSql,
+    registeredSql,
+    tasksSql,
+    transportNumber,
+    type E071Row,
+    type TransportHeaderRow
+} from '../lib/transportRegistration';
 
 export class TransportHandlers extends BaseHandler {
+    private readonly calls: CallHandlers;
+    private readonly queries: QueryHandlers;
+
+    constructor(client: ADTClient) {
+        super(client);
+        // Calling a function module and reading a table are jobs this server
+        // already does properly - signature, generated call, exceptions by name
+        // on one side, and SELECT on the other. Borrowed rather than repeated.
+        this.calls = new CallHandlers(client);
+        this.queries = new QueryHandlers(client);
+    }
+
     getTools(): ToolDefinition[] {
         return [
             {
@@ -322,12 +351,45 @@ export class TransportHandlers extends BaseHandler {
                     },
                     required: ['pgmid', 'obj_wbtype', 'obj_name']
                 }
+            },
+            {
+                name: 'registerInTransport',
+                description: 'Put an object into a transport request by hand, for the writes that do not register themselves - INSERT TEXTPOOL being the one this server hits. Without it the change works here and never reaches the next system. Pass the request: your own open task in it is found and used, because the function module behind this (TR_APPEND_TO_COMM_OBJS_KEYS) wants the task, not the request. The registration is verified by reading the row back out of E071 rather than trusting sy-subrc, and the 67 exceptions of that module come back as a sentence. Pass simulate to see whether it would be accepted without writing anything.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        objName: {
+                            type: 'string',
+                            description: 'Object name, e.g. ZR_APP_FOO.'
+                        },
+                        object: {
+                            type: 'string',
+                            description: 'Object type as the transport system spells it: PROG, CLAS, TABL, REPT (a text pool), ...'
+                        },
+                        pgmid: {
+                            type: 'string',
+                            description: 'R3TR for a whole object (default), LIMU for a part of one - R3TR PROG moves a program with its text pool, LIMU REPT the pool alone.',
+                            enum: ['R3TR', 'LIMU']
+                        },
+                        transport: {
+                            type: 'string',
+                            description: 'Request or task number. A request is resolved to your own open task in it; somebody else\'s task is refused rather than written to.'
+                        },
+                        simulate: {
+                            type: 'boolean',
+                            description: 'Ask the module whether it would accept the entry, without writing it (default false).'
+                        }
+                    },
+                    required: ['objName', 'object', 'transport']
+                }
             }
         ];
     }
 
     async handle(toolName: string, args: any): Promise<any> {
         switch (toolName) {
+            case 'registerInTransport':
+                return this.handleRegisterInTransport(args);
             case 'transportInfo':
                 return this.handleTransportInfo(args);
             case 'createTransport':
@@ -917,5 +979,175 @@ export class TransportHandlers extends BaseHandler {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get transport reference');
         }
+    }
+
+    /** Rows of a SELECT, through the tool that already runs them. */
+    private async queryRows(sqlQuery: string, rowNumber = 50): Promise<Record<string, string>[]> {
+        const result = await this.queries.handleRunQuery({ sqlQuery, rowNumber });
+        const payload = JSON.parse(result.content[0].text);
+        const values = payload?.result?.values;
+        return Array.isArray(values) ? values : [];
+    }
+
+    /**
+     * Where the object already sits.
+     *
+     * OB_LOCKED_BY_OTHER is the common refusal and the least self-explanatory:
+     * an object lives in one open request at a time, and the answer the caller
+     * needs is which one - not that there is one.
+     */
+    private async holders(row: E071Row): Promise<Record<string, string>[]> {
+        try {
+            return await this.queryRows(holdersSql(row), 10);
+        } catch {
+            // A courtesy lookup must not replace the original diagnosis with an
+            // error about the lookup.
+            return [];
+        }
+    }
+
+    /**
+     * Whether an object would travel: its package, and the open requests that
+     * already carry it.
+     *
+     * Written for the tools that change something a transport does not pick up
+     * by itself. The trap it exists to name was measured: a program's selection
+     * texts were changed, the request held only its includes, and the texts
+     * would have stayed behind in the development system without a word.
+     */
+    async registrationState(spec: { pgmid?: string; object: string; objName: string }): Promise<{
+        row: E071Row;
+        local: boolean;
+        devclass?: string;
+        openRequests: Record<string, string>[];
+    }> {
+        const row = buildE071Row(spec);
+        const tadir = await this.queryRows(packageSql(row), 1);
+        const devclass = tadir[0]?.DEVCLASS;
+        if (isLocalPackage(devclass)) {
+            return { row, local: true, devclass, openRequests: [] };
+        }
+        return { row, local: false, devclass, openRequests: await this.holders(row) };
+    }
+
+    async handleRegisterInTransport(args: any): Promise<any> {
+        let row: E071Row;
+        let given: string;
+        try {
+            row = buildE071Row({ pgmid: args?.pgmid, object: args?.object, objName: args?.objName });
+            given = transportNumber(args?.transport);
+        } catch (error: any) {
+            if (error instanceof TransportRegistrationError) {
+                throw new McpError(ErrorCode.InvalidParams, error.message);
+            }
+            throw error;
+        }
+
+        const user = String(this.adtclient.username || '').toUpperCase();
+        const simulate = args?.simulate === true;
+        const steps: Record<string, unknown>[] = [];
+
+        // Which task to write to. A request is resolved here rather than in the
+        // module, which takes a request number and quietly does nothing useful
+        // with it.
+        const header = (await this.queryRows(headerSql(given), 1))[0] as TransportHeaderRow | undefined;
+        const tasks = header && !String(header.STRKORR || '').trim()
+            ? await this.queryRows(tasksSql(given)) as TransportHeaderRow[]
+            : [];
+        let choice;
+        try {
+            choice = chooseTask(given, header, tasks, user);
+        } catch (error: any) {
+            if (error instanceof TransportRegistrationError) {
+                throw new McpError(ErrorCode.InvalidParams, error.message);
+            }
+            throw error;
+        }
+        steps.push({ step: 'resolveTask', task: choice.task, resolvedFrom: choice.resolvedFrom, ...(choice.request ? { request: choice.request } : {}) });
+
+        const called = await this.calls.handleCallFunction({
+            name: 'TR_APPEND_TO_COMM_OBJS_KEYS',
+            values: {
+                WI_TRKORR: choice.task,
+                WI_SIMULATION: simulate ? 'X' : ' ',
+                WT_E071: [row],
+                WT_E071K: []
+            },
+            // The module writes E071 and the call is rolled back by default,
+            // which would undo exactly the thing this tool is for.
+            commit: !simulate
+        });
+        const call = JSON.parse(called.content[0].text);
+        const exception = String(call?.exceptionRaised || '').toUpperCase();
+        steps.push({
+            step: 'call',
+            ran: call?.ran === true,
+            subrc: call?.subrc,
+            ...(exception ? { exception, diagnosis: diagnose(exception) } : {}),
+            ...(call?.ran === true ? {} : { error: call?.runError?.error })
+        });
+
+        const failed = call?.ran !== true || call?.subrc !== 0 || !!exception;
+        if (failed) {
+            const holders = exception === 'OB_LOCKED_BY_OTHER' ? await this.holders(row) : [];
+            return {
+                content: [{
+                    type: 'text', text: JSON.stringify({
+                        status: 'error',
+                        registered: false,
+                        ...(simulate ? { simulated: true } : {}),
+                        transport: choice.request || choice.task,
+                        task: choice.task,
+                        row,
+                        steps,
+                        ...(holders.length ? { heldBy: holders } : {}),
+                        hint: exception
+                            ? diagnose(exception)
+                            : 'The module did not run; nothing was registered.'
+                    })
+                }]
+            };
+        }
+
+        if (simulate) {
+            return {
+                content: [{
+                    type: 'text', text: JSON.stringify({
+                        status: 'success',
+                        registered: false,
+                        simulated: true,
+                        transport: choice.request || choice.task,
+                        task: choice.task,
+                        row,
+                        steps,
+                        hint: `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} would be accepted into ${choice.task}. Nothing was written.`
+                    })
+                }]
+            };
+        }
+
+        // sy-subrc = 0 is not proof: RS_CORR_INSERT answers plausibly and
+        // registers nothing, and the message SCTS_CTO_CUST_SYNC/003 sits in
+        // sy-msg* after a call that worked. The row in E071 is the proof.
+        const written = await this.queryRows(registeredSql(choice.task, row), 5);
+        steps.push({ step: 'verify', foundInE071: written.length });
+
+        return {
+            content: [{
+                type: 'text', text: JSON.stringify({
+                    status: written.length ? 'success' : 'error',
+                    registered: written.length > 0,
+                    transport: choice.request || choice.task,
+                    task: choice.task,
+                    row,
+                    steps,
+                    hint: written.length
+                        ? `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} is in task ${choice.task}` +
+                          (choice.request ? ` of request ${choice.request}.` : '.')
+                        : 'The module reported success but E071 has no such row, so nothing travels. ' +
+                          'Check the request in SE09 before relying on this.'
+                })
+            }]
+        };
     }
 }

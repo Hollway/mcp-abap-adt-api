@@ -1,13 +1,29 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
+import { SnippetHandlers } from './SnippetHandlers';
+import { TransportHandlers } from './TransportHandlers';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { session_types, textElementsUrl } from 'abap-adt-api';
-import type { TextElement, TextElementCategory } from 'abap-adt-api';
+import type { ADTClient, TextElement, TextElementCategory } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
 import { describeAdtError } from '../lib/adtError';
 import { takeLock, releaseLock } from '../lib/lockCycle';
 import { activateAndVerify } from '../lib/activation';
+import { isReadOnly, readOnlyAllowances } from '../lib/serverConfig';
+import {
+  TextPoolError,
+  elementsFromRows,
+  parsePoolPrint,
+  poolProgramFor,
+  readPoolSnippet,
+  titleFromRows,
+  titleWrite,
+  transportObjectFor,
+  writePoolSnippet,
+  writesFor,
+  type PoolCategory
+} from '../lib/textPool';
 
 /**
  * Not every release serves text elements over REST.
@@ -28,6 +44,26 @@ const missingEndpointHint = (error: unknown): string | undefined => {
 const CATEGORIES: TextElementCategory[] = ['symbols', 'selections', 'headings'];
 
 /**
+ * The 404 that means "this release does not serve text elements", carried up
+ * from whichever call hit it.
+ *
+ * On a system without the endpoint the 404 arrives at the lock, before the
+ * write is ever attempted, so the decision to go the ABAP way cannot be made
+ * inside the write alone.
+ */
+class EndpointNotServed extends Error {
+  constructor(readonly original: unknown, readonly hint: string) {
+    super(hint);
+  }
+}
+
+const asNotServed = (error: unknown): EndpointNotServed | undefined => {
+  if (error instanceof EndpointNotServed) return error;
+  const hint = missingEndpointHint(error);
+  return hint ? new EndpointNotServed(error, hint) : undefined;
+};
+
+/**
  * Text symbols, selection texts and list headings.
  *
  * These live outside the source: a report's TEXT-001 and the label of a
@@ -37,11 +73,26 @@ const CATEGORIES: TextElementCategory[] = ['symbols', 'selections', 'headings'];
  * code was.
  */
 export class TextElementHandlers extends BaseHandler {
+  private readonly snippets: SnippetHandlers;
+  private readonly transports: TransportHandlers;
+
+  constructor(client: ADTClient) {
+    super(client);
+    // The fallback runs ABAP, and running ABAP is a whole dance of its own:
+    // create a class, activate it, run it, delete it again. That handler
+    // carries it, so this one borrows it rather than repeating it.
+    this.snippets = new SnippetHandlers(client);
+    // INSERT TEXTPOOL registers nothing, so the pool write has to put the
+    // object into the request itself - and say so when there is no request to
+    // put it in.
+    this.transports = new TransportHandlers(client);
+  }
+
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'getTextElements',
-        description: 'Read the text elements of a program, class or function group: text symbols (TEXT-001), selection texts (the labels of PARAMETERS and SELECT-OPTIONS) or list headings. These are stored per language outside the source, so getObjectSource never shows them.',
+        description: 'Read the text elements of a program, class or function group: text symbols (TEXT-001), selection texts (the labels of PARAMETERS and SELECT-OPTIONS) or list headings. These are stored per language outside the source, so getObjectSource never shows them. On a release that does not serve /sap/bc/adt/textelements the texts are read with READ TEXTPOOL instead, through a throwaway class - the answer says which way it went in "via".',
         inputSchema: {
           type: 'object',
           properties: {
@@ -58,6 +109,10 @@ export class TextElementHandlers extends BaseHandler {
               description: 'Which set to read: "symbols" (default), "selections" or "headings".',
               enum: [...CATEGORIES]
             },
+            language: {
+              type: 'string',
+              description: 'Language of the texts on the READ TEXTPOOL fallback: the one-character SAP key (R) or the two-character ISO code (RU). Defaults to the language of the session.'
+            },
             url: {
               type: 'string',
               description: 'Escape hatch: the text elements base URL, e.g. /sap/bc/adt/textelements/programs/zr_app_foo.'
@@ -67,7 +122,7 @@ export class TextElementHandlers extends BaseHandler {
       },
       {
         name: 'setTextElements',
-        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements. The lock is taken on the text elements resource - not on the object - and released again, unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Pass activate to finish the job, or run activateSafe afterwards: a text write leaves both the object and its text pool inactive.',
+        description: 'Write the text elements of a program, class or function group. The write replaces the whole set for that category, so pass every element you want to keep - read them first with getTextElements, or pass merge to change only the ones you name. On a release that does not serve /sap/bc/adt/textelements the pool is written with INSERT TEXTPOOL instead, through a throwaway class: that way needs neither a lock nor an activation, and INSERT TEXTPOOL registers nothing by itself - so pass transport and the object is put into your own task in that request and the entry verified in E071. Without one, the answer says so when the object is in no open request at all, which is how texts quietly stay behind in the development system. The lock is taken on the text elements resource - not on the object - and released again, unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Pass activate to finish the job, or run activateSafe afterwards: a text write leaves both the object and its text pool inactive.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -112,14 +167,30 @@ export class TextElementHandlers extends BaseHandler {
             },
             transport: {
               type: 'string',
-              description: 'Transport request number - the request itself, not a developer task.'
+              description: 'Transport request number - the request itself, not a developer task. The READ TEXTPOOL fallback cannot register a change in one; it says so rather than pretending it did.'
+            },
+            title: {
+              type: 'string',
+              description: 'The program title (the R row of the pool). ADT serves it in no category and cannot write it at all, so passing this always goes the INSERT TEXTPOOL way. An empty string removes it.'
+            },
+            titleMaxLength: {
+              type: 'number',
+              description: 'Declared length of the title. Defaults to the length of the text; a longer title widens it rather than being cut.'
+            },
+            merge: {
+              type: 'boolean',
+              description: 'Change only the elements passed and leave the rest of the category alone (default false: the category is replaced whole). Only the fallback honours this - the ADT endpoint always replaces.'
+            },
+            language: {
+              type: 'string',
+              description: 'Language to write on the INSERT TEXTPOOL fallback: the one-character SAP key (R) or the two-character ISO code (RU). Defaults to the language of the session.'
             },
             url: {
               type: 'string',
               description: 'Escape hatch: the text elements base URL.'
             }
           },
-          required: ['elements']
+          required: []
         }
       }
     ];
@@ -185,7 +256,7 @@ export class TextElementHandlers extends BaseHandler {
   }
 
   async handleGetTextElements(args: any): Promise<any> {
-    const { url } = this.textUrl(args);
+    const { url, objectType } = this.textUrl(args);
     const category = this.category(args);
     const startTime = performance.now();
     try {
@@ -193,6 +264,7 @@ export class TextElementHandlers extends BaseHandler {
       this.trackRequest(startTime, true);
       return this.answer({
         status: 'success',
+        via: 'adt',
         url,
         category,
         count: (result?.textElements || []).length,
@@ -200,31 +272,167 @@ export class TextElementHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      const missing = missingEndpointHint(error);
-      throw wrapAdtError(
-        error,
-        missing
-          ? `Failed to read the ${category} of ${url}. ${missing}`
-          : `Failed to read the ${category} of ${url}`
-      );
+      const notServed = asNotServed(error);
+      if (notServed) return this.readThroughTextPool(args, url, objectType, category, notServed);
+      throw wrapAdtError(error, `Failed to read the ${category} of ${url}`);
     }
+  }
+
+  /**
+   * The program whose pool the texts are in, and the name to report.
+   *
+   * With only a URL given the name comes off its last segment, which is how
+   * ADT builds it in the first place.
+   */
+  private poolProgram(args: any, url: string, objectType: string): { program: string; objectName: string } {
+    const given = String(args?.objectName || '').trim();
+    const objectName = (given || decodeURIComponent(url.split('/').pop() || '')).toUpperCase();
+    if (!objectName) {
+      throw new McpError(ErrorCode.InvalidParams, 'Which object? Pass objectName (and objectType).');
+    }
+    return { program: poolProgramFor(objectType, objectName), objectName };
+  }
+
+  /**
+   * The ABAP way is a write, whatever it is used for.
+   *
+   * Reading the pool means creating a class, activating it, running it and
+   * deleting it again - four changes to the system to answer a question. A
+   * read-only server must refuse that, which is why the fence stands here
+   * rather than around getTextElements: the ADT read is harmless and keeps
+   * working on the systems that serve it.
+   */
+  private refuseWhenReadOnly(url: string, category: string, notServed: EndpointNotServed): void {
+    if (!isReadOnly() || readOnlyAllowances().has('runSnippet')) return;
+    throw wrapAdtError(
+      notServed.original,
+      `Failed to reach the ${category} of ${url}. ${notServed.hint} The way round it is READ TEXTPOOL in a ` +
+      'throwaway class, and creating one changes the system, which this server refuses with SAP_READONLY set. ' +
+      'Nothing was sent to SAP.'
+    );
+  }
+
+  /** Run a generated snippet and hand back what it printed. */
+  private async runPoolSnippet(code: string[]): Promise<{ output: string; answer: any }> {
+    const result = await this.snippets.handleRunSnippet({ code });
+    const answer = JSON.parse(result.content[0].text);
+    return { output: String(answer?.output ?? ''), answer };
+  }
+
+  /**
+   * Reading the text pool with ABAP, for the releases that serve no endpoint.
+   */
+  private async readThroughTextPool(
+    args: any,
+    url: string,
+    objectType: string,
+    category: TextElementCategory,
+    notServed: EndpointNotServed
+  ): Promise<any> {
+    this.refuseWhenReadOnly(url, category, notServed);
+    const { program, objectName } = this.poolProgram(args, url, objectType);
+    const language = args?.language ? String(args.language).trim() : undefined;
+
+    let code: string[];
+    try {
+      code = readPoolSnippet(program, language);
+    } catch (error: any) {
+      if (error instanceof TextPoolError) throw new McpError(ErrorCode.InvalidParams, error.message);
+      throw error;
+    }
+
+    const { output, answer } = await this.runPoolSnippet(code);
+    if (answer?.ran !== true) {
+      return this.answer({
+        status: 'error',
+        via: 'textpool',
+        url,
+        objectName,
+        program,
+        category,
+        steps: answer?.steps,
+        error: answer?.runError?.error,
+        hint: `${notServed.hint} Reading the pool with ABAP did not get as far as running: the steps above say where it stopped.`
+      });
+    }
+
+    const print = parsePoolPrint(output);
+    const textElements = elementsFromRows(print.rows, category as PoolCategory);
+    const title = titleFromRows(print.rows);
+    return this.answer({
+      status: 'success',
+      via: 'textpool',
+      url,
+      objectName,
+      program,
+      category,
+      ...(language ? { language } : {}),
+      count: textElements.length,
+      textElements,
+      // The title is in no category, so it rides alongside them rather than
+      // inside one - and it exists only here, because ADT never serves it.
+      ...(title ? { title: title.text, titleMaxLength: title.maxLength } : {}),
+      poolRows: print.rows.length,
+      ...(print.subrc && print.subrc !== 0 ? { readSubrc: print.subrc } : {}),
+      hint: print.rows.length === 0
+        ? `${notServed.hint} The pool of ${program} is empty in this language, so there is nothing to show.`
+        : `Read with READ TEXTPOOL, not over ADT: this release serves no text elements endpoint.`
+    });
   }
 
   async handleSetTextElements(args: any): Promise<any> {
     const { url, objectType } = this.textUrl(args);
     const category = this.category(args);
-    const elements: TextElement[] = this.parseObjectArg(args.elements, 'elements');
-    if (!Array.isArray(elements)) {
+    const hasTitle = typeof args?.title === 'string';
+    const given = args?.elements === undefined || args?.elements === null
+      ? undefined
+      : this.parseObjectArg(args.elements, 'elements');
+    if (given !== undefined && !Array.isArray(given)) {
       throw new McpError(ErrorCode.InvalidParams, 'elements must be an array of {id, text}.');
     }
+    if (given === undefined && !hasTitle) {
+      throw new McpError(ErrorCode.InvalidParams, 'Pass elements, or title, or both - there is nothing to write.');
+    }
+    const elements: TextElement[] = (given || []) as TextElement[];
 
+    // The title is not part of any category and ADT serves it nowhere, so any
+    // call carrying one goes the pool way whole - writing the elements over ADT
+    // and dropping the title on the floor would be the worst of both.
+    if (hasTitle) {
+      return this.writeThroughTextPool(
+        args, url, objectType, category, elements,
+        new EndpointNotServed(undefined, 'ADT serves the program title in no category, so it is written with INSERT TEXTPOOL.')
+      );
+    }
+
+    try {
+      return await this.writeThroughAdt(args, url, objectType, category, elements);
+    } catch (error: any) {
+      const notServed = asNotServed(error);
+      if (!notServed) throw error;
+      return this.writeThroughTextPool(args, url, objectType, category, elements, notServed);
+    }
+  }
+
+  private async writeThroughAdt(
+    args: any,
+    url: string,
+    objectType: string,
+    category: TextElementCategory,
+    elements: TextElement[]
+  ): Promise<any> {
     // The lock goes on the text elements resource itself, not on the object.
     // That is the opposite of what this handler assumed for as long as no
     // system served the endpoint: with a lock on the program, the write is
     // refused with 423 "Resource REPT ZFOO is not locked (invalid lock
     // handle)", naming REPT - the text pool - rather than the program.
     const objectUrl = this.objectUrl(args, objectType);
-    const { lockHandle, from, taken } = await this.lockFor(url, args);
+    // Without the endpoint the 404 lands here, on the lock, so the fallback is
+    // decided before a single byte of the write is sent.
+    const { lockHandle, from, taken } = await this.lockFor(url, args).catch((error: any) => {
+      const notServed = asNotServed(error);
+      throw notServed ?? error;
+    });
 
     const startTime = performance.now();
     try {
@@ -236,13 +444,9 @@ export class TextElementHandlers extends BaseHandler {
       if (taken) {
         await releaseLock(this.adtclient, url, lockHandle, (start, ok) => this.trackRequest(start, ok));
       }
-      const missing = missingEndpointHint(error);
-      throw wrapAdtError(
-        error,
-        missing
-          ? `Failed to write the ${category} of ${url}. ${missing}`
-          : `Failed to write the ${category} of ${url}`
-      );
+      const notServed = asNotServed(error);
+      if (notServed) throw notServed;
+      throw wrapAdtError(error, `Failed to write the ${category} of ${url}`);
     }
 
     const steps: Record<string, unknown>[] = [];
@@ -260,6 +464,7 @@ export class TextElementHandlers extends BaseHandler {
 
     const common = {
       written: true,
+      via: 'adt',
       url,
       objectUrl,
       category,
@@ -319,6 +524,148 @@ export class TextElementHandlers extends BaseHandler {
         hint: 'Written but not active. Nothing was rolled back; run activateSafe.'
       });
     }
+  }
+
+  /**
+   * Writing the text pool with ABAP, for the releases that serve no endpoint.
+   *
+   * Read, change and write happen inside one snippet: INSERT TEXTPOOL replaces
+   * the pool whole, so splitting them would drop every text of the categories
+   * this call is not about. STATE 'A' writes the active version outright -
+   * there is nothing to lock and nothing to activate afterwards, which is the
+   * one way this path is simpler than the ADT one.
+   */
+  private async writeThroughTextPool(
+    args: any,
+    url: string,
+    objectType: string,
+    category: TextElementCategory,
+    elements: TextElement[],
+    notServed: EndpointNotServed
+  ): Promise<any> {
+    this.refuseWhenReadOnly(url, category, notServed);
+    const { program, objectName } = this.poolProgram(args, url, objectType);
+    const language = args?.language ? String(args.language).trim() : undefined;
+    const merge = args?.merge === true;
+    const notes: string[] = [];
+
+    const hasTitle = typeof args?.title === 'string';
+    let code: string[];
+    try {
+      const writes = writesFor(category as PoolCategory, elements as any, notes);
+      // The title is a row of the pool like any other, and it survives a
+      // category replace because no category owns the letter R.
+      if (hasTitle) writes.push(titleWrite(args.title, args?.titleMaxLength, notes));
+      code = writePoolSnippet({
+        program,
+        category: category as PoolCategory,
+        writes,
+        language,
+        // With only a title to write, replacing the category as well would
+        // wipe the texts the caller never mentioned.
+        merge: merge || elements.length === 0
+      });
+    } catch (error: any) {
+      if (error instanceof TextPoolError) throw new McpError(ErrorCode.InvalidParams, error.message);
+      throw error;
+    }
+
+    const { output, answer } = await this.runPoolSnippet(code);
+    const print = parsePoolPrint(output);
+    const written = answer?.ran === true && print.steps.insert === 0;
+    const transport = String(args?.transport || '').trim();
+    const steps: Record<string, unknown>[] = [];
+    let registered: boolean | undefined;
+
+    if (written) {
+      // INSERT TEXTPOOL registers nothing, and a text that is not in a request
+      // simply stays in this system - which is the failure nobody sees until
+      // the next system is missing it.
+      const target = transportObjectFor(objectType, objectName);
+      try {
+        if (transport) {
+          const outcome = JSON.parse((await this.transports.handleRegisterInTransport({
+            pgmid: 'R3TR',
+            object: target.object,
+            objName: target.objName,
+            transport
+          })).content[0].text);
+          registered = outcome?.registered === true;
+          steps.push({ step: 'registerInTransport', ...outcome });
+          if (!registered) {
+            notes.push(
+              `The texts are written, but R3TR ${target.object} ${target.objName} did not get into ${transport}: ` +
+              `${outcome?.hint || 'the registration was refused'} Nothing was rolled back - the pool keeps the new texts.`
+            );
+          }
+        } else {
+          const state = await this.transports.registrationState({
+            pgmid: 'R3TR',
+            object: target.object,
+            objName: target.objName
+          });
+          if (!state.local && state.openRequests.length === 0) {
+            notes.push(
+              `R3TR ${target.object} ${target.objName} is in no open request` +
+              (state.devclass ? ` (package ${state.devclass})` : '') +
+              ', so these texts stay in this system. Pass transport to register it, or add it by hand in SE09. ' +
+              'The includes of a program do not carry its text pool: the main program has to be in the request.'
+            );
+          }
+        }
+      } catch (error: any) {
+        // The texts are already written; failing to say where they travel must
+        // not turn into an error that hides that.
+        notes.push(
+          `The texts are written, but the transport side could not be checked: ${describeAdtError(error).error}`
+        );
+      }
+    }
+
+    if (!written) {
+      return this.answer({
+        status: 'error',
+        via: 'textpool',
+        written: false,
+        url,
+        objectName,
+        program,
+        category,
+        steps: [...(answer?.steps || []), ...steps],
+        ...(answer?.runError?.error ? { error: answer.runError.error } : {}),
+        ...(print.steps.insert !== undefined ? { insertSubrc: print.steps.insert } : {}),
+        ...(notes.length ? { notes } : {}),
+        hint: answer?.ran === true
+          ? `INSERT TEXTPOOL answered sy-subrc ${print.steps.insert}, so the pool was not written.`
+          : `${notServed.hint} The write was attempted with ABAP instead and did not get as far as running.`
+      });
+    }
+
+    const textElements = elementsFromRows(print.rows, category as PoolCategory);
+    const title = titleFromRows(print.rows);
+    return this.answer({
+      status: registered === false ? 'error' : 'success',
+      via: 'textpool',
+      written: true,
+      url,
+      objectName,
+      program,
+      category,
+      ...(language ? { language } : {}),
+      merge,
+      count: elements.length,
+      textElements,
+      ...(title ? { title: title.text, titleMaxLength: title.maxLength } : {}),
+      activated: true,
+      ...(registered !== undefined ? { registered, transport } : {}),
+      ...(steps.length ? { steps } : {}),
+      ...(notes.length ? { notes } : {}),
+      hint: merge
+        ? 'The elements passed were updated and the rest of the pool was left as it was. INSERT TEXTPOOL wrote the ' +
+          'active version straight away, so there is nothing to activate.'
+        : `The whole set of ${category} was replaced; the other categories and the program title were kept. ` +
+          'INSERT TEXTPOOL wrote the active version straight away, so there is nothing to activate.'
+    });
   }
 
   /**

@@ -1,6 +1,7 @@
 import { TextElementHandlers } from '../handlers/TextElementHandlers';
 import { ObjectManagementHandlers } from '../handlers/ObjectManagementHandlers';
 import { lockRegistry } from '../lib/lockRegistry';
+import { AdtErrorException } from 'abap-adt-api';
 
 /**
  * Text elements were written blind for as long as no system here served the
@@ -149,6 +150,191 @@ describe('setTextElements', () => {
     const { handlers } = harness();
     await expect(handlers.handleSetTextElements({ ...ARGS, category: 'captions' }))
       .rejects.toThrow(/Unknown category/);
+  });
+});
+
+/**
+ * The fallback for the releases that serve no text elements at all.
+ *
+ * The 404 does not arrive where it would be convenient: on a write it lands on
+ * the lock of the text elements resource, before anything is written, so the
+ * decision to go the ABAP way is taken around the whole ADT attempt rather than
+ * inside it. Running the ABAP itself belongs to SnippetHandlers and is stubbed
+ * out here - what these tests hold is the decision, the parsing and the answer.
+ */
+describe('the text pool fallback', () => {
+  const notServed = () => new AdtErrorException(404, {}, 'ExceptionResourceNotFound', 'Resource not found');
+
+  const fallbackHarness = (
+    output: string,
+    over: Record<string, unknown> = {},
+    transport: { registered?: boolean; hint?: string; openRequests?: Record<string, string>[]; local?: boolean } = {}
+  ) => {
+    const ran: string[][] = [];
+    const registrations: any[] = [];
+    const { handlers, calls } = harness({
+      getTextElements: async () => { throw notServed(); },
+      lock: async () => { throw notServed(); },
+      ...over
+    });
+    (handlers as any).snippets = {
+      handleRunSnippet: async ({ code }: { code: string[] }) => {
+        ran.push(code);
+        return { content: [{ type: 'text', text: JSON.stringify({ status: 'success', ran: true, output }) }] };
+      }
+    };
+    // The transport side is a handler of its own, with a function module and
+    // two queries behind it; what belongs here is what this handler does with
+    // its answer.
+    (handlers as any).transports = {
+      handleRegisterInTransport: async (args: any) => {
+        registrations.push(args);
+        const registered = transport.registered !== false;
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              status: registered ? 'success' : 'error',
+              registered,
+              task: 'EUDK900124',
+              hint: transport.hint || (registered ? 'in the task.' : 'The object is locked in another request.')
+            })
+          }]
+        };
+      },
+      registrationState: async () => ({
+        row: {},
+        local: transport.local === true,
+        devclass: transport.local === true ? '$TMP' : 'ZMM',
+        openRequests: transport.openRequests || []
+      })
+    };
+    return { handlers, ran, calls, registrations };
+  };
+
+  const READ_PRINT = [
+    'READ~#~0~#~2',
+    'ROW~#~I~#~001~#~30~#~[Probe symbol]',
+    'ROW~#~S~#~P_WERKS~#~13~#~[        Plant]'
+  ].join('\n');
+
+  it('reads the pool with ABAP when the endpoint is not there', async () => {
+    const { handlers, ran } = fallbackHarness(READ_PRINT);
+    const result = answer(await handlers.handleGetTextElements({ objectName: PROGRAM, category: 'symbols' }));
+
+    expect(result.via).toBe('textpool');
+    expect(result.program).toBe(PROGRAM);
+    expect(result.textElements).toEqual([{ id: '001', text: 'Probe symbol', maxLength: 30 }]);
+    expect(ran[0]).toEqual(expect.arrayContaining([`READ TEXTPOOL '${PROGRAM}' INTO lt_pool LANGUAGE lv_langu.`]));
+  });
+
+  it('says which way a read went when the endpoint is there', async () => {
+    const { handlers } = harness();
+    const result = answer(await handlers.handleGetTextElements({ objectName: PROGRAM, category: 'symbols' }));
+    expect(result.via).toBe('adt');
+  });
+
+  it('writes the pool without a lock and without an activation', async () => {
+    const { handlers, ran, calls } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1\nROW~#~I~#~001~#~30~#~[Probe symbol]');
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(calls).toEqual([]);
+    expect(result.status).toBe('success');
+    expect(result.via).toBe('textpool');
+    expect(result.written).toBe(true);
+    expect(result.activated).toBe(true);
+    expect(ran[0]).toEqual(expect.arrayContaining([
+      `INSERT TEXTPOOL '${PROGRAM}' FROM lt_pool LANGUAGE lv_langu STATE 'A'.`
+    ]));
+    expect(result.hint).toMatch(/nothing to activate/);
+  });
+
+  it('reports a write the pool refused instead of calling it done', async () => {
+    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~4~#~1');
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(result.status).toBe('error');
+    expect(result.written).toBe(false);
+    expect(result.insertSubrc).toBe(4);
+  });
+
+  // INSERT TEXTPOOL registers nothing of its own, so the write has to put the
+  // object into the request itself or the texts never leave this system.
+  it('registers the object in the request it was given', async () => {
+    const { handlers, registrations } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1');
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
+
+    expect(registrations).toEqual([{
+      pgmid: 'R3TR', object: 'PROG', objName: PROGRAM, transport: 'EUDK900123'
+    }]);
+    expect(result.status).toBe('success');
+    expect(result.registered).toBe(true);
+    expect(result.steps.some((step: any) => step.step === 'registerInTransport')).toBe(true);
+  });
+
+  // The texts are on the system by then and nothing takes them back, so a
+  // refused registration is an error to report, not one to hide.
+  it('reports a refused registration without pretending the texts are unwritten', async () => {
+    const { handlers } = fallbackHarness(
+      'READ~#~0~#~0\nINSERT~#~0~#~1', {}, { registered: false, hint: 'The object is locked in EUDK900999.' }
+    );
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
+
+    expect(result.written).toBe(true);
+    expect(result.registered).toBe(false);
+    expect(result.status).toBe('error');
+    expect(result.notes.join(' ')).toMatch(/did not get into EUDK900123/);
+  });
+
+  // Measured in a live task: the request held the includes of a program and not
+  // the program itself, and the text pool of the main program would have stayed
+  // behind without a word.
+  it('warns when the object is in no open request at all', async () => {
+    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1', {}, { openRequests: [] });
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(result.status).toBe('success');
+    expect(result.notes.join(' ')).toMatch(/in no open request/);
+    expect(result.notes.join(' ')).toMatch(/includes of a program do not carry its text pool/);
+  });
+
+  it('says nothing about transports for a local object', async () => {
+    const { handlers } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1', {}, { local: true });
+    const result = answer(await handlers.handleSetTextElements(ARGS));
+
+    expect(result.status).toBe('success');
+    expect(result.notes).toBeUndefined();
+  });
+
+  it('leaves the rest of the category alone with merge', async () => {
+    const { handlers, ran } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1');
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, merge: true }));
+
+    expect(result.merge).toBe(true);
+    expect(ran[0].some(line => line === "DELETE lt_pool WHERE id = 'I'.")).toBe(false);
+  });
+
+  it('does not fall back on a failure that is not the missing endpoint', async () => {
+    const { handlers } = fallbackHarness('', {
+      getTextElements: async () => { throw new Error('Program ZDEV_MCP_TXT does not exist'); }
+    });
+    await expect(handlers.handleGetTextElements({ objectName: PROGRAM })).rejects.toThrow(/does not exist/);
+  });
+
+  // Reading the pool means creating, activating, running and deleting a class:
+  // four changes to answer a question, which a read-only server must refuse -
+  // while the ADT read, which changes nothing, keeps working.
+  it('refuses to run ABAP on a read-only server, explaining why', async () => {
+    process.env.SAP_READONLY = 'true';
+    try {
+      const { handlers } = fallbackHarness(READ_PRINT);
+      await expect(handlers.handleGetTextElements({ objectName: PROGRAM })).rejects.toThrow(/SAP_READONLY/);
+
+      const served = harness();
+      const result = answer(await served.handlers.handleGetTextElements({ objectName: PROGRAM }));
+      expect(result.via).toBe('adt');
+    } finally {
+      delete process.env.SAP_READONLY;
+    }
   });
 });
 

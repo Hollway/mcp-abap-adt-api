@@ -376,6 +376,7 @@ export class AbapAdtServer extends Server {
             case 'dropSession':
                 result = await this.authHandlers.handle(toolName, args);
                 break;
+            case 'registerInTransport':
             case 'transportInfo':
             case 'createTransport':
             case 'hasTransportConfig':
