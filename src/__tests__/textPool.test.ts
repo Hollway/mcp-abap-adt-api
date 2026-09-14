@@ -216,7 +216,20 @@ describe('writePoolSnippet', () => {
     expect(copy).toBeLessThan(lines.indexOf("DELETE lt_pool WHERE id = 'S'."));
     expect(read).toBeGreaterThan(copy);
     expect(lines).toEqual(expect.arrayContaining(['  lv_prefix = ls_row-entry(8).']));
-    expect(lines).toEqual(expect.arrayContaining(['ls_new-entry = |{ lv_prefix }| && `Plant`.']));
+  });
+
+  // Measured on a live selection text that came back as "ва" instead of
+  // "Проба два": a string template converts the C field and drops its trailing
+  // blanks, so the D of a dictionary flag landed straight against the text and
+  // the next read cut eight characters off the front of it. Offsets keep the
+  // blanks, and nothing else here does.
+  it('puts the flags in by offset, never through a string template', () => {
+    const lines = snippet();
+    expect(lines).toEqual(expect.arrayContaining([
+      'ls_new-entry(8) = lv_prefix.',
+      'ls_new-entry+8 = `Plant`.'
+    ]));
+    expect(lines.some(line => line.includes('{ lv_prefix }'))).toBe(false);
   });
 
   it('writes a text symbol without a flag field', () => {

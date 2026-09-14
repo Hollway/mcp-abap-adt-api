@@ -82,11 +82,25 @@ contradicted what the fallback was going to assume:
   not "take the first letter": Chinese is `ZH` and `1`). Without it, the
   language of the session.
 
+### What the live run found
+
+The first run against a real program wrote a selection text back as the last
+two letters of itself. `|{ lv_prefix }| && text` looks like the obvious way to
+put the eight flag characters in front of a text, and a string template
+converts the C field and **drops its trailing blanks**: the `D` of a dictionary
+flag landed straight against the text, the row was written as `DText` instead of
+`D       Text`, and the next read - cutting the eight characters off, as it
+must - handed back the text minus its first seven letters.
+
+The flags now go in by offset (`ls_new-entry(8) = lv_prefix.`), which keeps
+every blank, and a test holds the string template out. Nothing else in the
+generated ABAP interpolates a character field whose blanks matter.
+
 ### Tests
 
 `src/lib/textPool.ts` holds every decision above as pure functions, so the
-generated ABAP is tested without a system: 30 new tests there and 8 around the
-fallback in the handler. 847 tests in 50 suites, green.
+generated ABAP is tested without a system: 31 new tests there and 8 around the
+fallback in the handler. 848 tests in 50 suites, green.
 
 One trap is held by a test of its own: `out->write` is a method call and resets
 `sy-subrc`, so the subrc of a pool statement is taken on the very next line.

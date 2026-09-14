@@ -436,7 +436,14 @@ export function writePoolSnippet(spec: WriteSnippetSpec): string[] {
         'IF sy-subrc = 0.',
         `  lv_prefix = ls_row-entry(${SELECTION_FLAG_LENGTH}).`,
         'ENDIF.',
-        `ls_new-entry = |{ lv_prefix }| && ${stringLiteral(write.text)}.`
+        // Offsets, not a string template. A template converts a C field and
+        // drops its trailing blanks, and the flag field is a D followed by
+        // seven of them: |{ lv_prefix }| && text wrote "DText" instead of
+        // "D       Text", and the next read cut eight characters off the front
+        // of the text. Measured on a live selection text, which came back as
+        // the last two letters of itself.
+        `ls_new-entry(${SELECTION_FLAG_LENGTH}) = lv_prefix.`,
+        `ls_new-entry+${SELECTION_FLAG_LENGTH} = ${stringLiteral(write.text)}.`
       );
     } else {
       lines.push(`ls_new-entry = ${stringLiteral(write.text)}.`);
