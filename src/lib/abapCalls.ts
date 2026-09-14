@@ -95,11 +95,6 @@ const CUSTOM_NAME = /^(z|y|\/[a-z0-9_]+\/)/i;
 const TYPE_EXPRESSION = /\b(VALUE|CONV|COND|SWITCH|CAST|REF|EXACT|FILTER|REDUCE|CORRESPONDING|NEW|TYPE|LIKE)\s*$/i;
 
 /**
- * Words that stand where a table name would: INSERT REPORT and MODIFY SCREEN
- * are not database access, and `DELETE itab FROM ls` has the same shape as a
- * delete from a table.
- */
-/**
  * Types that belong to the language rather than to the dictionary. `TYPE c
  * LENGTH 8` names one, and so do `TYPE string` and `LIKE sy-subrc`; with
  * onlyCustom off nothing else would keep them out of the answer. The words a
@@ -129,6 +124,11 @@ const TYPED = /\b(?:TYPE|LIKE)\s+(?:(?:STANDARD|SORTED|HASHED|ANY|INDEX)\s+TABLE
 /** SELECT-OPTIONS s_id FOR zorders-id, and RANGES, which is the same statement. */
 const FOR_FIELD = /^(?:SELECT-OPTIONS|RANGES)\s+[\w]+\s+FOR\s+([\w/]+)(?:-([\w]+))?/i;
 
+/**
+ * Words that stand where a table name would: INSERT REPORT and MODIFY SCREEN
+ * are not database access, and `DELETE itab FROM ls` has the same shape as a
+ * delete from a table.
+ */
 const NOT_A_TABLE = new Set([
   'REPORT', 'TEXTPOOL', 'PROGRAM', 'DYNPRO', 'SCREEN', 'MEMORY', 'TABLE', 'DATABASE',
   'FIELD', 'LINE', 'INITIAL', 'OBJECT', 'ID', 'DATASET', 'ITAB', 'FROM', 'INTO', 'DATA',
@@ -562,7 +562,7 @@ function scan(
       add(statement, 'type', upper, field);
     };
     for (const match of text.matchAll(TYPED)) {
-      // `define type zytrproj { ... }` is how this backend serves the source of
+      // `define type zorders { ... }` is how this backend serves the source of
       // a structure: the object naming itself, not a dependency on anything.
       if (/\bDEFINE\s*$/i.test(text.slice(0, match.index))) continue;
       namesAType(match[1], match[2]);

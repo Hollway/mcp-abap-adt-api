@@ -134,7 +134,8 @@ describe('extractCalls', () => {
 
   it('does not read a constructor expression over a type as a call', () => {
     // VALUE zcl_x=>tt_row( ) wears the parentheses of a method call and is a
-    // type of that class - found live on ZCL_YTRACKER_ZB_NOTIFIER.
+    // type of that class - found live on a notifier class that built its
+    // return table this way.
     const found = extractCalls([
       '  DATA(lt_return) = VALUE zcl_mm_return=>tt_return( ).',
       '  DATA(lv_one) = zcl_mm_return=>build( ).'
@@ -252,9 +253,9 @@ describe('types named in declarations', () => {
   });
 
   it('does not read the definition of a structure as a dependency on itself', () => {
-    // How this backend serves a TABL/DT source - found on ZYTRPROJ, which
-    // came out of the package graph calling itself.
-    expect(typed('define type zytrproj { key mandt : mandt not null; }')).toEqual([]);
+    // How this backend serves a TABL/DT source: found when every table of a
+    // package came out of the graph calling itself.
+    expect(typed('define type zorders { key mandt : mandt not null; }')).toEqual([]);
   });
 
   it('keeps a type owned by a class a reference to that class, not a type of its own', () => {
