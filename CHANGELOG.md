@@ -1,6 +1,7 @@
 # Changelog
 
-Every version below was developed against live SAP systems (a classic ERP
+This fork adds tools, guardrails and tests on top of the upstream server. Every
+version below was developed against live SAP systems (a classic ERP
 system, an S/4 system and a read-only QA system), and the entries record what
 the backend actually does — not what its documentation implies.
 
@@ -70,6 +71,13 @@ probe, no technical user.
   caller and the tool.
 - Deploy **one replica**: the pool lives in the memory of one process, so a
   lock taken through one pod and a write routed to another would not meet.
+- Every session logs the id SAP knows it by. The `SAP_SESSIONID` cookie is 32
+  bytes: the first half authenticates and is never printed, the second half is
+  SECURITY_CONTEXT-LINK, the handle SM05 lists. Printing only the second half
+  gives an exact join against SAP's own session list - `SELECT * FROM
+  security_context WHERE link = '<what the log printed>'` - and leaks nothing
+  that can be replayed. It is what tells a session this server still holds
+  apart from one abandoned by a process that died without logging off.
 
 ## [0.9.1] — the project goes by one name
 
