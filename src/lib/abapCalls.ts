@@ -283,47 +283,80 @@ function splitMember(target: string, member: string): { target: string; member: 
   return { target: member.slice(0, tilde), member: member.slice(tilde + 1) };
 }
 
+/** What one pass of the scan collects, so several sources can share it. */
+interface ScanState {
+  calls: CallSite[];
+  unresolved: UnresolvedCall[];
+  seen: Set<string>;
+  seenUnresolved: Set<string>;
+  standardTargetsHidden: number;
+  statements: number;
+}
+
+const emptyState = (): ScanState => ({
+  calls: [],
+  unresolved: [],
+  seen: new Set(),
+  seenUnresolved: new Set(),
+  standardTargetsHidden: 0,
+  statements: 0
+});
+
 /**
- * Every other object this source reaches, and every call it cannot name.
+ * The scan itself, over statements that have already been read.
+ *
+ * Kept apart from extractCalls so that a function group - whose declarations
+ * are in one include and whose code is in another - can be scanned with the
+ * declarations of all its includes in hand.
  */
-export function extractCalls(source: string, options: CallScanOptions = {}): CallScanResult {
+function scan(
+  statements: Statement[],
+  locals: Locals,
+  options: CallScanOptions,
+  state: ScanState,
+  sourceName?: string
+): void {
   const onlyCustom = options.onlyCustom !== false;
   const wantedKinds = options.kinds?.length
     ? new Set(options.kinds.map(kind => String(kind).trim().toLowerCase()))
     : undefined;
-
-  const statements = statementsOf(source);
-  const locals = localNames(statements);
-  const calls: CallSite[] = [];
-  const unresolved: UnresolvedCall[] = [];
-  const seen = new Set<string>();
-  const seenUnresolved = new Set<string>();
-  let standardTargetsHidden = 0;
+  state.statements += statements.length;
 
   const add = (statement: Statement, kind: CallKind, target: string, member?: string): void => {
     if (wantedKinds && !wantedKinds.has(kind)) return;
     const name = target.trim().toUpperCase();
     if (!name || name === 'ME' || name === 'SUPER') return;
-    if (onlyCustom && !CUSTOM_NAME.test(name)) { standardTargetsHidden++; return; }
-    const key = `${kind}|${name}|${(member || '').toUpperCase()}|${statement.line}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    calls.push({
+    if (onlyCustom && !CUSTOM_NAME.test(name)) { state.standardTargetsHidden++; return; }
+    const key = `${sourceName || ''}|${kind}|${name}|${(member || '').toUpperCase()}|${statement.line}`;
+    if (state.seen.has(key)) return;
+    state.seen.add(key);
+    state.calls.push({
       target: name,
       kind,
       ...(member ? { member: member.trim().toUpperCase() } : {}),
       line: statement.line,
-      statement: statement.text
+      statement: statement.text,
+      ...(sourceName ? { source: sourceName } : {})
     });
   };
 
   const cannotName = (statement: Statement, kind: CallKind, reason: string): void => {
     if (wantedKinds && !wantedKinds.has(kind)) return;
-    const key = `${kind}|${statement.line}|${reason}`;
-    if (seenUnresolved.has(key)) return;
-    seenUnresolved.add(key);
-    unresolved.push({ kind, line: statement.line, statement: statement.text, reason });
+    const key = `${sourceName || ''}|${kind}|${statement.line}|${reason}`;
+    if (state.seenUnresolved.has(key)) return;
+    state.seenUnresolved.add(key);
+    state.unresolved.push({
+      kind,
+      line: statement.line,
+      statement: statement.text,
+      reason,
+      ...(sourceName ? { source: sourceName } : {})
+    });
   };
+
+  // Several sources are read together for a function group, so what the scan
+  // did not find a declaration in is all of them, not one file.
+  const undeclared = (name: string): string => `${name.toUpperCase()} is not declared as a reference in ${sourceName ? 'the sources read for this object' : 'this source'}, so its class is unknown here`;
 
   for (const statement of statements) {
     const text = statement.text;
@@ -357,7 +390,7 @@ export function extractCalls(source: string, options: CallScanOptions = {}): Cal
         const split = splitMember(refCall[1], refCall[2]);
         const owner = split.target === refCall[1] ? typeOf(locals, refCall[1]) : split.target;
         if (owner) add(statement, 'method', owner, split.member);
-        else cannotName(statement, 'method', `${refCall[1].toUpperCase()} is not declared in this source, so its class is unknown here`);
+        else cannotName(statement, 'method', undeclared(refCall[1]));
       }
     }
 
@@ -380,7 +413,7 @@ export function extractCalls(source: string, options: CallScanOptions = {}): Cal
       if (upper === 'ME' || upper === 'SUPER') continue;
       const owner = typeOf(locals, variable);
       if (owner) add(statement, 'method', owner, split.member);
-      else cannotName(statement, 'method', `${upper} is not declared in this source, so its class is unknown here`);
+      else cannotName(statement, 'method', undeclared(upper));
     }
     for (const match of text.matchAll(/[\w/<>-]+\s*(?:->|=>)\s*\(/g)) {
       if (match.index! < headEnd) continue;
@@ -407,7 +440,7 @@ export function extractCalls(source: string, options: CallScanOptions = {}): Cal
       } else {
         const owner = typeOf(locals, created[1]);
         if (owner) add(statement, 'constructor', owner);
-        else cannotName(statement, 'constructor', `${created[1].toUpperCase()} is not declared in this source, so its class is unknown here`);
+        else cannotName(statement, 'constructor', undeclared(created[1]));
       }
     }
 
@@ -486,7 +519,59 @@ export function extractCalls(source: string, options: CallScanOptions = {}): Cal
     if (included && !/^INCLUDE\s+(?:TYPE|STRUCTURE)\b/i.test(text)) add(statement, 'include', included[1]);
   }
 
-  return { calls, unresolved, standardTargetsHidden, statements: statements.length };
+}
+
+const resultOf = (state: ScanState): CallScanResult => ({
+  calls: state.calls,
+  unresolved: state.unresolved,
+  standardTargetsHidden: state.standardTargetsHidden,
+  statements: state.statements
+});
+
+/**
+ * Every other object this source reaches, and every call it cannot name.
+ */
+export function extractCalls(source: string, options: CallScanOptions = {}): CallScanResult {
+  const statements = statementsOf(source);
+  const state = emptyState();
+  scan(statements, localNames(statements), options, state);
+  return resultOf(state);
+}
+
+/** A source read for the scan, and the name to report its lines under. */
+export interface NamedSource {
+  name: string;
+  source: string;
+}
+
+/**
+ * The same scan over several sources that belong together.
+ *
+ * A function group declares its globals in one include and uses them in
+ * another: scanned one at a time, every call through gs_screen-handler would
+ * be unresolvable. The declarations of all the sources are collected first,
+ * and each source still prefers its own - a name reused for something else in
+ * one include means what that include says it means.
+ */
+export function extractCallsAcross(sources: NamedSource[], options: CallScanOptions = {}): CallScanResult {
+  const parsed = sources.map(source => ({ name: source.name, statements: statementsOf(source.source) }));
+  const shared: Locals = { refTypes: new Map(), declared: new Set() };
+  const own = parsed.map(source => {
+    const locals = localNames(source.statements);
+    for (const [name, type] of locals.refTypes) if (!shared.refTypes.has(name)) shared.refTypes.set(name, type);
+    for (const name of locals.declared) shared.declared.add(name);
+    return locals;
+  });
+
+  const state = emptyState();
+  const many = parsed.length > 1;
+  parsed.forEach((source, index) => {
+    const locals: Locals = many
+      ? { refTypes: new Map([...shared.refTypes, ...own[index].refTypes]), declared: shared.declared }
+      : own[index];
+    scan(source.statements, locals, options, state, many ? source.name : undefined);
+  });
+  return resultOf(state);
 }
 
 /** One object that is called, with the places that call it. */

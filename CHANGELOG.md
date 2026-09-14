@@ -60,7 +60,11 @@ inside a literal ends nothing.
 
 A function group is read together with its includes whether or not
 `followIncludes` was passed: its own source holds nothing but `INCLUDE` lines,
-and every function module body lives in one of them. They are served under the
+and every function module body lives in one of them. Sources read together are
+also scanned together: a group declares its globals in the TOP include and uses
+them in another, so every call through `gs_screen-handler` would otherwise be
+unresolvable. Each source still prefers its own declarations, because a name
+reused in one include means what that include says it means. They are served under the
 group (`/functions/groups/<group>/includes/<include>`), with the report include
 collection as a fallback; one that cannot be read is reported by name instead
 of losing the rest. A program's includes are read only when asked, because

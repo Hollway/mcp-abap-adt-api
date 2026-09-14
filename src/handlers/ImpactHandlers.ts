@@ -8,7 +8,7 @@ import { locateMethod, classSourceUrl, interfaceSourceUrl } from '../lib/symbolP
 import { rollUpUsages } from '../lib/impact';
 import type { ImpactObject, ImpactPlace, UsageRow } from '../lib/impact';
 import { includedPrograms, includeSourceUrl } from '../lib/sourceScan';
-import { extractCalls, groupCalls, CALL_KINDS } from '../lib/abapCalls';
+import { extractCallsAcross, groupCalls, CALL_KINDS } from '../lib/abapCalls';
 import type { CallSite, UnresolvedCall } from '../lib/abapCalls';
 
 /**
@@ -523,18 +523,14 @@ export class ImpactHandlers extends BaseHandler {
         includesUnread = read.unread;
       }
 
-      const calls: CallSite[] = [];
-      const unresolved: UnresolvedCall[] = [];
-      let statements = 0;
-      let standardTargetsHidden = 0;
-      for (const source of scanned) {
-        const found = extractCalls(source.source, { onlyCustom, kinds });
-        const many = scanned.length > 1;
-        for (const call of found.calls) calls.push(many ? { ...call, source: source.name } : call);
-        for (const entry of found.unresolved) unresolved.push(many ? { ...entry, source: source.name } : entry);
-        statements += found.statements;
-        standardTargetsHidden += found.standardTargetsHidden;
-      }
+      // Scanned together, not one at a time: a function group declares its
+      // globals in one include and uses them in another, so a call through
+      // gs_screen-handler is only resolvable with every include in hand.
+      const found = extractCallsAcross(scanned, { onlyCustom, kinds });
+      const calls: CallSite[] = found.calls;
+      const unresolved: UnresolvedCall[] = found.unresolved;
+      const statements = found.statements;
+      const standardTargetsHidden = found.standardTargetsHidden;
 
       const { targets, targetsHidden } = groupCalls(calls, {
         maxTargets: Number(args?.maxTargets) || undefined,
@@ -542,7 +538,10 @@ export class ImpactHandlers extends BaseHandler {
         maxStatementChars: Number(args?.maxStatementChars) || undefined
       });
 
-      const byKind: Record<string, number> = {};
+      // No prototype: one of the kinds counted here is called 'constructor',
+      // and on a plain object that name already holds a function - the count
+      // came out as "function Object() { [native code] }111".
+      const byKind: Record<string, number> = Object.create(null);
       for (const call of calls) byKind[call.kind] = (byKind[call.kind] || 0) + 1;
 
       this.trackRequest(startTime, true);

@@ -539,6 +539,7 @@ const CALLER_SOURCE = [
   '    mo_helper->add( 2 ).',
   "    CALL FUNCTION 'Z_APP_SAVE'.",
   '    SELECT * FROM zorders INTO TABLE @DATA(lt_any).',
+  '    DATA(lo_writer) = NEW zcl_app_writer( ).',
   '    CALL METHOD (lv_class)=>(lv_method).',
   '    cl_gui_frontend_services=>file_exist( ).',
   '  ENDMETHOD.',
@@ -571,6 +572,13 @@ describe('callsFrom', () => {
     expect(helper.members).toEqual(['ADD']);
     expect(result.summary.byKind).toMatchObject({ method: 2, function: 1, table: 1 });
     expect(result.standardTargetsHidden).toBe(1);
+  });
+
+  it('counts constructors as a number, the one kind whose name a plain object already holds', async () => {
+    const { handler } = handlers({ getObjectSource: async () => CALLER_SOURCE });
+    const result = answer(await handler.handleCallsFrom({ objectName: 'ZCL_APP_CALLER', onlyCustom: false }));
+    expect(result.summary.byKind.constructor).toBe(1);
+    expect(JSON.stringify(result.summary.byKind)).not.toMatch(/native code/);
   });
 
   it('lists the dynamic call it cannot name instead of leaving the edge out', async () => {

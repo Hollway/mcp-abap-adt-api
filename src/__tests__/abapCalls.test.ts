@@ -1,4 +1,4 @@
-import { statementsOf, localNames, extractCalls, groupCalls } from '../lib/abapCalls';
+import { statementsOf, localNames, extractCalls, extractCallsAcross, groupCalls } from '../lib/abapCalls';
 
 /**
  * A class written the way the ones on a real system are: a chain declaration,
@@ -191,8 +191,8 @@ describe('extractCalls', () => {
     const reasons = calls.unresolved.map(entry => entry.reason);
     expect(reasons).toContain('the class and the method are both in variables');
     expect(reasons).toContain('the function module name is in a variable');
-    expect(reasons).toContain('LO_OTHER is not declared in this source, so its class is unknown here');
-    expect(reasons).toContain('LO_UNKNOWN is not declared in this source, so its class is unknown here');
+    expect(reasons).toContain('LO_OTHER is not declared as a reference in this source, so its class is unknown here');
+    expect(reasons).toContain('LO_UNKNOWN is not declared as a reference in this source, so its class is unknown here');
     expect(reasons.some(reason => reason.startsWith('a chained call'))).toBe(true);
   });
 
@@ -244,5 +244,47 @@ describe('groupCalls', () => {
     const grouped = groupCalls(calls.calls, { maxTargets: 2 });
     expect(grouped.targets).toHaveLength(2);
     expect(grouped.targetsHidden).toBeGreaterThan(0);
+  });
+});
+
+describe('extractCallsAcross', () => {
+  // A function group as they really are: the globals in the TOP include, the
+  // code that uses them in another - found this way on a live one.
+  const TOP = 'DATA go_worker TYPE REF TO zcl_app_worker.';
+  const F01 = [
+    'FORM run.',
+    '  go_worker->start( ).',
+    'ENDFORM.'
+  ].join('\n');
+
+  it('resolves a call through a reference declared in another include of the same object', () => {
+    const alone = extractCalls(F01);
+    expect(alone.calls).toHaveLength(0);
+    expect(alone.unresolved[0].reason).toMatch(/GO_WORKER is not declared/);
+
+    const together = extractCallsAcross([{ name: 'LZAPPTOP', source: TOP }, { name: 'LZAPPF01', source: F01 }]);
+    expect(together.unresolved).toHaveLength(0);
+    expect(together.calls).toEqual([{
+      target: 'ZCL_APP_WORKER',
+      kind: 'method',
+      member: 'START',
+      line: 2,
+      statement: 'go_worker->start( )',
+      source: 'LZAPPF01'
+    }]);
+  });
+
+  it('lets a source keep its own meaning for a name another source also declares', () => {
+    const other = 'DATA go_worker TYPE REF TO zcl_app_other.';
+    const together = extractCallsAcross([
+      { name: 'LZAPPTOP', source: TOP },
+      { name: 'LZAPPF01', source: `${other}\n${F01}` }
+    ]);
+    expect(together.calls.map(call => call.target)).toEqual(['ZCL_APP_OTHER']);
+  });
+
+  it('names no source when there is only one, so a single object reads as before', () => {
+    const one = extractCallsAcross([{ name: 'ZCL_ONE', source: 'DATA(x) = NEW zcl_app_worker( ).' }]);
+    expect(one.calls[0].source).toBeUndefined();
   });
 });
