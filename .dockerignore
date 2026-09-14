@@ -1,0 +1,45 @@
+# The build context is copied into the builder stage with `COPY . .`, so
+# anything listed here is anything that must not end up in an image layer.
+
+# Credentials first: .env holds a real SAP password on a developer machine,
+# and the final image never needs it - the server takes its settings from the
+# environment it is started in.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+id_rsa*
+id_ed25519*
+.netrc
+.npmrc
+secrets.json
+credentials.json
+*.credentials
+auth.json
+
+# History and local tooling, which an image has no use for
+.git
+.gitignore
+.gitattributes
+.gitlab-ci.yml
+.claude
+.mcp.json
+CLAUDE.md
+.codegraph
+graphify-out
+
+# Rebuilt inside the image, or irrelevant to it
+node_modules
+dist
+coverage
+.jest-cache
+*.log
+.vscode
+.idea
+.DS_Store
+Thumbs.db

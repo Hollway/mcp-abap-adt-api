@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { config } from 'dotenv';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -57,6 +55,7 @@ import { refusalFor, annotationsFor } from './lib/toolFilter';
 import type { ToolProfile } from './lib/toolFilter';
 import { metrics } from './lib/metrics';
 import { lockRegistry } from './lib/lockRegistry';
+import { currentSession } from './lib/sessionContext';
 import type { ToolDefinition } from './types/tools.js';
 
 /**
@@ -84,9 +83,51 @@ const HEALTHCHECK_TOOL: ToolDefinition = {
   }
 };
 
+/** Where the settings came from, so a misdirected instance is obvious. */
+export function configSource(): 'client environment' | '.env file' {
+  return CLIENT_PROVIDED.has('SAP_URL') ? 'client environment' : '.env file';
+}
+
+/**
+ * Say on startup which system this process talks to. With several instances
+ * of this server connected to different systems, "which one am I" is the
+ * question worth answering before anything else happens.
+ *
+ * Called once per process from the entry point, not from the constructor:
+ * over HTTP a server instance is built for every request, and a banner
+ * printed on each of them would drown the log it is meant to clarify.
+ */
+export function announceTarget(mode: 'stdio' | 'http' = 'stdio'): void {
+  // Over HTTP there is no server-wide user: every caller brings their own
+  // credentials, and printing SAP_USER here would name whoever happens to be
+  // in the .env file rather than anyone who will actually connect.
+  const who = mode === 'http' ? 'per request (HTTP Basic)' : process.env.SAP_USER;
+  console.error(
+    `[config] ${process.env.SAP_URL} client=${process.env.SAP_CLIENT || '-'} ` +
+    `language=${process.env.SAP_LANGUAGE || '-'} user=${who} ` +
+    `(settings from ${configSource()})`
+  );
+  if (configSource() === '.env file') {
+    console.error(
+      '[config] WARNING: SAP_URL was not passed by the client, so it came from the .env ' +
+      'file next to the server. Check that this is the system you meant.'
+    );
+  }
+  if (isReadOnly()) {
+    const allowed = [...readOnlyAllowances()];
+    console.error(
+      '[config] SAP_READONLY is set: tools that change the system are refused' +
+      (allowed.length ? `, except: ${allowed.join(', ')}` : '')
+    );
+  }
+  const excluded = [...excludedTokens()];
+  if (excluded.length) {
+    console.error(`[config] SAP_TOOLS_EXCLUDE hides: ${excluded.join(', ')}`);
+  }
+}
+
 export class AbapAdtServer extends Server {
   private adtClient: ADTClient;
-  private reloginPromise?: Promise<void>;
   private toolGroupIndex?: Map<string, string>;
   private authHandlers: AuthHandlers;
   private transportHandlers: TransportHandlers;
@@ -128,11 +169,20 @@ export class AbapAdtServer extends Server {
     private callHandlers: CallHandlers;
     private tableHandlers: TableHandlers;
 
-    constructor() {
+  /**
+   * @param client the session to serve this request, when one is supplied.
+   *
+   * Over stdio nothing is passed and the server builds its own client from
+   * the environment, as it always did: one process, one person, one session
+   * for as long as it runs. Over HTTP the credentials arrive per request and
+   * the session comes from the pool, so the server is handed a client that
+   * outlives it rather than opening - and abandoning - one of its own.
+   */
+  constructor(client?: ADTClient) {
     super(
       {
         name: "mcp-abap-adt-api",
-        version: "0.1.0",
+        version: "1.0.0",
       },
       {
         capabilities: {
@@ -141,24 +191,26 @@ export class AbapAdtServer extends Server {
       }
     );
 
-    const missingVars = ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
-    if (missingVars.length > 0) {
-      throw new Error(
-        `Missing required environment variables: ${missingVars.join(', ')}. ` +
-        'Note the user variable is SAP_USER, not SAP_USERNAME.'
+    if (client) {
+      this.adtClient = client;
+    } else {
+      const missingVars = ['SAP_URL', 'SAP_USER', 'SAP_PASSWORD'].filter(v => !process.env[v]);
+      if (missingVars.length > 0) {
+        throw new Error(
+          `Missing required environment variables: ${missingVars.join(', ')}. ` +
+          'Note the user variable is SAP_USER, not SAP_USERNAME.'
+        );
+      }
+
+      this.adtClient = new ADTClient(
+        process.env.SAP_URL as string,
+        process.env.SAP_USER as string,
+        process.env.SAP_PASSWORD as string,
+        process.env.SAP_CLIENT as string,
+        process.env.SAP_LANGUAGE as string
       );
+      this.adtClient.stateful = session_types.stateful;
     }
-
-    this.adtClient = new ADTClient(
-      process.env.SAP_URL as string,
-      process.env.SAP_USER as string,
-      process.env.SAP_PASSWORD as string,
-      process.env.SAP_CLIENT as string,
-      process.env.SAP_LANGUAGE as string
-    );
-    this.adtClient.stateful = session_types.stateful
-
-    this.announceTarget();
 
     // Initialize handlers
     this.authHandlers = new AuthHandlers(this.adtClient);
@@ -204,41 +256,6 @@ export class AbapAdtServer extends Server {
 
         // Setup tool handlers
     this.setupToolHandlers();
-  }
-
-  /** Where the settings came from, so a misdirected instance is obvious. */
-  private configSource(): 'client environment' | '.env file' {
-    return CLIENT_PROVIDED.has('SAP_URL') ? 'client environment' : '.env file';
-  }
-
-  /**
-   * Say on startup which system this process talks to. With several instances
-   * of this server connected to different systems, "which one am I" is the
-   * question worth answering before anything else happens.
-   */
-  private announceTarget(): void {
-    console.error(
-      `[config] ${process.env.SAP_URL} client=${process.env.SAP_CLIENT || '-'} ` +
-      `language=${process.env.SAP_LANGUAGE || '-'} user=${process.env.SAP_USER} ` +
-      `(settings from ${this.configSource()})`
-    );
-    if (this.configSource() === '.env file') {
-      console.error(
-        '[config] WARNING: SAP_URL was not passed by the client, so it came from the .env ' +
-        'file next to the server. Check that this is the system you meant.'
-      );
-    }
-    if (isReadOnly()) {
-      const allowed = [...readOnlyAllowances()];
-      console.error(
-        '[config] SAP_READONLY is set: tools that change the system are refused' +
-        (allowed.length ? `, except: ${allowed.join(', ')}` : '')
-      );
-    }
-    const excluded = [...excludedTokens()];
-    if (excluded.length) {
-      console.error(`[config] SAP_TOOLS_EXCLUDE hides: ${excluded.join(', ')}`);
-    }
   }
 
   private serializeResult(result: any) {
@@ -731,13 +748,18 @@ export class AbapAdtServer extends Server {
    * this server run side by side against different systems.
    */
   private async healthcheck() {
+    const owner = currentSession().owner;
     const system = {
       url: this.adtClient.baseUrl,
       client: this.adtClient.client || undefined,
       language: this.adtClient.language || undefined,
       user: this.adtClient.username,
-      configuredBy: this.configSource()
+      configuredBy: configSource()
     };
+    // Over HTTP one process serves everybody, so "whose session answered
+    // this" is worth stating rather than leaving to be inferred from the
+    // user name.
+    const pooled = owner ? { user: owner.user, since: owner.since } : undefined;
     const excluded = [...excludedTokens()];
     const allowed = [...readOnlyAllowances()];
     const profile = {
@@ -761,6 +783,7 @@ export class AbapAdtServer extends Server {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         system,
+        pooledSession: pooled,
         profile,
         metrics: metrics.snapshot(),
         session: { ...session, loggedin: this.adtClient.loggedin },
@@ -775,6 +798,7 @@ export class AbapAdtServer extends Server {
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
         system,
+        pooledSession: pooled,
         profile,
         metrics: metrics.snapshot(),
         session,
@@ -795,9 +819,12 @@ export class AbapAdtServer extends Server {
    * Re-authenticate at most once, even if several calls fail at the same time.
    */
   private async relogin(): Promise<void> {
-    if (!this.reloginPromise) {
-      const done = () => { this.reloginPromise = undefined; };
-      this.reloginPromise = this.adtClient.login().then(() => {
+    // The guard lives with the session, not with this object: over HTTP a
+    // server is built per request, so a field here would guard nothing.
+    const session = currentSession();
+    if (!session.relogin) {
+      const done = () => { session.relogin = undefined; };
+      session.relogin = this.adtClient.login().then(() => {
         // Handles from the previous session are void - drop them rather than
         // keeping entries that can only fail.
         if (lockRegistry.count() > 0) {
@@ -807,7 +834,7 @@ export class AbapAdtServer extends Server {
         done();
       }, (e: unknown) => { done(); throw e; });
     }
-    return this.reloginPromise;
+    return session.relogin;
   }
 
   /**
@@ -906,10 +933,3 @@ export class AbapAdtServer extends Server {
     };
   }
 }
-
-// Create and run server instance
-const server = new AbapAdtServer();
-server.run().catch((error) => {
-  console.error('Failed to start MCP server:', error);
-  process.exit(1);
-});

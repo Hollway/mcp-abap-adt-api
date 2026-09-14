@@ -8,7 +8,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 The MCP-Server `mcp-abap-adt-api` is a Model Context Protocol (MCP) server designed to facilitate seamless communication between ABAP systems and MCP clients. It is a wrapper for [abap-adt-api](https://github.com/marcellourbani/abap-adt-api/) and provides a suite of tools and resources for managing ABAP objects, handling transport requests, performing code analysis, and more, enhancing the efficiency and effectiveness of ABAP development workflows.
 
-The server is not published to a package registry: clone the repository, build it, and point your MCP client at `dist/index.js`. [Installation](#installation) has the details.
+The server is not published to a package registry: clone the repository, build it, and point your MCP client at `dist/main.js`. [Installation](#installation) has the details.
 
 ## Features
 
@@ -41,24 +41,32 @@ The server is not published to a package registry: clone the repository, build i
 
 ## Installation
 
-The server runs over **stdio**. Clone it, build it, and give your MCP client the path to `dist/index.js` together with the environment variables below.
+The server speaks two transports, chosen with `MCP_TRANSPORT`:
+
+- **stdio** (default) - one process per user, started by the MCP client, credentials from the environment. Give your client the path to `dist/main.js`.
+- **http** - one process for everybody, each caller sending their own SAP credentials as HTTP Basic on every request. See [Serving several users over HTTP](#serving-several-users-over-http).
+
+Clone it, build it, and point your client at `dist/main.js` with the environment variables below.
 
 ### Environment variables
 
 | Variable | Meaning |
 | --- | --- |
-| `SAP_URL`, `SAP_USER`, `SAP_PASSWORD` | Connection; required. The user variable is `SAP_USER` - not `SAP_USERNAME`. |
+| `SAP_URL` | The system; required by both transports. |
+| `SAP_USER`, `SAP_PASSWORD` | Credentials, required over **stdio** only - over HTTP every caller sends their own and the server holds none. The user variable is `SAP_USER` - not `SAP_USERNAME`. |
 | `SAP_CLIENT`, `SAP_LANGUAGE` | Logon client and language. |
 | `SAP_READONLY` | `1` hides every tool that changes the system and refuses it if called anyway. Use it for a system that must only be read. |
 | `SAP_READONLY_ALLOW` | Groups or tool names let through the read-only fence, e.g. `debugger` for a system that must not be developed on but does need debugging. Exclusion wins over an allowance, and these tools keep `readOnlyHint: false`. |
 | `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
 | `SAP_MAX_RESPONSE_CHARS` | Cap on a single answer (default 200000). Over it, the answer is replaced by an envelope with the size and a preview. |
-| `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr. |
+| `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr - over stdio, stdout carries the protocol. Over HTTP, `info` adds one line per request carrying its id, the caller and the tool. |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `0` accepts a self-signed certificate (development only). |
 
 Connection settings can also come from a `.env` file next to the server, but that is only a fallback: when several instances run against different systems, a typo in one client entry would silently connect to whatever `.env` points at. The server prints its target system and where the settings came from on startup, and `healthcheck` reports both.
 
-> **Windows tip:** give `command` the full path to `node.exe` and `args` the absolute path to `dist/index.js` — a bare `node` is not always on the PATH an MCP client starts with.
+The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `MCP_MAX_BODY_MB`, `MCP_REQUEST_TIMEOUT`, `MCP_ALLOWED_ORIGINS`, `SAP_SESSION_IDLE_TTL`, `SAP_SESSION_IDLE_TTL_LOCKED`, `SAP_ASSUMED_SESSION_TIMEOUT`, `SAP_MAX_SESSIONS`, `SAP_MAX_CONCURRENT`, `SAP_ADMIN_TOKEN`. Each is explained in `.env.example` and in the section below.
+
+> **Windows tip:** give `command` the full path to `node.exe` and `args` the absolute path to `dist/main.js` — a bare `node` is not always on the PATH an MCP client starts with.
 
 ### Build from source
 
@@ -123,13 +131,98 @@ Connection settings can also come from a `.env` file next to the server, but tha
      "mcpServers": {
        "mcp-abap-adt-api": {
          "command": "node",
-         "args": ["PATH_TO_YOUR/mcp-abap-adt-api/dist/index.js"],
+         "args": ["PATH_TO_YOUR/mcp-abap-adt-api/dist/main.js"],
          "disabled": false,
          "autoApprove": []
        }
      }
    }
    ```
+
+## Serving several users over HTTP
+
+`MCP_TRANSPORT=http` turns the server into one process that many people share. Every request carries its own SAP credentials as HTTP Basic; the server stores none of them and has no account of its own.
+
+```jsonc
+// what a client puts in its MCP configuration
+{
+  "mcpServers": {
+    "abap-adt-api": {
+      "type": "http",
+      "url": "https://abap-mcp.example.internal/mcp",
+      "headers": { "Authorization": "Basic <base64 of SAPUSER:password>" }
+    }
+  }
+}
+```
+
+### One session per user, not per request
+
+The credentials identify a **pooled SAP session**, reused across requests and closed on a schedule. That is the whole point of the design: a session per request would leave one behind on the backend for every call ever made, and a lock taken by one request would be unusable by the next, because the handle dies with the session that took it.
+
+Each pooled user costs **two** sessions on the backend: the stateful one that holds locks and does the writing, and a stateless clone that serves the reads. Both are logged off when the session is closed.
+
+Sessions are closed when they have been idle past a limit, when a caller runs `logout`, when an operator deletes one, or on shutdown. Closing releases the locks first, deliberately, and says in the log what was released. The pool never pings SAP to keep a session warm: a session nobody is using is meant to expire on its own, taking its locks with it.
+
+**Two idle limits, because the cases differ.** A session with no locks is cheap to close (`SAP_SESSION_IDLE_TTL`, 15 min). One that still holds locks is kept far longer (`SAP_SESSION_IDLE_TTL_LOCKED`, 28 min) - but not forever, because those locks block everyone else on the system, including people working outside this server.
+
+The locked limit is measured from the last use of the **stateful** session, not from the last request: reads travel on the clone, so somebody who spends half an hour reading is busy the whole time while the session holding their locks sits untouched - and SAP times each session out separately. It must also stay comfortably under the backend timeout (`SAP_ASSUMED_SESSION_TIMEOUT`, 1800 s by default in SAP), or the session will be gone before the server can release its locks; the server warns at startup when it is not.
+
+### Matching the log against SAP's own session list
+
+Every `session opened`, `stateless clone opened` and `session closed` line
+carries the id of the SAP session it is about:
+
+```
+[pool] JSMITH: session opened (1/25) [sap-session=DB883C5FADA111F18000005056A2C8B3]
+```
+
+That value is `SECURITY_CONTEXT-LINK` - the handle SAP keeps for an HTTP
+security session, listed in **SM05** and readable directly:
+
+```sql
+SELECT * FROM security_context WHERE link = 'DB883C5FADA111F18000005056A2C8B3'
+```
+
+Sessions SAP lists that no log line claims were **abandoned**: a process
+killed rather than stopped leaves them behind until the backend times them
+out. That is what the id is for.
+
+Note it is not SM04's "session key" (`T82_U11195_M0`). That is an internal
+dialogue-session key and nothing an HTTP client holds corresponds to it; in
+SM04 these sessions are recognised by user, client host and start time.
+
+The id is half of the `SAP_SESSIONID` cookie - the half that identifies.
+The other half authenticates and is never written anywhere: a log that
+carried it would hand whoever reads it the session, and logs outlive
+sessions.
+
+### Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /mcp` | The MCP endpoint. HTTP Basic required; `401` with `WWW-Authenticate` if absent, `413` for a body over the limit, `503` with `Retry-After` when the pool is full or too many calls are already running. |
+| `GET /health` | Liveness. Reports the system, the number of sessions and whether SAP has been unreachable - but stays `ok` regardless, because restarting this process would not fix SAP. |
+| `GET /ready` | Readiness. Red only while shutting down. Deliberately **not** red for a full pool (busy is not unfit, and failing would stop even the 503 naming who holds the sessions) nor for SAP being down (a dependency every replica shares: failing it empties the service of endpoints without helping). |
+| `GET /metrics` | Counters for the process, the state of the pool, and a passive `sap` signal built from real traffic - no probe, no technical user. |
+| `GET /sessions` | Who is connected, for how long, and what they have locked. |
+| `DELETE /sessions/<user>` | Close one session. Refused with `409` while it is serving a request. |
+
+The last two are **off** unless `SAP_ADMIN_TOKEN` is set, and then require it in `X-Admin-Token`: they name who is connected and end other people's sessions.
+
+### Deploy one replica
+
+The pool lives in the memory of one process. With two replicas and no affinity, a `lock` handled by one pod and the write that follows handled by another would open a second session for the same person, and the write would be refused for a lock the second pod knows nothing about - while the first pod holds it until it times out.
+
+So: **one replica per SAP client**, which also matches one server per client. If it ever has to scale, add session affinity on the `Authorization` header first, and test that a lock survives two consecutive requests through the load balancer.
+
+Set `terminationGracePeriodSeconds` above the drain: on `SIGTERM` the server turns `/ready` red, lets the requests in flight finish, then logs every session off. Killed before that finishes, it leaves sessions - and their locks - behind until SAP times them out.
+
+### What is shared and what is not
+
+Per session: the locks held, the source cache and the per-caller counters. `unlockAll` releases only its own caller's locks, and a cached read is never served to another user - two people do not have the same authorisations.
+
+Shared by the whole server: `SAP_READONLY`, `SAP_TOOLS_EXCLUDE`, `SAP_READONLY_ALLOW`, `SAP_MAX_RESPONSE_CHARS`. They describe the system this server talks to, not the person calling.
 
 ## Custom Instruction
 
@@ -372,7 +465,7 @@ When working with ABAP objects, you may encounter errors related to unknown fiel
 
 ## Troubleshooting
 
-*   **The client won't start the server:** ensure Node.js is installed (`node -v`, `npm -v`) and that `npm run build` has produced `dist/index.js`. Give the client absolute paths for both `node` and the script — the PATH an MCP client starts with is not always your shell's.
+*   **The client won't start the server:** ensure Node.js is installed (`node -v`, `npm -v`) and that `npm run build` has produced `dist/main.js`. Give the client absolute paths for both `node` and the script — the PATH an MCP client starts with is not always your shell's.
 *   **SAP connection errors:** verify your credentials (`SAP_URL`, `SAP_USER`, `SAP_PASSWORD`, `SAP_CLIENT`), confirm the system is reachable, that your user has ADT authorizations, and that `/sap/bc/adt` is active in `SICF`.
 *   **TLS / self-signed certificate errors:** for development only, set `NODE_TLS_REJECT_UNAUTHORIZED=0` (env var or in the client `env` block).
 *   **Every call suddenly fails with status 400:** the ADT session died. The server detects that shape (an HTTP failure with no `exc:exception` body), re-authenticates and retries read-only calls, marking the answer `sessionRecovered`. A call that writes is not repeated: re-lock the object and try again. `healthcheck` says whether the session is alive.
@@ -415,7 +508,7 @@ does rather than what its documentation implies.
 
 Contributions are welcome! Please follow these steps to contribute:
 
-1. **Fork the Repository**
+1. **Branch from `main`**
 2. **Create a New Branch**
 
    ```cmd

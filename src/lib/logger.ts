@@ -1,4 +1,5 @@
 import { logLevel } from './serverConfig';
+import { currentRequest } from './requestContext';
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
@@ -23,11 +24,16 @@ function log(level: LogLevel, name: string, message: string, meta?: Record<strin
   if (RANK[level] > RANK[logLevel()]) return;
 
   const timestamp = new Date().toISOString();
+  // Whose call this line belongs to. Absent over stdio, where there is only
+  // ever one caller and one call in flight; over HTTP it is what makes a
+  // shared log readable at all.
+  const request = currentRequest();
   const logEntry = {
     timestamp,
     level,
     service: name,
     message,
+    ...(request ? { requestId: request.id, user: request.user, tool: request.tool } : {}),
     ...meta
   };
   

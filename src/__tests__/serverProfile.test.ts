@@ -1,4 +1,14 @@
-import { isReadOnly, excludedTokens, logLevel, maxResponseChars } from '../lib/serverConfig';
+import {
+  isReadOnly,
+  excludedTokens,
+  assumedSessionTimeoutMs,
+  logLevel,
+  maxResponseChars,
+  sessionIdleTtlMs,
+  lockedSessionIdleTtlMs,
+  maxSessions,
+  maxConcurrentCalls
+} from '../lib/serverConfig';
 import {
   MUTATING_TOOLS,
   SESSION_TOOLS,
@@ -134,5 +144,76 @@ describe('metrics', () => {
     const snapshot = metrics.snapshot();
     expect(snapshot).toMatchObject({ requests: 3, successes: 2, failures: 1, averageMs: 150 });
     expect(snapshot.handlers.ObjectSourceHandlers).toMatchObject({ requests: 2, averageMs: 200 });
+  });
+});
+
+/**
+ * The pool limits are the numbers an operator tunes per system - one may run 16
+ * dialogue work processes and icm/max_conn = 100, another system will not -
+ * so what matters here is that a value set in the environment is honoured and
+ * that nonsense falls back to something safe rather than to zero, which would
+ * close every session the moment it was opened.
+ */
+describe('serverConfig pool limits', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it('takes the idle limits in seconds and answers in milliseconds', () => {
+    delete process.env.SAP_SESSION_IDLE_TTL;
+    delete process.env.SAP_SESSION_IDLE_TTL_LOCKED;
+    expect(sessionIdleTtlMs()).toBe(900_000);
+    expect(lockedSessionIdleTtlMs()).toBe(1_680_000);
+
+    process.env.SAP_SESSION_IDLE_TTL = '60';
+    process.env.SAP_SESSION_IDLE_TTL_LOCKED = '120';
+    expect(sessionIdleTtlMs()).toBe(60_000);
+    expect(lockedSessionIdleTtlMs()).toBe(120_000);
+  });
+
+  /**
+   * The locked limit is only useful while it lands inside what SAP allows,
+   * with room for the sweep interval on top - past that the backend closes
+   * the session first and the deliberate unlock never happens.
+   */
+  it('leaves room between the locked limit and the backend timeout', () => {
+    delete process.env.SAP_SESSION_IDLE_TTL_LOCKED;
+    delete process.env.SAP_ASSUMED_SESSION_TIMEOUT;
+    expect(assumedSessionTimeoutMs()).toBe(1_800_000);
+    expect(lockedSessionIdleTtlMs() + 60_000).toBeLessThanOrEqual(assumedSessionTimeoutMs());
+
+    process.env.SAP_ASSUMED_SESSION_TIMEOUT = '3600';
+    expect(assumedSessionTimeoutMs()).toBe(3_600_000);
+  });
+
+  it('keeps a locked session longer than an idle one by default', () => {
+    delete process.env.SAP_SESSION_IDLE_TTL;
+    delete process.env.SAP_SESSION_IDLE_TTL_LOCKED;
+    expect(lockedSessionIdleTtlMs()).toBeGreaterThan(sessionIdleTtlMs());
+  });
+
+  it('refuses a zero or unreadable limit instead of expiring everything at once', () => {
+    process.env.SAP_SESSION_IDLE_TTL = '0';
+    expect(sessionIdleTtlMs()).toBe(900_000);
+    process.env.SAP_SESSION_IDLE_TTL = 'soon';
+    expect(sessionIdleTtlMs()).toBe(900_000);
+    process.env.SAP_SESSION_IDLE_TTL = '-30';
+    expect(sessionIdleTtlMs()).toBe(900_000);
+  });
+
+  it('reads the session and concurrency caps, and defaults them below what a system can take', () => {
+    delete process.env.SAP_MAX_SESSIONS;
+    delete process.env.SAP_MAX_CONCURRENT;
+    expect(maxSessions()).toBe(25);
+    expect(maxConcurrentCalls()).toBe(8);
+
+    process.env.SAP_MAX_SESSIONS = '10';
+    process.env.SAP_MAX_CONCURRENT = '4';
+    expect(maxSessions()).toBe(10);
+    expect(maxConcurrentCalls()).toBe(4);
+
+    process.env.SAP_MAX_SESSIONS = 'plenty';
+    expect(maxSessions()).toBe(25);
   });
 });
