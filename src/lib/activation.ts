@@ -53,6 +53,9 @@ export interface ActivationOutcome {
   activated: ObjectRef[];
   messages?: ActivationMessage[];
   stillInactive?: ObjectRef[];
+  /** Inactive objects that were not part of this activation. */
+  othersInactive?: ObjectRef[];
+  othersInactiveCount?: number;
   note?: string;
   hint?: string;
 }
@@ -92,6 +95,32 @@ export function selectInactive(
 
 const asRef = (e: { 'adtcore:name': string; 'adtcore:type': string }): ObjectRef =>
   ({ name: e['adtcore:name'], type: e['adtcore:type'] });
+
+/** How many of the other inactive objects an answer lists before it counts them. */
+export const MAX_OTHERS_LISTED = 25;
+
+/**
+ * What is still inactive after an activation, split in two: the object that
+ * was activated, and everything else.
+ *
+ * The second half is the one that misleads. An activation narrowed to a name -
+ * activateByName with mainInclude takes exactly one include per call - checks
+ * itself against that name only, so the answer reads `stillInactive: []` while
+ * the four other includes of the same program sit inactive. Reporting them is
+ * the difference between "this include is active" and "the program is".
+ */
+export function splitInactive(
+  records: InactiveObjectRecord[],
+  objectName?: string,
+  objectUrl?: string
+): { forObject: ObjectRef[]; others: ObjectRef[] } {
+  const mine = selectInactive(records, objectName, objectUrl);
+  const uris = new Set(mine.map(e => e['adtcore:uri']));
+  return {
+    forObject: mine.map(asRef),
+    others: selectInactive(records).filter(e => !uris.has(e['adtcore:uri'])).map(asRef)
+  };
+}
 
 /**
  * Package URI of an object, from the path the workbench shows for it.
@@ -170,7 +199,7 @@ export async function activateAndVerify(
   const result: ActivationResult = await client.activate(objects, request.preauditRequested);
 
   const after: InactiveObjectRecord[] = await client.inactiveObjects();
-  const stillInactive = selectInactive(after, request.objectName, request.objectUrl).map(asRef);
+  const { forObject: stillInactive, others } = splitInactive(after, request.objectName, request.objectUrl);
 
   const success = result.success && stillInactive.length === 0;
   return {
@@ -178,8 +207,19 @@ export async function activateAndVerify(
     activated: objects.map(asRef),
     messages: result.messages,
     stillInactive,
+    // Only what was asked for was activated, and success says only that. What
+    // else is inactive is the caller's own worklist, and a program whose other
+    // includes are still inactive is not an activated program.
+    ...(others.length
+      ? {
+        othersInactive: others.slice(0, MAX_OTHERS_LISTED),
+        othersInactiveCount: others.length
+      }
+      : {}),
     hint: success
-      ? undefined
+      ? others.length
+        ? `Activated what was asked for. ${others.length} other object(s) are still inactive - they were not part of this call.`
+        : undefined
       : stillInactive.length > 0
         ? 'Some parts are still inactive - read the messages, fix the source and run activateSafe again.'
         : 'The backend reported a failure; the messages carry the syntax or activation errors.'

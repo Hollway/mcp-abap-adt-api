@@ -196,6 +196,22 @@ const check = (label, condition, detail) => {
   });
   check('findInSource refuses a broken regular expression', badRegex.isError === true, badRegex.payload);
 
+  // A syntax check with nothing but the URL. This used to be refused with
+  // "mainUrl and content are required", two parameters that for a class can
+  // only ever hold the URL itself and the source behind it.
+  const syntax = await call('syntaxCheckCode', { objectSourceUrl: CLASS_URL, url: CLASS_URL });
+  check(`syntaxCheckCode checks ${CLASS_NAME} from its URL alone`,
+    syntax.payload.status === 'success' && Array.isArray(syntax.payload.result),
+    syntax.payload);
+  check('syntaxCheckCode says where the source it checked came from',
+    syntax.payload.readSource === true || syntax.payload.usedCachedSource === true,
+    syntax.payload);
+
+  const syntaxGone = await call('syntaxCheckCode', { url: '/sap/bc/adt/oo/classes/zsmoke_no_such_class/source/main' });
+  check('syntaxCheckCode says so when there is no source to check',
+    syntaxGone.isError === true && /reading it failed/.test(JSON.stringify(syntaxGone.payload)),
+    syntaxGone.payload);
+
   // Refusals that never reach the backend, so they stay read-only
   const badFragment = await call('fragmentMappings', {
     url: CLASS_URL.replace('/source/main', ''), type: 'FORM', name: 'ANYTHING'

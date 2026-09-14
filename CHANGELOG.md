@@ -38,6 +38,30 @@ again, for a package changed from ADT since), the answer says how many came
 that way, and every budget it stops at is named rather than left to look like
 the package is smaller than it is. Statements are quoted only with `places`.
 
+### Two answers that read as success and were not
+
+**An activation reports what it did not do.** `activateByName` checks itself
+against the name it was given, and with `mainInclude` it activates exactly one
+include per call — so a program with five changed includes answered
+`verified: true, stillInactive: []` four times over while it was still
+inactive. The answer now carries `othersInactive` as well: what is still
+inactive that this call did not cover. `activateSafe` reports the same, for
+the same reason.
+
+**A syntax check on an include was an error about the wrong object.** This
+backend reads the content it is given as the main program, so an include's own
+text came back as `REPORT/PROGRAM statement missing` — a syntax error on an
+include that is perfectly fine. An include is compiled as part of its program
+and cannot be checked any other way, so for an include URL the main program is
+looked up, its stored source is what gets checked, and the answer says so in
+`checkedAgainst` (write the include first: what is not saved cannot be checked
+this way).
+
+Two more things that call needed and would not say: the source, which it now
+reads when it was neither passed nor read this session, and `mainUrl`, which
+for anything that is not an include can only ever be the URL itself — a check
+on a class with nothing but its URL used to be refused outright.
+
 ### What a declaration reaches
 
 `callsFrom` read statements that act — a call, a select, a perform — and not

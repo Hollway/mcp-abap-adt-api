@@ -18,7 +18,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
         return [
             {
                 name: 'syntaxCheckCode',
-                description: 'Perform ABAP syntax check. Provide the source in "code", or omit it to reuse the source last read/written for "url" via getObjectSource/setObjectSource (cached this session).',
+                description: 'Perform ABAP syntax check. Provide the source in "code", or omit it: the source last read or written for "url" this session is reused, and failing that it is read. An include is a special case this handles for you - it compiles only as part of its program, and this backend reads the content it is given as that program, so an include\'s own text checked on its own comes back as "REPORT/PROGRAM statement missing". For an include URL the main program is looked up, its stored source is what gets checked, and the answer says so in checkedAgainst. Write the include first: a change that is not saved cannot be checked this way.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -357,21 +357,63 @@ export class CodeAnalysisHandlers extends BaseHandler {
         // before the try so a missing-source error keeps its InvalidParams code.
         let code = args?.code;
         let usedCachedSource = false;
+        let readSource = false;
+        let mainUrl = args?.mainUrl;
+        let mainUrlResolved: string | undefined;
+        let codeIgnored = false;
+
+        // An include is not checked on its own. The backend compiles whatever
+        // content it is given as the main program, so an include's own text
+        // comes back as "REPORT/PROGRAM statement missing" - a syntax error
+        // about the wrong thing, and one the caller cannot act on. What it
+        // wants is the main program: the include is compiled as part of it,
+        // from what is stored, which is why a write has to come first.
+        const isInclude = /\/programs\/includes\//.test(String(args.url));
+        let checkedAgainst: string | undefined;
+        if (isInclude) {
+            if (!mainUrl) {
+                mainUrl = await this.mainProgramOf(String(args.url));
+                mainUrlResolved = mainUrl;
+            }
+            if (mainUrl) {
+                checkedAgainst = mainUrl;
+                codeIgnored = !!code && code !== sourceCache.get(mainUrl);
+                code = await this.sourceOf(mainUrl);
+                readSource = true;
+                usedCachedSource = false;
+            }
+        }
+
         if (code === undefined || code === null || code === '') {
             const cached = sourceCache.get(args.url);
-            if (cached === undefined) {
-                throw new McpError(
-                    ErrorCode.InvalidParams,
-                    `No source provided and none cached for '${args.url}'. Pass "code", or call getObjectSource/setObjectSource for this URL first.`
-                );
+            if (cached !== undefined) {
+                code = cached;
+                usedCachedSource = true;
+            } else {
+                // Reading it here is the call the caller would have to make
+                // anyway: this endpoint cannot check anything without the
+                // whole text.
+                try {
+                    code = await this.sourceOf(args.url);
+                    readSource = true;
+                } catch (error: any) {
+                    throw new McpError(
+                        ErrorCode.InvalidParams,
+                        `No source was provided, none is cached for '${args.url}', and reading it failed: ${error?.message}. Pass "code", or a URL that serves a source.`
+                    );
+                }
             }
-            code = cached;
-            usedCachedSource = true;
         }
+
+        // Everything that is not an include is its own main URL, and the call
+        // fails outright without one ("mainUrl and content are required") -
+        // which made a check on a class need two parameters that could only
+        // ever hold the same value.
+        if (!mainUrl) mainUrl = args.url;
 
         const startTime = performance.now();
         try {
-            const result = await this.readClient.syntaxCheck(args.url, args?.mainUrl, code, args?.mainProgram, args?.version);
+            const result = await this.readClient.syntaxCheck(args.url, mainUrl, code, args?.mainProgram, args?.version);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -380,6 +422,15 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         text: JSON.stringify({
                             status: 'success',
                             usedCachedSource,
+                            ...(readSource ? { readSource } : {}),
+                            ...(mainUrlResolved ? { mainUrlResolved } : {}),
+                            ...(checkedAgainst
+                                ? {
+                                    checkedAgainst,
+                                    ...(codeIgnored ? { codeIgnored: true } : {}),
+                                    includeNote: `An include is compiled as part of ${checkedAgainst}, and the check is over that program as it is stored${codeIgnored ? ' - the code passed here was not used, because this backend reads content as the main program and an include\'s own text comes back as "REPORT/PROGRAM statement missing"' : ''}. Write the include first; a change that is not saved cannot be checked this way.`
+                                }
+                                : {}),
                             result
                         })
                     }
@@ -492,6 +543,30 @@ export class CodeAnalysisHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, `Failed to read ${sourceUrl}`);
+        }
+    }
+
+    /**
+     * The main program an include belongs to, as a source URL.
+     *
+     * An include compiles only inside a program, so a syntax check on one
+     * without a main URL is answered with 400 - and the include's own URL
+     * says nothing about which program that is. Answers undefined rather than
+     * throwing: a check that then fails says so itself, which is better than
+     * losing a lookup that was only meant to help.
+     */
+    protected async mainProgramOf(sourceUrl: string): Promise<string | undefined> {
+        const startTime = performance.now();
+        try {
+            const includeUrl = sourceUrl.split('#')[0].replace(/\/source\/main.*$/, '');
+            const mains: any[] = await this.readClient.mainPrograms(includeUrl);
+            this.trackRequest(startTime, true);
+            const uri = mains?.[0]?.['adtcore:uri'] || mains?.[0]?.uri;
+            if (!uri) return undefined;
+            return /\/source\/main/.test(uri) ? uri : `${uri}/source/main`;
+        } catch {
+            this.trackRequest(startTime, false);
+            return undefined;
         }
     }
 
