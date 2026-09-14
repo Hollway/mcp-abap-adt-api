@@ -55,20 +55,25 @@ export const isCommentLine = (line: string): boolean => {
 /**
  * The code part of a line: the trailing `"` comment removed, quotes respected.
  *
- * A `"` inside a character literal is not a comment, and `''` is how a literal
- * escapes its own quote - both matter, because ABAP is full of texts with
- * inches, and mistaking one for a comment would hide real code.
+ * A `"` inside a literal is not a comment, and `''` is how a literal escapes
+ * its own quote - both matter, because ABAP is full of texts with inches, and
+ * mistaking one for a comment would hide real code. ABAP has three literal
+ * delimiters and all three count: a string template that builds JSON,
+ * |{ "id": 1 }|, is the everyday case where only `'` is not enough.
  */
 export const codeOf = (line: string): string => {
   if (line.startsWith('*')) return '';
-  let inLiteral = false;
+  let quote: string | undefined;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === "'") {
-      inLiteral = !inLiteral;
-    } else if (ch === '"' && !inLiteral) {
-      return line.slice(0, i);
+    if (quote) {
+      // A template and a backtick literal escape their delimiter with \.
+      if ((quote === '|' || quote === '`') && ch === '\\') { i++; continue; }
+      if (ch === quote) quote = undefined;
+      continue;
     }
+    if (ch === "'" || ch === '`' || ch === '|') { quote = ch; continue; }
+    if (ch === '"') return line.slice(0, i);
   }
   return line;
 };
