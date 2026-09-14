@@ -8,6 +8,39 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.3.0] — the graph of a whole package
+
+### What a declaration reaches
+
+`callsFrom` read statements that act — a call, a select, a perform — and not
+the ones that only declare. A report that types its work area over `ZORDERS`
+and passes it to a function module was reported as depending on the function
+module and not on the table, though changing the table is what breaks it.
+
+Declarations are read now, under the new kind `type`:
+
+- `TYPE zorders`, `TYPE zde_order_id`, `LIKE zorders-id`, and the same over a
+  table type: `TYPE STANDARD TABLE OF zorders`, `TYPE RANGE OF zorders-id`;
+- `SELECT-OPTIONS s_id FOR zorders-id` and `RANGES`, where the dictionary name
+  is the only thing that says what the selection is over.
+
+`TYPE REF TO` stays out: it is already read as the class behind a reference,
+and so as the calls made through it — reporting it again would say the same
+thing twice. So do the built-in types, which are the language rather than the
+dictionary, and every name the source declares itself, because `TYPE ty_row`
+is local and only the declarations tell the two apart. A type owned by a class
+(`TYPE zcl_return=>tt_return`) remains a `reference` to that class.
+
+### Macros are named instead of passing silently
+
+A macro expands to code that is not on the line that expands it. The body of
+one defined in the object's own source was already scanned, so what it reaches
+was found — but whatever the call site passes in was not, and nothing said so.
+A line that expands a macro the object defines is now reported as `unresolved`
+with the kind `macro`, naming the macro and the line it was defined on. A
+macro defined in a type pool or an include that was not read still cannot be
+recognised at all: there, the word is a word like any other.
+
 ## [1.2.0] — what an object calls, read from its own source
 
 `impactOf` and `abapPath` both answer the same question from the same data:

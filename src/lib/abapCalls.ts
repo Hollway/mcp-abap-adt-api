@@ -34,13 +34,16 @@ export type CallKind =
   | 'program'
   | 'transaction'
   | 'table'
+  | 'type'
   | 'inherits'
   | 'implements'
-  | 'include';
+  | 'include'
+  | 'macro';
 
 export const CALL_KINDS: readonly CallKind[] = [
   'method', 'constructor', 'exception', 'reference', 'function', 'form',
-  'program', 'transaction', 'table', 'inherits', 'implements', 'include'
+  'program', 'transaction', 'table', 'type', 'inherits', 'implements', 'include',
+  'macro'
 ];
 
 /** One place in the source that reaches another object. */
@@ -96,6 +99,36 @@ const TYPE_EXPRESSION = /\b(VALUE|CONV|COND|SWITCH|CAST|REF|EXACT|FILTER|REDUCE|
  * are not database access, and `DELETE itab FROM ls` has the same shape as a
  * delete from a table.
  */
+/**
+ * Types that belong to the language rather than to the dictionary. `TYPE c
+ * LENGTH 8` names one, and so do `TYPE string` and `LIKE sy-subrc`; with
+ * onlyCustom off nothing else would keep them out of the answer. The words a
+ * table type is written with - TABLE, LINE, RANGE, REF - stand here too,
+ * because they are what follows TYPE when the real name comes later.
+ */
+const BUILT_IN_TYPE = new Set([
+  'C', 'N', 'D', 'T', 'X', 'I', 'F', 'P', 'B', 'S', 'STRING', 'XSTRING', 'UTCLONG',
+  'DECFLOAT16', 'DECFLOAT34', 'INT1', 'INT2', 'INT4', 'INT8',
+  'ANY', 'DATA', 'OBJECT', 'SIMPLE', 'CLIKE', 'CSEQUENCE', 'XSEQUENCE', 'NUMERIC',
+  'ABAP_BOOL', 'ABAP_BOOLEAN', 'SY', 'SYST', 'SCREEN',
+  'TABLE', 'LINE', 'RANGE', 'REF', 'STANDARD', 'SORTED', 'HASHED', 'INDEX'
+]);
+
+/**
+ * A type named where it can be read: TYPE zorders, TYPE zde_id, LIKE
+ * zorders-id, TYPE STANDARD TABLE OF zorders, TYPE RANGE OF zorders-id.
+ *
+ * TYPE REF TO is left to the declaration scan, which turns it into the class
+ * behind a reference variable and so into the calls made through it. The
+ * trailing boundary is what keeps `TYPE zcl_x=>ty_row` out: that is a
+ * reference to a class, already reported as one, and without the boundary the
+ * name would be cut short to match.
+ */
+const TYPED = /\b(?:TYPE|LIKE)\s+(?:(?:STANDARD|SORTED|HASHED|ANY|INDEX)\s+TABLE\s+OF\s+|TABLE\s+OF\s+|RANGE\s+OF\s+|LINE\s+OF\s+)?(?!REF\s+TO\b)([\w/]+)(?:-([\w]+))?\b(?!\s*=>)/gi;
+
+/** SELECT-OPTIONS s_id FOR zorders-id, and RANGES, which is the same statement. */
+const FOR_FIELD = /^(?:SELECT-OPTIONS|RANGES)\s+[\w]+\s+FOR\s+([\w/]+)(?:-([\w]+))?/i;
+
 const NOT_A_TABLE = new Set([
   'REPORT', 'TEXTPOOL', 'PROGRAM', 'DYNPRO', 'SCREEN', 'MEMORY', 'TABLE', 'DATABASE',
   'FIELD', 'LINE', 'INITIAL', 'OBJECT', 'ID', 'DATASET', 'ITAB', 'FROM', 'INTO', 'DATA',
@@ -222,6 +255,8 @@ export interface Locals {
   refTypes: Map<string, string>;
   /** Every name declared here: variables, tables, types, field symbols. */
   declared: Set<string>;
+  /** Macros defined here, and the line each was defined on. */
+  macros: Map<string, number>;
 }
 
 const DECLARING = /^(DATA|CLASS-DATA|STATICS|CONSTANTS|TYPES|FIELD-SYMBOLS|PARAMETERS|SELECT-OPTIONS|RANGES)\s+([\w/<>-]+)/i;
@@ -238,8 +273,14 @@ const DECLARING = /^(DATA|CLASS-DATA|STATICS|CONSTANTS|TYPES|FIELD-SYMBOLS|PARAM
 export function localNames(statements: Statement[]): Locals {
   const refTypes = new Map<string, string>();
   const declared = new Set<string>();
+  const macros = new Map<string, number>();
 
-  for (const { text } of statements) {
+  for (const { text, line } of statements) {
+    // A macro defined here: its body is scanned like any other code, but a
+    // line that expands it can pass the target in, and that is not in the body.
+    const macro = /^DEFINE\s+([\w/]+)/i.exec(text);
+    if (macro) macros.set(macro[1].toUpperCase(), line);
+
     const declaration = DECLARING.exec(text);
     if (declaration) declared.add(declaration[2].toUpperCase());
 
@@ -264,7 +305,7 @@ export function localNames(statements: Statement[]): Locals {
     if (created) refTypes.set(created[1].toUpperCase(), created[2].toUpperCase());
   }
 
-  return { refTypes, declared };
+  return { refTypes, declared, macros };
 }
 
 /** The class a reference variable holds, or undefined when this source never says. */
@@ -509,6 +550,35 @@ function scan(
     const tablesStatement = /^TABLES\s+([\w/]+)/i.exec(text);
     if (tablesStatement) add(statement, 'table', tablesStatement[1]);
 
+    // A type named in a declaration is a dependency without being a call:
+    // TYPE zorders reaches the table whether or not this source ever selects
+    // from it, and a data element is reached no other way at all. A name the
+    // source declares itself is its own - TYPE ty_row is local, and only the
+    // declarations tell the two apart.
+    const namesAType = (name: string | undefined, field?: string): void => {
+      if (!name) return;
+      const upper = name.toUpperCase();
+      if (BUILT_IN_TYPE.has(upper) || locals.declared.has(upper)) return;
+      add(statement, 'type', upper, field);
+    };
+    for (const match of text.matchAll(TYPED)) namesAType(match[1], match[2]);
+    const forField = FOR_FIELD.exec(text);
+    if (forField) namesAType(forField[1], forField[2]);
+
+    // A line that expands a macro. Only a macro this object defines can be
+    // recognised - one defined in a type pool or an include that was not read
+    // is a word like any other - and even for this one the body is all that
+    // can be scanned: what the call site passes in is not in it.
+    const leading = /^([\w/]+)(?:\s+(?![=<>-])|$)/.exec(text);
+    const macroLine = leading && locals.macros.get(leading[1].toUpperCase());
+    if (macroLine) {
+      cannotName(
+        statement,
+        'macro',
+        `the statement expands the macro ${leading![1].toUpperCase()}, defined at line ${macroLine}: what its body reaches is reported from the body, what this line passes into it is not`
+      );
+    }
+
     const inherits = /\bINHERITING\s+FROM\s+([\w/]+)/i.exec(text);
     if (inherits) add(statement, 'inherits', inherits[1]);
 
@@ -555,11 +625,14 @@ export interface NamedSource {
  */
 export function extractCallsAcross(sources: NamedSource[], options: CallScanOptions = {}): CallScanResult {
   const parsed = sources.map(source => ({ name: source.name, statements: statementsOf(source.source) }));
-  const shared: Locals = { refTypes: new Map(), declared: new Set() };
+  const shared: Locals = { refTypes: new Map(), declared: new Set(), macros: new Map() };
   const own = parsed.map(source => {
     const locals = localNames(source.statements);
     for (const [name, type] of locals.refTypes) if (!shared.refTypes.has(name)) shared.refTypes.set(name, type);
     for (const name of locals.declared) shared.declared.add(name);
+    // A function group defines its macros in the TOP include and expands them
+    // everywhere else, so they are shared the way the declarations are.
+    for (const [name, line] of locals.macros) if (!shared.macros.has(name)) shared.macros.set(name, line);
     return locals;
   });
 
@@ -567,7 +640,7 @@ export function extractCallsAcross(sources: NamedSource[], options: CallScanOpti
   const many = parsed.length > 1;
   parsed.forEach((source, index) => {
     const locals: Locals = many
-      ? { refTypes: new Map([...shared.refTypes, ...own[index].refTypes]), declared: shared.declared }
+      ? { refTypes: new Map([...shared.refTypes, ...own[index].refTypes]), declared: shared.declared, macros: shared.macros }
       : own[index];
     scan(source.statements, locals, options, state, many ? source.name : undefined);
   });

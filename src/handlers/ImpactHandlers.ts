@@ -115,7 +115,7 @@ export class ImpactHandlers extends BaseHandler {
       },
       {
         name: 'callsFrom',
-        description: 'What an object\'s own code calls: the other direction of impactOf. No backend call answers this - the where-used index only knows who calls whom, one object at a time - so the source is read and scanned. Answers with the objects reached, grouped by target, each with the lines that reach it: methods and constructors, function modules, forms and programs, transactions, database tables, what the class inherits and implements, and the includes it pulls in. This is scanning, not parsing: a macro hides what it expands to, and a name built at runtime cannot be known before the program runs - every such call is listed as unresolved with the reason, so a missing edge is named rather than silently absent.',
+        description: 'What an object\'s own code calls: the other direction of impactOf. No backend call answers this - the where-used index only knows who calls whom, one object at a time - so the source is read and scanned. Answers with the objects reached, grouped by target, each with the lines that reach it: methods and constructors, function modules, forms and programs, transactions, database tables, the dictionary types its declarations name (TYPE zorders, LIKE zorders-id, SELECT-OPTIONS ... FOR), what the class inherits and implements, and the includes it pulls in. This is scanning, not parsing: a macro hides what it expands to, and a name built at runtime cannot be known before the program runs - every such call is listed as unresolved with the reason, so a missing edge is named rather than silently absent.',
         inputSchema: {
           type: 'object',
           properties: {
