@@ -106,10 +106,16 @@ export function stringLiteral(value: string): string {
   return '`' + text.replace(/`/g, '``') + '`';
 }
 
-/** The program name, checked before it is pasted into a statement. */
+/**
+ * The program name, checked before it is pasted into a statement.
+ *
+ * The equals signs are not decoration: a class keeps its texts in a pool named
+ * ZCL_FOO=======================CP, and a pattern without them refuses every
+ * class there is - which is how the first live read of one failed.
+ */
 export function programLiteral(name: string): string {
   const program = String(name || '').trim().toUpperCase();
-  if (!/^[A-Z0-9_/$][A-Z0-9_/]{0,39}$/.test(program)) {
+  if (!/^[A-Z0-9_/$][A-Z0-9_/=]{0,39}$/.test(program)) {
     throw new TextPoolError(`'${name}' does not look like a program name.`);
   }
   return charLiteral(program);
@@ -382,6 +388,47 @@ export function writesFor(
   }
 
   return writes;
+}
+
+/**
+ * The program title, which is a pool row of its own.
+ *
+ * ADT serves it in no category - it cannot be read or written over the
+ * endpoint at all - so it is a parameter here rather than an element, and it
+ * only exists on the text pool path. The row has letter R and an empty key.
+ */
+export const TITLE_LETTER: TextPoolLetter = 'R';
+
+export function titleFromRows(rows: TextPoolRow[]): { text: string; maxLength: number } | undefined {
+  const row = rows.find(candidate => candidate.id === TITLE_LETTER);
+  return row ? { text: row.entry, maxLength: row.length } : undefined;
+}
+
+/** The row a title is written as, under the same length rule as an element. */
+export function titleWrite(title: string, maxLength?: number, notes: string[] = []): PoolWrite {
+  const text = String(title ?? '');
+  if (text.length > ENTRY_LIMIT) {
+    throw new TextPoolError(`The title is ${text.length} characters; a pool entry holds ${ENTRY_LIMIT}.`);
+  }
+  let maximum = text.length;
+  if (maxLength !== undefined && maxLength !== null) {
+    const asked = Number(maxLength);
+    if (!Number.isInteger(asked) || asked < 0 || asked > ENTRY_LIMIT) {
+      throw new TextPoolError(`The titleMaxLength is not a length a pool entry can have (0 to ${ENTRY_LIMIT}).`);
+    }
+    maximum = asked;
+    if (text.length > asked) {
+      maximum = text.length;
+      notes.push(
+        `The title is ${text.length} characters and titleMaxLength said ${asked}: ` +
+        'the length was widened to fit rather than the title cut.'
+      );
+    }
+  }
+  if (text === '') {
+    notes.push('The title is empty, so its row leaves the pool rather than being written empty.');
+  }
+  return { letter: TITLE_LETTER, key: '', text, length: maximum, keepsFlags: false };
 }
 
 export interface WriteSnippetSpec {

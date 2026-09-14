@@ -8,6 +8,8 @@ import {
   programLiteral,
   readPoolSnippet,
   stringLiteral,
+  titleFromRows,
+  titleWrite,
   writePoolSnippet,
   writesFor,
   type TextPoolRow
@@ -263,6 +265,40 @@ describe('writePoolSnippet', () => {
   });
 });
 
+describe('the program title', () => {
+  // ADT serves the R row in no category at all, so it is a parameter of its
+  // own - and it has to survive a category being replaced, because no category
+  // owns that letter.
+  it('is read off its own row', () => {
+    expect(titleFromRows([row('R', '', 'Delivery monitor', 70), row('I', '001', 'x', 1)]))
+      .toEqual({ text: 'Delivery monitor', maxLength: 70 });
+    expect(titleFromRows([row('I', '001', 'x', 1)])).toBeUndefined();
+  });
+
+  it('follows the same length rule as an element', () => {
+    expect(titleWrite('Monitor', 40)).toEqual({ letter: 'R', key: '', text: 'Monitor', length: 40, keepsFlags: false });
+    const notes: string[] = [];
+    expect(titleWrite('Delivery monitor', 4, notes).length).toBe(16);
+    expect(notes[0]).toContain('widened');
+    expect(() => titleWrite('x'.repeat(133))).toThrow(TextPoolError);
+  });
+
+  it('is written without disturbing the category being replaced', () => {
+    const lines = writePoolSnippet({
+      program: 'ZFOO',
+      category: 'symbols',
+      writes: [...writesFor('symbols', [{ id: '001', text: 'Belege' }]), titleWrite('Monitor')]
+    });
+    expect(lines).toEqual(expect.arrayContaining([
+      "DELETE lt_pool WHERE id = 'I'.",
+      "DELETE lt_pool WHERE id = 'R' AND key = ''.",
+      'ls_new-entry = `Monitor`.'
+    ]));
+    // Replacing the symbols must not take the title with it.
+    expect(lines.some(line => line === "DELETE lt_pool WHERE id = 'R'.")).toBe(false);
+  });
+});
+
 describe('readPoolSnippet', () => {
   it('prints the rows of the pool it read', () => {
     const lines = readPoolSnippet('ZFOO');
@@ -299,6 +335,10 @@ describe('programLiteral and stringLiteral', () => {
   it('refuses a name that would carry a statement of its own', () => {
     expect(() => programLiteral("ZFOO'. DELETE lt_pool. \"")).toThrow(TextPoolError);
     expect(programLiteral('/dune/zfoo')).toBe("'/DUNE/ZFOO'");
+    // Measured: a class pool is all equals signs, and the first pattern here
+    // refused every class on the system.
+    expect(programLiteral('ZCL_AOC_CHECK_01==============CP'))
+      .toBe("'ZCL_AOC_CHECK_01==============CP'");
   });
 
   it('refuses a text with a line break, which no pool entry has', () => {

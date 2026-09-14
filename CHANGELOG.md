@@ -8,7 +8,7 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
-## [1.1.0] — text elements on a system that serves none
+## [1.1.0] — text elements on a system that serves none, and the transport they travel in
 
 `getTextElements` and `setTextElements` were written against an endpoint that
 half the releases do not have. On the classic ERP system
@@ -58,11 +58,9 @@ contradicted what the fallback was going to assume:
   `notes` — losing the tail of a text silently is the worse of the two.
 - An empty text removes its row rather than writing an empty one, because a
   program without a list header has no `T` row at all.
-- A `transport` on this path is **not** honoured, and the answer says so rather
-  than implying the change was registered: the pool is written directly, and
-  registering an object in a request is a separate job that is not built yet.
-  Outside `$TMP` the entry has to be added by hand or the texts stay in this
-  system.
+- A `transport` is honoured by registering the object in the request — see
+  below; `INSERT TEXTPOOL` itself registers nothing, and a text that is in no
+  request simply stays in this system.
 
 ### Where the fallback is decided, and where it is refused
 
@@ -111,6 +109,71 @@ ls_new-entry+8 = `text`.
 A test holds the string template out of that spot. Nothing else in the
 generated ABAP interpolates a character field whose blanks matter - the row
 printing drops only the trailing blanks of a text, which are padding.
+
+### registerInTransport, because INSERT TEXTPOOL registers nothing
+
+A pool write goes straight into the database, so the change stayed in the
+system it was made on — and the first version of this only said so in a note.
+A live task hit exactly that: the request held the *includes* of a program, the
+text pool belongs to the main program, and the selection text would not have
+travelled.
+
+The new tool registers an object in a request over
+`TR_APPEND_TO_COMM_OBJS_KEYS`. What it holds:
+
+- **It wants the task, not the request.** A request number is accepted by the
+  parameter and achieves nothing, so a request is resolved to the caller's own
+  open task in it. Somebody else's task is refused with the request to pass
+  instead, and two open tasks of one user are refused rather than guessed
+  between.
+- **`sy-subrc = 0` is not proof.** `RS_CORR_INSERT` — the obvious alternative,
+  and unusable from an ADT class anyway: it answers `CANCELLED` whatever it is
+  passed — answers plausibly and registers nothing, and this module leaves
+  `SCTS_CTO_CUST_SYNC/003` in `sy-msg*` after a call that *worked*. So the row
+  is read back out of `E071`, and only then reported as registered.
+- **The 67 exceptions come back as a sentence.** The ones a caller actually
+  hits are spelled out; the rest keep their name and get what their prefix
+  earns, because inventing a diagnosis for an exception nobody has seen would
+  read as knowledge this does not have. `OB_LOCKED_BY_OTHER` additionally
+  reports which open request does hold the object — the thing the exception
+  does not say.
+- `simulate` asks whether the entry would be accepted, writing nothing.
+
+`setTextElements` uses it on the pool path: with a `transport` the object is
+registered and the step reported; without one, an object that is in no open
+request at all is named as such — unless it is local, where the warning would
+be noise on every throwaway program. The object registered is the
+**transportable** one, not the pool program: a function group travels as
+`FUGR <group>`, never as `SAPL<group>`.
+
+### The program title
+
+`title` writes the `R` row, which ADT serves in no category and cannot write at
+all — so a call carrying one goes the pool way whole rather than writing the
+elements over ADT and dropping the title on the floor. `getTextElements`
+answers with it alongside the categories on the pool path. An empty string
+removes it; the length follows the same rule as an element.
+
+### What the live runs found
+
+- **A class pool is all equals signs.** `ZCL_FOO=======================CP` was
+  refused by the name pattern, which is to say every class on the system was.
+  Function groups were right first time (`SAPLZ1C_UPLOAD`, read live).
+- **Against ADT itself**, on the system where the endpoint does exist: the same
+  program answers with the same five headings in the same order, empties
+  included. Two deliberate differences remain — the fallback adds `maxLength`
+  where ADT omits it, and for a selection text with a dictionary flag ADT
+  returns `?...` (it cuts eight characters blindly) where the fallback returns
+  the text and `fromDictionary`.
+- **The version history is not written by this.** A pool write sets the change
+  stamp on the pool itself (`REPOTEXT`: user, date, time) but creates no entry
+  in version management (`VRSD`), where a snapshot is taken when a request is
+  released. No callable API for creating one was found: `RPY_TEXTPOOL_*` does
+  not exist on this release, `RS_TEXTPOOL_ADD` is the dialog (it takes a
+  `CL_WB_TEXTPOOL` and can answer `ACTION_CANCELLED`), and `RS_CORR_INSERT` is
+  the one that does not work from an ADT class. So the "active" line of the
+  version list stays blank until the request is released. Worth knowing before
+  reading that screen as proof of anything.
 
 ### Tests
 

@@ -17,6 +17,8 @@ import {
   parsePoolPrint,
   poolProgramFor,
   readPoolSnippet,
+  titleFromRows,
+  titleWrite,
   transportObjectFor,
   writePoolSnippet,
   writesFor,
@@ -167,6 +169,14 @@ export class TextElementHandlers extends BaseHandler {
               type: 'string',
               description: 'Transport request number - the request itself, not a developer task. The READ TEXTPOOL fallback cannot register a change in one; it says so rather than pretending it did.'
             },
+            title: {
+              type: 'string',
+              description: 'The program title (the R row of the pool). ADT serves it in no category and cannot write it at all, so passing this always goes the INSERT TEXTPOOL way. An empty string removes it.'
+            },
+            titleMaxLength: {
+              type: 'number',
+              description: 'Declared length of the title. Defaults to the length of the text; a longer title widens it rather than being cut.'
+            },
             merge: {
               type: 'boolean',
               description: 'Change only the elements passed and leave the rest of the category alone (default false: the category is replaced whole). Only the fallback honours this - the ADT endpoint always replaces.'
@@ -180,7 +190,7 @@ export class TextElementHandlers extends BaseHandler {
               description: 'Escape hatch: the text elements base URL.'
             }
           },
-          required: ['elements']
+          required: []
         }
       }
     ];
@@ -348,6 +358,7 @@ export class TextElementHandlers extends BaseHandler {
 
     const print = parsePoolPrint(output);
     const textElements = elementsFromRows(print.rows, category as PoolCategory);
+    const title = titleFromRows(print.rows);
     return this.answer({
       status: 'success',
       via: 'textpool',
@@ -358,6 +369,9 @@ export class TextElementHandlers extends BaseHandler {
       ...(language ? { language } : {}),
       count: textElements.length,
       textElements,
+      // The title is in no category, so it rides alongside them rather than
+      // inside one - and it exists only here, because ADT never serves it.
+      ...(title ? { title: title.text, titleMaxLength: title.maxLength } : {}),
       poolRows: print.rows.length,
       ...(print.subrc && print.subrc !== 0 ? { readSubrc: print.subrc } : {}),
       hint: print.rows.length === 0
@@ -369,9 +383,26 @@ export class TextElementHandlers extends BaseHandler {
   async handleSetTextElements(args: any): Promise<any> {
     const { url, objectType } = this.textUrl(args);
     const category = this.category(args);
-    const elements: TextElement[] = this.parseObjectArg(args.elements, 'elements');
-    if (!Array.isArray(elements)) {
+    const hasTitle = typeof args?.title === 'string';
+    const given = args?.elements === undefined || args?.elements === null
+      ? undefined
+      : this.parseObjectArg(args.elements, 'elements');
+    if (given !== undefined && !Array.isArray(given)) {
       throw new McpError(ErrorCode.InvalidParams, 'elements must be an array of {id, text}.');
+    }
+    if (given === undefined && !hasTitle) {
+      throw new McpError(ErrorCode.InvalidParams, 'Pass elements, or title, or both - there is nothing to write.');
+    }
+    const elements: TextElement[] = (given || []) as TextElement[];
+
+    // The title is not part of any category and ADT serves it nowhere, so any
+    // call carrying one goes the pool way whole - writing the elements over ADT
+    // and dropping the title on the floor would be the worst of both.
+    if (hasTitle) {
+      return this.writeThroughTextPool(
+        args, url, objectType, category, elements,
+        new EndpointNotServed(undefined, 'ADT serves the program title in no category, so it is written with INSERT TEXTPOOL.')
+      );
     }
 
     try {
@@ -518,10 +549,22 @@ export class TextElementHandlers extends BaseHandler {
     const merge = args?.merge === true;
     const notes: string[] = [];
 
+    const hasTitle = typeof args?.title === 'string';
     let code: string[];
     try {
       const writes = writesFor(category as PoolCategory, elements as any, notes);
-      code = writePoolSnippet({ program, category: category as PoolCategory, writes, language, merge });
+      // The title is a row of the pool like any other, and it survives a
+      // category replace because no category owns the letter R.
+      if (hasTitle) writes.push(titleWrite(args.title, args?.titleMaxLength, notes));
+      code = writePoolSnippet({
+        program,
+        category: category as PoolCategory,
+        writes,
+        language,
+        // With only a title to write, replacing the category as well would
+        // wipe the texts the caller never mentioned.
+        merge: merge || elements.length === 0
+      });
     } catch (error: any) {
       if (error instanceof TextPoolError) throw new McpError(ErrorCode.InvalidParams, error.message);
       throw error;
@@ -599,6 +642,7 @@ export class TextElementHandlers extends BaseHandler {
     }
 
     const textElements = elementsFromRows(print.rows, category as PoolCategory);
+    const title = titleFromRows(print.rows);
     return this.answer({
       status: registered === false ? 'error' : 'success',
       via: 'textpool',
@@ -611,6 +655,7 @@ export class TextElementHandlers extends BaseHandler {
       merge,
       count: elements.length,
       textElements,
+      ...(title ? { title: title.text, titleMaxLength: title.maxLength } : {}),
       activated: true,
       ...(registered !== undefined ? { registered, transport } : {}),
       ...(steps.length ? { steps } : {}),
