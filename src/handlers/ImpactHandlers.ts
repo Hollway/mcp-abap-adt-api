@@ -3,13 +3,18 @@ import type { UsageReferenceSnippet } from 'abap-adt-api';
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
-import { objectUrlFor, sourceUrlFor } from '../lib/packageWalk';
+import { objectUrlFor, sourceUrlFor, walkPackage } from '../lib/packageWalk';
+import type { PackageNode } from '../lib/packageWalk';
 import { locateMethod, classSourceUrl, interfaceSourceUrl } from '../lib/symbolPosition';
 import { rollUpUsages } from '../lib/impact';
 import type { ImpactObject, ImpactPlace, UsageRow } from '../lib/impact';
 import { includedPrograms, includeSourceUrl } from '../lib/sourceScan';
 import { extractCallsAcross, groupCalls, CALL_KINDS } from '../lib/abapCalls';
 import type { CallSite, UnresolvedCall } from '../lib/abapCalls';
+import { buildGraph, functionModulesOf } from '../lib/abapGraph';
+import type { ScannedObject } from '../lib/abapGraph';
+import { sourceCache } from '../lib/sourceCache';
+import { describeAdtError } from '../lib/adtError';
 
 /**
  * What depends on an object - the question asked before changing one.
@@ -27,6 +32,9 @@ const MAX_UNRESOLVED_LISTED = 25;
 /** BFS budget for abapPath: how many objects it will fetch usageReferences for before giving up. */
 const MAX_PATH_NODES = 300;
 const DEFAULT_MAX_PATH_DEPTH = 8;
+/** How many objects of a package abapGraph reads, and how many sources in all. */
+const DEFAULT_GRAPH_OBJECTS = 60;
+const DEFAULT_GRAPH_SOURCES = 200;
 
 export class ImpactHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
@@ -159,6 +167,70 @@ export class ImpactHandlers extends BaseHandler {
           },
           required: []
         }
+      },
+      {
+        name: 'abapGraph',
+        description: 'The call graph of a whole package: every object read, its source scanned with the same rules as callsFrom, and the calls between them turned into a shape. Answers with the objects and the edges between them, plus what that shape means - the entry points (nothing inside the package calls them), the hubs (everything does, so they cannot be changed cheaply), the objects connected to nothing, the call circles, and the targets outside the package the whole of it depends on. A function module is matched to the group that defines it, which the group\'s own source says. This costs one source read per object (a function group also reads its includes), so it is a call to make once for a package being worked on, not a lookup; sources already read in this session are reused unless fresh is set. Scanning, not parsing: what a macro expands to is not seen, and a target named at runtime is counted as unresolved rather than drawn.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            packageName: {
+              type: 'string',
+              description: 'Package to graph, e.g. ZMM_UTILS.'
+            },
+            maxDepth: {
+              type: 'number',
+              description: 'How many package levels to walk: 1 (default) the package itself, 2 its sub-packages, and so on. The packages left unopened are named.'
+            },
+            objectTypes: {
+              type: 'array',
+              description: 'Only these ADT types, e.g. ["CLAS/OC"]. Everything readable by default: classes, interfaces, programs, includes, function groups, CDS, tables and structures.',
+              items: { type: 'string' }
+            },
+            kinds: {
+              type: 'array',
+              description: `Only these kinds of call: ${CALL_KINDS.join(', ')}. All of them by default.`,
+              items: { type: 'string' }
+            },
+            onlyCustom: {
+              type: 'boolean',
+              description: 'Keep only Z*, Y* and /namespace/ targets (default true). Standard SAP calls are counted, not listed.'
+            },
+            followIncludes: {
+              type: 'boolean',
+              description: 'Also read the includes a program names. A function group is read this way whichever way this is set. Off by default: an include of the package is walked as an object of its own anyway, and following them as well reads the same text twice.'
+            },
+            places: {
+              type: 'boolean',
+              description: 'Quote the statements behind each edge. Off by default - a package of forty objects is long enough without them.'
+            },
+            fresh: {
+              type: 'boolean',
+              description: 'Read every source from the backend again instead of reusing what this session already read. Worth it when the package was changed from ADT since, which this server cannot see.'
+            },
+            maxObjects: {
+              type: 'number',
+              description: 'How many objects to read. Default 60; the walk reports when it stopped short.'
+            },
+            maxSources: {
+              type: 'number',
+              description: 'Total sources to read, includes counted (default 200). What is left unread is reported rather than silently missing.'
+            },
+            maxEdges: {
+              type: 'number',
+              description: 'How many edges to list, heaviest first. Default 300; the rest are counted.'
+            },
+            maxPlacesPerEdge: {
+              type: 'number',
+              description: 'With places, how many call sites to quote per edge. Default 3.'
+            },
+            maxStatementChars: {
+              type: 'number',
+              description: 'With places, how much of each statement to quote. Default 160.'
+            }
+          },
+          required: ['packageName']
+        }
       }
     ];
   }
@@ -171,6 +243,8 @@ export class ImpactHandlers extends BaseHandler {
         return this.handleAbapPath(args);
       case 'callsFrom':
         return this.handleCallsFrom(args);
+      case 'abapGraph':
+        return this.handleAbapGraph(args);
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown impact tool: ${toolName}`);
     }
@@ -460,7 +534,8 @@ export class ImpactHandlers extends BaseHandler {
   private async readIncludes(
     main: string,
     objectType: string,
-    groupName: string
+    groupName: string,
+    read: (url: string) => Promise<string> = url => this.readClient.getObjectSource(url)
   ): Promise<{ sources: Array<{ name: string; source: string }>; unread: Array<{ name: string; error: string }> }> {
     const sources: Array<{ name: string; source: string }> = [];
     const unread: Array<{ name: string; error: string }> = [];
@@ -473,11 +548,11 @@ export class ImpactHandlers extends BaseHandler {
         ]
         : [includeSourceUrl(name)];
       let lastError = '';
-      let read = false;
+      let wasRead = false;
       for (const url of urls) {
         try {
-          sources.push({ name, source: await this.readClient.getObjectSource(url) });
-          read = true;
+          sources.push({ name, source: await read(url) });
+          wasRead = true;
           break;
         } catch (error: any) {
           lastError = error?.message || `${error}`;
@@ -485,7 +560,7 @@ export class ImpactHandlers extends BaseHandler {
       }
       // An include that cannot be read is reported, not thrown: one generated
       // or system include among twenty is no reason to lose the other nineteen.
-      if (!read) unread.push({ name, error: lastError });
+      if (!wasRead) unread.push({ name, error: lastError });
     }
     return { sources, unread };
   }
@@ -497,8 +572,8 @@ export class ImpactHandlers extends BaseHandler {
    * can be found: nothing here asks the backend to confirm that a target
    * exists, and nothing is filtered out by whether it does.
    */
-  async handleCallsFrom(args: any): Promise<any> {
-    const { sourceUrl, label, objectType, name } = this.resolveSource(args);
+  /** The kinds asked for, checked against the ones the scan knows. */
+  private wantedKinds(args: any): string[] | undefined {
     const kinds = Array.isArray(args?.kinds)
       ? args.kinds.map((kind: any) => String(kind).trim().toLowerCase())
       : undefined;
@@ -509,6 +584,12 @@ export class ImpactHandlers extends BaseHandler {
         `kinds: '${unknownKind}' is not one of ${CALL_KINDS.join(', ')}.`
       );
     }
+    return kinds;
+  }
+
+  async handleCallsFrom(args: any): Promise<any> {
+    const { sourceUrl, label, objectType, name } = this.resolveSource(args);
+    const kinds = this.wantedKinds(args);
     const onlyCustom = args?.onlyCustom !== false;
     const wantIncludes = args?.followIncludes === true || objectType.startsWith('FUGR');
 
@@ -591,6 +672,189 @@ export class ImpactHandlers extends BaseHandler {
       this.trackRequest(startTime, false);
       if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to work out what ${label} calls`);
+    }
+  }
+
+  /** One level of a package, as nodes. */
+  private async packageNodes(packageName: string): Promise<PackageNode[]> {
+    const structure = await this.readClient.nodeContents('DEVC/K', packageName);
+    return (structure?.nodes || []) as PackageNode[];
+  }
+
+  /**
+   * One source, from what this session already read where it can be.
+   *
+   * The cache is the one the source tools keep, so a write made through this
+   * server updates it and the graph does not go stale behind an edit of its
+   * own. An edit made in ADT is another matter - nothing here can see it, and
+   * `fresh` is how to say so.
+   */
+  private async sourceOf(url: string, fresh?: boolean, stats?: { fromCache: number }): Promise<string> {
+    if (!fresh) {
+      const cached = sourceCache.get(url);
+      if (cached !== undefined) {
+        if (stats) stats.fromCache += 1;
+        return cached;
+      }
+    }
+    const source = await this.readClient.getObjectSource(url);
+    sourceCache.set(url, source);
+    return source;
+  }
+
+  /**
+   * Every object of a package, scanned for what it calls, and the calls
+   * between them made into a graph.
+   *
+   * The reading is the expensive part - one source per object, more for a
+   * function group - and everything after it is the same scan callsFrom runs,
+   * so what the graph can and cannot see is exactly what that tool can.
+   */
+  async handleAbapGraph(args: any): Promise<any> {
+    const packageName = String(args?.packageName || '').trim().toUpperCase();
+    if (!packageName) {
+      throw new McpError(ErrorCode.InvalidParams, 'Which package? Pass packageName.');
+    }
+    const kinds = this.wantedKinds(args);
+    const onlyCustom = args?.onlyCustom !== false;
+    const followIncludes = args?.followIncludes === true;
+    const fresh = args?.fresh === true;
+    const maxObjects = Math.max(1, Number(args?.maxObjects) || DEFAULT_GRAPH_OBJECTS);
+    const maxSources = Math.max(1, Number(args?.maxSources) || DEFAULT_GRAPH_SOURCES);
+
+    const startTime = performance.now();
+    try {
+      const walked = await walkPackage(packageName, name => this.packageNodes(name), {
+        maxDepth: Math.max(1, Number(args?.maxDepth) || 1),
+        maxObjects,
+        objectTypes: Array.isArray(args?.objectTypes) ? args.objectTypes : undefined,
+        readableOnly: true
+      });
+
+      const scanned: ScannedObject[] = [];
+      const unread: Array<{ name: string; objectType: string; error: string }> = [];
+      const includesUnread: Array<{ object: string; name: string; error: string }> = [];
+      const stats = { fromCache: 0 };
+      let sourcesRead = 0;
+      let linesRead = 0;
+      let statements = 0;
+      let unresolved = 0;
+      let standardTargetsHidden = 0;
+      let readBudgetReached = false;
+
+      for (const object of walked.objects) {
+        if (!object.sourceUrl) continue;
+        if (sourcesRead >= maxSources) { readBudgetReached = true; break; }
+        const isGroup = object.objectType.startsWith('FUGR');
+        try {
+          const main = await this.sourceOf(object.sourceUrl, fresh, stats);
+          const sources = [{ name: object.name.toUpperCase(), source: main }];
+          if (isGroup || followIncludes) {
+            const read = await this.readIncludes(
+              main,
+              object.objectType,
+              object.name,
+              url => this.sourceOf(url, fresh, stats)
+            );
+            sources.push(...read.sources);
+            for (const missed of read.unread) {
+              includesUnread.push({ object: object.name.toUpperCase(), ...missed });
+            }
+          }
+          sourcesRead += sources.length;
+          for (const source of sources) linesRead += source.source.split(/\r?\n/).length;
+
+          const found = extractCallsAcross(sources, { onlyCustom, kinds });
+          statements += found.statements;
+          unresolved += found.unresolved.length;
+          standardTargetsHidden += found.standardTargetsHidden;
+          scanned.push({
+            name: object.name.toUpperCase(),
+            objectType: object.objectType,
+            packageName: object.packageName,
+            ...(isGroup ? { provides: functionModulesOf(sources) } : {}),
+            calls: found.calls,
+            unresolved: found.unresolved.length
+          });
+        } catch (error: any) {
+          // One object that cannot be read is a gap in the graph, not the end
+          // of it: the package is still worth the picture the rest gives.
+          sourcesRead += 1;
+          unread.push({
+            name: object.name.toUpperCase(),
+            objectType: object.objectType,
+            error: describeAdtError(error).error
+          });
+        }
+      }
+
+      const graph = buildGraph(scanned, {
+        places: args?.places === true,
+        maxEdges: Number(args?.maxEdges) || undefined,
+        maxPlacesPerEdge: Number(args?.maxPlacesPerEdge) || undefined,
+        maxStatementChars: Number(args?.maxStatementChars) || undefined
+      });
+
+      this.trackRequest(startTime, true);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            status: 'success',
+            packageName,
+            packages: walked.packages,
+            ...(walked.notWalked.length ? { packagesNotWalked: walked.notWalked } : {}),
+            scanned: {
+              objects: scanned.length,
+              sourcesRead,
+              ...(stats.fromCache ? { fromCache: stats.fromCache } : {}),
+              linesRead,
+              statements,
+              unresolved
+            },
+            summary: {
+              nodes: graph.nodes.length,
+              edges: graph.edges.length + graph.edgesHidden,
+              entryPoints: graph.entryPoints.length,
+              orphans: graph.orphans.length,
+              cycles: graph.cycles.length,
+              targetsOutside: graph.outside.length + graph.outsideHidden,
+              ...(standardTargetsHidden ? { standardTargetsHidden } : {})
+            },
+            nodes: graph.nodes,
+            edges: graph.edges,
+            ...(graph.edgesHidden
+              ? { edgesHidden: graph.edgesHidden, edgesNote: 'Listing the heaviest edges; raise maxEdges to see the rest.' }
+              : {}),
+            entryPoints: graph.entryPoints,
+            hubs: graph.hubs,
+            orphans: graph.orphans,
+            cycles: graph.cycles,
+            outside: graph.outside,
+            ...(graph.outsideHidden ? { outsideHidden: graph.outsideHidden } : {}),
+            ...(unread.length ? { unread } : {}),
+            ...(includesUnread.length ? { includesUnread } : {}),
+            ...(walked.truncated || readBudgetReached
+              ? {
+                truncated: true,
+                truncatedNote: readBudgetReached
+                  ? `Stopped after ${sourcesRead} sources (maxSources). The objects not reached are missing from the graph, not absent from the package.`
+                  : `The walk stopped at ${maxObjects} objects (maxObjects). The objects not reached are missing from the graph, not absent from the package.`
+              }
+              : {}),
+            ...(scanned.length === 0
+              ? {
+                emptyNote: 'No readable object was found in this package. A package that does not exist answers with an empty list exactly like an empty one - packageTree tells the two apart.'
+              }
+              : {}),
+            scanNote: 'Read from the source text of each object, not from the where-used index. An edge is a name one source writes and another answers to: a macro hides what it expands to, a target named at runtime is counted under unresolved, and nothing here is checked against the repository.'
+          }, null, 2)
+        }]
+      };
+    } catch (error: any) {
+      this.trackRequest(startTime, false);
+      if (error instanceof McpError) throw error;
+      throw wrapAdtError(error, `Failed to graph package ${packageName}`);
     }
   }
 

@@ -10,6 +10,34 @@ rather than a release.
 
 ## [1.3.0] — the graph of a whole package
 
+### `abapGraph`: a package, not an object at a time
+
+`callsFrom` answers for one object. Asked for every object of a package, the
+answers stop being a list and become a shape — and that shape is the thing
+worth having:
+
+- **entry points**, the objects nothing inside the package calls, which is
+  where work comes in from outside;
+- **hubs**, the objects everything calls, which is what cannot be changed
+  cheaply;
+- **orphans**, connected to nothing, which is where dead code shows;
+- **cycles**, the circles the calls run in;
+- **what the package depends on outside itself**, gathered from every object
+  rather than looked up one at a time.
+
+A function module is matched to the group that defines it, which the group's
+own source says: `CALL FUNCTION 'Z_APP_SAVE'` names a module, and the package
+list names a group, so without that step the edge would point outside the
+package it is inside. A call an object makes to itself is counted on the
+object and left off the graph.
+
+The cost is one source read per object — a function group also reads its
+includes — so this is a call to make once for a package being worked on, not
+a lookup. Sources this session already read are reused (`fresh` reads them
+again, for a package changed from ADT since), the answer says how many came
+that way, and every budget it stops at is named rather than left to look like
+the package is smaller than it is. Statements are quoted only with `places`.
+
 ### What a declaration reaches
 
 `callsFrom` read statements that act — a call, a select, a perform — and not

@@ -126,7 +126,7 @@ const check = (label, condition, detail) => {
                       'getStructureSource', 'createStructure',
                       'packageTree', 'readSources', 'searchInPackage', 'atcCheck',
                       'changePackagePreview', 'rapGenIsAvailable',
-                      'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'addMethod', 'deleteMethod', 'addAttribute',
+                      'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'abapGraph', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
                       'runSnippet', 'callFunction', 'callMethod',
                       'tableFields', 'tableIndexes', 'tableKeys']) {
@@ -574,6 +574,56 @@ const check = (label, condition, detail) => {
   check('callsFrom asks whose calls to scan',
     callsNothing.isError === true && /Whose calls/.test(JSON.stringify(callsNothing.payload)),
     callsNothing.payload);
+
+  // abapGraph: the same scan over a whole package. Kept small on purpose -
+  // this is one source read per object, and the package here is whatever the
+  // system has, not one written for the test.
+  const graph = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false
+  });
+  check(`abapGraph reads ${PACKAGE_NAME} and answers with a node per object it read`,
+    graph.payload.status === 'success'
+    && graph.payload.scanned.objects > 0
+    && graph.payload.nodes.length === graph.payload.scanned.objects,
+    graph.payload);
+  check('abapGraph reads no more objects than it was allowed to',
+    graph.payload.scanned.objects <= 8, graph.payload);
+  check('abapGraph draws every edge between two objects it actually read',
+    (graph.payload.edges || []).every(edge =>
+      graph.payload.nodes.some(node => node.name === edge.from)
+      && graph.payload.nodes.some(node => node.name === edge.to)),
+    graph.payload.edges);
+  check('abapGraph counts the degree of a node from the edges it drew',
+    graph.payload.nodes.every(node =>
+      node.callsIn === (graph.payload.edges || []).filter(edge => edge.to === node.name).length
+      || graph.payload.edgesHidden > 0),
+    graph.payload.nodes);
+  check('abapGraph says which objects nothing inside the package calls',
+    Array.isArray(graph.payload.entryPoints) && Array.isArray(graph.payload.orphans)
+    && graph.payload.entryPoints.length + graph.payload.orphans.length <= graph.payload.nodes.length,
+    graph.payload);
+  check('abapGraph leaves the statements out until they are asked for',
+    (graph.payload.edges || []).every(edge => edge.places === undefined), graph.payload.edges);
+
+  const graphAgain = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false, places: true
+  });
+  check('abapGraph reuses the sources this session already read',
+    graphAgain.payload.scanned.fromCache > 0, graphAgain.payload.scanned);
+  check('abapGraph quotes the statement behind an edge when asked',
+    (graphAgain.payload.edges || []).length === 0
+    || (graphAgain.payload.edges[0].places || []).every(place => typeof place.line === 'number' && !!place.statement),
+    graphAgain.payload.edges);
+
+  const graphUnknown = await call('abapGraph', { packageName: 'ZSMOKE_NO_SUCH_PACKAGE' });
+  check('abapGraph says an empty package and a missing one look the same',
+    graphUnknown.payload.status === 'success' && /packageTree/.test(String(graphUnknown.payload.emptyNote)),
+    graphUnknown.payload);
+
+  const graphBadKind = await call('abapGraph', { packageName: PACKAGE_NAME, kinds: ['calls'] });
+  check('abapGraph rejects a kind that does not exist',
+    graphBadKind.isError === true && /not one of method/.test(JSON.stringify(graphBadKind.payload)),
+    graphBadKind.payload);
 
   // Function modules by name alone, and the group they live in.
   const fm = await call('getFunctionModule', { name: FUNCTION_MODULE });
