@@ -378,6 +378,22 @@ describe('inactiveObjects', () => {
     const result = JSON.parse((await handlers.handleInactiveObjects({})).content[0].text);
 
     expect(asked).toEqual(['stateful']);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ status: 'success', count: 0, inactive: [], result: [] });
+  });
+
+  it('counts what it found and keeps the rows under both names', async () => {
+    const row = inactiveRow('PROG/P');
+    const client: any = {
+      stateful: 'stateful',
+      inactiveObjects: async () => [row],
+      statelessClone: { inactiveObjects: async () => [] }
+    };
+    const handlers = new ObjectManagementHandlers(client);
+    const result = JSON.parse((await handlers.handleInactiveObjects({})).content[0].text);
+
+    expect(result.status).toBe('success');
+    expect(result.count).toBe(1);
+    expect(result.inactive).toEqual([row]);
+    expect(result.result).toEqual([row]);
   });
 });

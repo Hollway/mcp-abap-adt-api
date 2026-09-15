@@ -313,10 +313,18 @@ export class ObjectManagementHandlers extends BaseHandler {
     try {
       const result: InactiveObjectRecord[] = await this.adtclient.inactiveObjects();
       this.trackRequest(startTime, true);
+      // This was the one tool of the server answering with a bare array: no
+      // status, no count, and an empty list indistinguishable from a call
+      // that failed to say anything.
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(result)
+          text: JSON.stringify({
+            status: 'success',
+            count: Array.isArray(result) ? result.length : 0,
+            inactive: result,
+            result
+          })
         }]
       };
     } catch (error: any) {

@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError, isMissingCollection } from '../lib/adtError';
+import { wrapAdtError, isMissingCollection, describeAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, PackageValueHelpType } from 'abap-adt-api';
 
@@ -43,13 +43,13 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'ddicRepositoryAccess',
-                description: 'Read dictionary metadata through the DDIC repository access endpoint - types, fields and domains as the dictionary itself sees them.',
+                description: 'Read dictionary metadata through the DDIC repository access endpoint - types, fields and domains as the dictionary itself sees them. Takes a dictionary name, not a URL: an address is answered with an empty list by the backend, which is the same answer a name that exists nowhere gets, so both are reported as found false here.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         path: {
                             type: 'string',
-                            description: 'The path to the DDIC element.'
+                            description: 'The dictionary name, e.g. T000 or a field path like T000-MANDT.'
                         }
                     },
                     required: ['path']
@@ -57,17 +57,18 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'packageSearchHelp',
-                description: 'Search help for package names, as the input help in ADT offers them - a name check before a creation that would fail on the package.',
+                description: 'The input help behind the package attributes - application components, software components, transport layers, translation relevances - as ADT offers them when a package is created. Not a search for packages: for that use searchObject. The endpoint is absent on a classic ERP release, and that is reported as such rather than as a bad request.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         type: {
                             type: 'string',
-                            description: 'The package value help type.'
+                            enum: ['applicationcomponents', 'softwarecomponents', 'transportlayers', 'translationrelevances'],
+                            description: 'Which value help to read. One of applicationcomponents, softwarecomponents, transportlayers, translationrelevances - the endpoint has no others.'
                         },
                         name: {
                             type: 'string',
-                            description: 'The package name.'
+                            description: 'Name pattern to filter the entries, e.g. SAP*. Defaults to * - everything.'
                         }
                     },
                     required: ['type']
@@ -157,13 +158,30 @@ export class DdicHandlers extends BaseHandler {
         try {
             const result = await this.readClient.ddicRepositoryAccess(args.path);
             this.trackRequest(startTime, true);
+            const rows = Array.isArray(result) ? result : result ? [result] : [];
+            if (!rows.length) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'success',
+                            found: false,
+                            path: args.path,
+                            reason: 'The dictionary knows nothing under this name.',
+                            hint: 'This endpoint takes a name, not an address - T000, not /sap/bc/adt/ddic/tables/t000. For a table use tableFields; searchObject finds a name.'
+                        })
+                    }]
+                };
+            }
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            found: true,
+                            path: args.path,
+                            result: rows
                         })
                     }
                 ]
@@ -176,8 +194,17 @@ export class DdicHandlers extends BaseHandler {
 
     async handlePackageSearchHelp(args: any): Promise<any> {
         const startTime = performance.now();
+        const allowed = ['applicationcomponents', 'softwarecomponents', 'transportlayers', 'translationrelevances'];
+        const type = String(args?.type ?? '').trim();
+        if (!allowed.includes(type)) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `type must be one of ${allowed.join(', ')} - the endpoint publishes no other value help, and anything else answers 404. ` +
+                'To find a package by name use searchObject with objType DEVC/K.'
+            );
+        }
         try {
-            const result = await this.readClient.packageSearchHelp(args.type, args.name);
+            const result = await this.readClient.packageSearchHelp(type as any, args.name);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -185,6 +212,9 @@ export class DdicHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            type,
+                            name: args?.name ?? '*',
+                            found: Array.isArray(result) ? result.length : 0,
                             result
                         })
                     }
@@ -192,7 +222,10 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get package search help');
+            const status = describeAdtError(error).status;
+            throw wrapAdtError(error, status === 404
+                ? `This system does not serve the package value helps: /sap/bc/adt/packages/valuehelps/${type} answers 404, as it does on a classic ERP release. The attributes are then only visible in SE80`
+                : 'Failed to get package search help');
         }
     }
 }

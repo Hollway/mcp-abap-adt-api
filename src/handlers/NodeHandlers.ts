@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, describeAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { NodeParents, NodeStructure } from "abap-adt-api";
 import { pageNodes } from '../lib/nodePage';
@@ -126,12 +126,16 @@ export class NodeHandlers extends BaseHandler {
         try {
             const mainPrograms = await this.readClient.mainPrograms(args.includeUrl);
             this.trackRequest(startTime, true);
+            const programs = Array.isArray(mainPrograms) ? mainPrograms : [];
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            includeUrl: args.includeUrl,
+                            found: programs.length > 0,
+                            count: programs.length,
                             mainPrograms
                         })
                     }
@@ -139,7 +143,11 @@ export class NodeHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get main programs');
+            // Only a program or function-group include has main programs. A
+            // class include answers 404, which says nothing about why.
+            throw wrapAdtError(error, describeAdtError(error).status === 404
+                ? `No main-program list at ${args?.includeUrl}: this answers for program and function-group includes only. A class include belongs to its class - use classIncludes for those`
+                : 'Failed to get main programs');
         }
     }
 }

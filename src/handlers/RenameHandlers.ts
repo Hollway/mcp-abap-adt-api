@@ -1,4 +1,5 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { requireShape } from '../lib/argShape';
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
@@ -110,6 +111,11 @@ export class RenameHandlers extends BaseHandler {
 
     async handleRenamePreview(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.renameRefactoring, {
+            parameter: 'renameRefactoring',
+            fields: ['oldName', 'newName', 'affectedObjects'],
+            producedBy: 'renameEvaluate'
+        });
         try {
             const result = await this.readClient.renamePreview(
                 args.renameRefactoring,

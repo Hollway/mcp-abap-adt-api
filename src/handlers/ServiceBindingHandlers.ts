@@ -1,4 +1,5 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { requireShape } from '../lib/argShape';
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
@@ -123,6 +124,11 @@ export class ServiceBindingHandlers extends BaseHandler {
 
     async handleBindingDetails(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.binding, {
+            parameter: 'binding',
+            fields: ['links', 'services'],
+            producedBy: 'objectStructure on a service binding, parsed as a ServiceBinding'
+        });
         try {
             const details = await this.readClient.bindingDetails(args.binding, args.index);
             this.trackRequest(startTime, true);
