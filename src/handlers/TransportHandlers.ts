@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, describeAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 import type { TransportsOfUser, TransportTarget, TransportRequest } from "abap-adt-api";
@@ -221,17 +221,46 @@ export class TransportHandlers extends BaseHandler {
             },
             {
                 name: 'transportsByConfig',
-                description: 'Transport requests of one organizer configuration, filtered as that configuration defines. For your own open requests use userTransports, which filters and shortens.',
+                description: 'Transport requests of one organizer configuration, filtered as that configuration defines. For your own open requests use userTransports, which filters and shortens. The configuration address is checked against transportConfigurations first: the backend ignores one it does not know and answers with every request in the system instead - 327,499 characters, measured, and nothing in it says the filter was dropped.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         configUri: {
                             type: 'string',
-                            description: 'The configuration URI.'
+                            description: 'The link of a configuration transportConfigurations answered with.'
                         },
                         targets: {
                             type: 'boolean',
                             description: 'Whether to include target systems.'
+                        },
+                        status: {
+                            type: 'string',
+                            description: 'Keep only requests with this status: "D" (modifiable), "R" (released) or "all" (default).',
+                            enum: ['D', 'R', 'all']
+                        },
+                        owner: {
+                            type: 'string',
+                            description: 'Keep only requests owned by this user (case-insensitive).'
+                        },
+                        numberLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose number contains this text.'
+                        },
+                        descriptionLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose description contains this text (case-insensitive).'
+                        },
+                        includeTasks: {
+                            type: 'boolean',
+                            description: 'Include the tasks inside each request. Off by default.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Requests to return, default 100. The count always covers the whole answer.'
+                        },
+                        raw: {
+                            type: 'boolean',
+                            description: 'Return the unfiltered ADT structure instead of the flat list.'
                         }
                     },
                     required: ['configUri']
@@ -679,7 +708,9 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get transport configuration');
+            throw wrapAdtError(error, describeAdtError(error).status === 404
+                ? `No transport organizer configuration at ${args?.url}: this takes the link of one transportConfigurations answered with, and a system with no configurations has none to take`
+                : 'Failed to get transport configuration');
         }
     }
 
@@ -827,18 +858,61 @@ export class TransportHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * An organizer configuration the system does not know is not refused: the
+     * backend drops the filter and answers with every request it holds, which
+     * measured 327,499 characters and reads exactly like the answer for the
+     * configuration that was asked about. The address is checked first.
+     */
     async handleTransportsByConfig(args: any): Promise<any> {
         const startTime = performance.now();
+        const configUri = String(args?.configUri ?? '');
+        let known: string[] = [];
         try {
-            const transports = await this.readClient.transportsByConfig(args.configUri, args.targets);
+            const configurations = await this.readClient.transportConfigurations();
+            known = (Array.isArray(configurations) ? configurations : [])
+                .map((c: any) => String(c?.link ?? ''))
+                .filter(Boolean);
+        } catch {
+            // The check is a courtesy; a system that will not list its
+            // configurations should not stop the call that was asked for.
+            known = [];
+        }
+        if (known.length && !known.some(link => link === configUri || link.endsWith(configUri) || configUri.endsWith(link))) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `No organizer configuration is published at ${configUri}. The backend would answer that with every transport request in the system, not with none. ` +
+                `The configurations this system has are: ${known.slice(0, 10).join(', ')}.`
+            );
+        }
+        if (!known.length) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'This system publishes no transport organizer configurations, so there is nothing this tool can be pointed at - and the backend would answer any address with every request it holds. Use userTransports for your own requests, or transportDetails for one by number.'
+            );
+        }
+        try {
+            const transports = await this.readClient.transportsByConfig(configUri, args.targets);
             this.trackRequest(startTime, true);
+            if (args?.raw === true) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ status: 'success', configUri, transports }) }]
+                };
+            }
+            const requests = this.flattenTransports(transports, args);
+            const max = Number.isFinite(args?.maxResults) ? Math.max(1, Math.trunc(args.maxResults)) : 100;
+            const page = requests.slice(0, max);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            transports
+                            configUri,
+                            count: requests.length,
+                            returned: page.length,
+                            more: page.length < requests.length,
+                            requests: page
                         })
                     }
                 ]
