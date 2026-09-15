@@ -371,6 +371,15 @@ export class UnitTestHandlers extends BaseHandler {
 
     async handleUnitTestEvaluation(args: any): Promise<any> {
         const startTime = performance.now();
+        // Without a test class the library reads testmethods off undefined and
+        // the TypeError leaves as a transport error - a diagnosis pointing at
+        // the network for a missing argument.
+        if (!args?.clas) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Pass clas - a test class as unitTestRun answered with. This tool evaluates the alerts of a run that already happened; to run the tests use runTests.'
+            );
+        }
         try {
             const result = await this.readClient.unitTestEvaluation(
                 this.parseObjectArg<UnitTestClass>(args.clas, 'clas'),

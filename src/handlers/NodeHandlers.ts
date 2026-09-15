@@ -3,13 +3,14 @@ import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { NodeParents, NodeStructure } from "abap-adt-api";
+import { pageNodes } from '../lib/nodePage';
 
 export class NodeHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
         return [
             {
                 name: 'nodeContents',
-                description: 'One level of the repository tree: what is directly inside a package, or inside a function group. Two things to know. Most rows hand back a SAPGUI bridge URI that serves properties and no content, so it is not the way to read sources - packageTree resolves the real source URLs, and listFunctionGroup does it for a group. And an unknown package answers exactly like an empty one, with no nodes at all, so only a repository search tells them apart.',
+                description: 'One level of the repository tree: what is directly inside a package, or inside a function group. Three things to know. Most rows hand back a SAPGUI bridge URI that serves properties and no content, so it is not the way to read sources - packageTree resolves the real source URLs, and listFunctionGroup does it for a group. An unknown package answers exactly like an empty one, with no nodes at all, so only a repository search tells them apart. And a large package answers with everything at once - measured, SABAPDEMOS holds 802 nodes and 238,596 characters, past the response cap - so the nodes are counted by type and returned one page at a time, with maxResults, offset and objectType to steer it.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -37,6 +38,18 @@ export class NodeHandlers extends BaseHandler {
                             type: 'array',
                             description: 'An array of parent node IDs.'
                         },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Nodes in this page, default 100. The counts always cover the whole level, not the page.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Nodes to skip, for the next page. Default 0.'
+                        },
+                        objectType: {
+                            type: 'string',
+                            description: 'Keep only nodes of this ADT type, e.g. CLAS/OC or PROG/P. The counts say which types are there.'
+                        }
                     },
                     required: ['parent_type']
                 }
@@ -81,13 +94,23 @@ export class NodeHandlers extends BaseHandler {
                 args.parentnodes
             );
             this.trackRequest(startTime, true);
+            const page = pageNodes(nodeContents, {
+                offset: args.offset,
+                maxResults: args.maxResults,
+                objectType: args.objectType
+            });
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            nodeContents
+                            ...page,
+                            hint: page.more
+                                ? `More nodes follow: ask again with offset=${page.offset + page.returned}.`
+                                : (page.total === 0
+                                    ? 'No nodes here. An unknown package answers exactly like an empty one - searchObject tells them apart.'
+                                    : undefined)
                         })
                     }
                 ]

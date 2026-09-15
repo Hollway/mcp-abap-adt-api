@@ -1138,6 +1138,106 @@ const check = (label, condition, detail) => {
       extract.isError ? extract.payload : Object.keys(extract.payload.result || {}));
   }
 
+  // The reading tools no smoke run had ever called. Three of them answer past
+  // the response cap unless they are narrowed, and three answer nothing in a
+  // way that reads like an answer.
+  const discovery = await call('adtDiscovery');
+  check('adtDiscovery lists the collections this system serves',
+    Array.isArray(discovery.payload.discovery) && discovery.payload.discovery.length > 0);
+
+  const feedList = await call('feeds');
+  check('feeds names the dump feed among the ones it publishes',
+    Array.isArray(feedList.payload.feeds)
+    && feedList.payload.feeds.some(feed => /dumps/.test(String(feed.href))),
+    (feedList.payload.feeds || []).map(feed => feed.href));
+
+  const shortDumps = await call('dumps', { max: 3 });
+  check('dumps answers the headers without the ST22 pages behind them',
+    typeof shortDumps.payload.count === 'number'
+    && shortDumps.payload.returned <= 3
+    && (shortDumps.payload.dumps.dumps || []).every(entry => entry.text === undefined),
+    { count: shortDumps.payload.count, returned: shortDumps.payload.returned });
+  check('and the headers still say which runtime error it was',
+    (shortDumps.payload.dumps.dumps || []).length === 0
+    || (shortDumps.payload.dumps.dumps || []).every(entry => typeof entry.textChars === 'number'),
+    (shortDumps.payload.dumps.dumps || [])[0]);
+
+  const classMeta = await call('objectStructure', { objectUrl: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}` });
+  check('objectStructure reads the metadata of a class and its source link',
+    classMeta.payload.structure.metaData['adtcore:name'] === CLASS_NAME
+    || String(classMeta.payload.structure.objectUrl).includes(CLASS_NAME.toLowerCase()),
+    classMeta.payload.structure.objectUrl);
+  const tableMeta = await call('objectStructure', { objectUrl: `/sap/bc/adt/ddic/structures/${STRUCTURE_NAME.toLowerCase()}` });
+  check('objectStructure reads a table from the structures collection both types share',
+    tableMeta.payload.structure.metaData['adtcore:name'] === STRUCTURE_NAME,
+    tableMeta.payload.structure.metaData['adtcore:name']);
+
+  const searched = await call('searchObject', { query: `${CLASS_NAME}*`, max: 3 });
+  check('searchObject finds an object by name, with its type and package',
+    (searched.payload.results || []).some(row => row['adtcore:name'] === CLASS_NAME
+      && row['adtcore:type'] === 'CLAS/OC' && !!row['adtcore:packageName']),
+    searched.payload.results);
+  const missed = await call('searchObject', { query: 'ZZZ_NO_SUCH_OBJECT_AT_ALL*', max: 3 });
+  check('searchObject answers an empty list for a name nothing matches',
+    Array.isArray(missed.payload.results) && missed.payload.results.length === 0);
+
+  const registration = await call('objectRegistrationInfo', { objectUrl: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}` });
+  check('objectRegistrationInfo says how the object travels and whether a key is needed',
+    !!registration.payload.info.object && 'reg:isRequired' in registration.payload.info.object,
+    registration.payload.info.object);
+
+  const level = await call('nodeContents', { parent_type: 'DEVC/K', parent_name: PACKAGE_NAME, maxResults: 5 });
+  check(`nodeContents counts the whole level of ${PACKAGE_NAME} and returns one page of it`,
+    level.payload.counts.nodes >= level.payload.returned
+    && level.payload.returned <= 5
+    && JSON.stringify(level.payload).length < 40000,
+    { nodes: level.payload.counts.nodes, returned: level.payload.returned, chars: JSON.stringify(level.payload).length });
+  check('and says which types the level holds, so the next page can be narrowed',
+    Object.keys(level.payload.counts.byType || {}).length > 0, level.payload.counts.byType);
+
+  const nowhere = await call('nodeContents', { parent_type: 'DEVC/K', parent_name: 'ZZZ_NO_SUCH_PACKAGE' });
+  check('nodeContents says an empty level cannot be told from a package that is not there',
+    nowhere.payload.total === 0 && /unknown package/.test(String(nowhere.payload.hint)),
+    nowhere.payload.hint);
+
+  const entity = await call('ddicElement', { path: STRUCTURE_NAME });
+  check(`ddicElement reads the fields of ${STRUCTURE_NAME} with their data elements`,
+    entity.payload.found === true && entity.payload.fields > 0,
+    { found: entity.payload.found, fields: entity.payload.fields });
+  const notAnEntity = await call('ddicElement', { path: 'WERKS_D' });
+  check('ddicElement says a data element gets the same empty shell as a name that is not there',
+    notAnEntity.payload.found === false && /getDataElementProperties/.test(String(notAnEntity.payload.hint)),
+    notAnEntity.payload.hint);
+
+  const configurations = await call('transportConfigurations');
+  check('transportConfigurations answers with a list, empty or not',
+    Array.isArray(configurations.payload.configurations));
+
+  const mine = await call('userTransports', { user: process.env.SAP_USER, status: 'all' });
+  check('userTransports answers a flat list of requests for the connected user',
+    typeof mine.payload.count === 'number' && Array.isArray(mine.payload.requests)
+    && mine.payload.requests.every(request => !!request.number && !!request.status),
+    { count: mine.payload.count });
+
+  const repos = await call('gitRepos');
+  check('gitRepos either lists the repositories or says abapGit is not installed here',
+    repos.isError === true
+      ? /abapGit is not installed/.test(JSON.stringify(repos.payload))
+      : Array.isArray(repos.payload.repos),
+    repos.payload);
+
+  const annotations = await call('annotationDefinitions');
+  check('annotationDefinitions either answers or says this system does not serve them',
+    annotations.isError === true
+      ? /does not serve the CDS annotation definitions/.test(JSON.stringify(annotations.payload))
+      : !!annotations.payload,
+    annotations.isError ? annotations.payload.error : 'served');
+
+  const noClass = await call('unitTestEvaluation', {});
+  check('unitTestEvaluation asks for the test class instead of failing on undefined',
+    noClass.isError === true && /Pass clas/.test(JSON.stringify(noClass.payload)),
+    noClass.payload);
+
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
 

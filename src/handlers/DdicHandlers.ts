@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, isMissingCollection } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, PackageValueHelpType } from 'abap-adt-api';
 
@@ -17,13 +17,13 @@ export class DdicHandlers extends BaseHandler {
             },
             {
                 name: 'ddicElement',
-                description: 'A dictionary element as the DDIC sees it: a data element, a domain or a type, with its properties. For a table or structure with its fields use getStructureSource.',
+                description: 'The fields of a dictionary entity and what each one is made of - key flag, data element, type, length - in one call. It answers for a table, a structure or a CDS entity: T000 comes back with its 17 fields. It does NOT answer for a data element or a domain, whatever its name suggests: the endpoint behind it is the CDS element-info one, and a data element name answers with an empty shell rather than an error. Use getDataElementProperties and getDomainProperties for those, and getStructureSource for the DDL text of a table.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         path: {
                             type: 'string',
-                            description: 'The path to the DDIC element.'
+                            description: 'Name of the table, structure or CDS entity, e.g. T000. A field path like T000-MANDT is accepted and answers for the whole table.'
                         },
                         getTargetForAssociation: {
                             type: 'boolean',
@@ -109,7 +109,9 @@ export class DdicHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get annotation definitions');
+            throw wrapAdtError(error, isMissingCollection(error)
+                ? 'This system does not serve the CDS annotation definitions: the /sap/bc/adt/ddic/cds/annotation/definitions collection is absent, as it is on a classic ERP release'
+                : 'Failed to get annotation definitions');
         }
     }
 
@@ -123,13 +125,23 @@ export class DdicHandlers extends BaseHandler {
                 args.getSecondaryObjects
             );
             this.trackRequest(startTime, true);
+            // An entity this endpoint knows nothing about is answered with an
+            // empty shell and status 200 - the same answer a name that does
+            // not exist gets, and the same one a data element gets, which is
+            // what the tool used to say it was for.
+            const found = !!(result && (result.name || (result.children || []).length > 0));
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            found,
+                            fields: (result?.children || []).length,
+                            result: found ? result : undefined,
+                            hint: found
+                                ? undefined
+                                : `Nothing here for "${args.path}". This endpoint answers for tables, structures and CDS entities; a data element or a domain answers exactly like a name that does not exist. For those use getDataElementProperties or getDomainProperties, and searchObject to check the name is real.`
                         })
                     }
                 ]
