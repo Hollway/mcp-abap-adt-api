@@ -277,3 +277,122 @@ export function functionModulesOf(sources: Array<{ source: string }>): string[] 
   }
   return [...names];
 }
+
+/** A picture of the graph, in a notation something else can draw. */
+export type DiagramFormat = 'mermaid' | 'dot';
+
+export interface DiagramOptions {
+  /** Name the picture, usually the package. */
+  title?: string;
+  maxNodes?: number;
+  maxEdges?: number;
+}
+
+export interface Diagram {
+  format: DiagramFormat;
+  text: string;
+  nodes: number;
+  edges: number;
+  truncated?: boolean;
+  note?: string;
+}
+
+const DIAGRAM_NODES = 60;
+const DIAGRAM_EDGES = 120;
+
+/** Mermaid takes a label in quotes; a quote inside one ends it early. */
+const label = (name: string) => name.replace(/"/g, "'");
+
+/**
+ * Draw the graph.
+ *
+ * The shape is the point of asking for a package, and a shape is easier seen
+ * than read out of a list of edges. Both notations here are text, so they cost
+ * nothing to produce and can be pasted wherever the reader already draws:
+ * mermaid renders in most markdown viewers, dot is for graphviz.
+ *
+ * Only the heaviest edges are drawn - a picture of three hundred of them is
+ * not a picture of anything - and a node that no drawn edge touches is kept
+ * only while there is room, because an orphan is worth seeing and a crowd of
+ * them is not.
+ */
+export function renderDiagram(graph: GraphResult, format: DiagramFormat, options: DiagramOptions = {}): Diagram {
+  const maxNodes = Math.max(1, Number(options.maxNodes) || DIAGRAM_NODES);
+  const askedEdges = Number(options.maxEdges);
+  const maxEdges = Number.isFinite(askedEdges) ? Math.max(0, askedEdges) : DIAGRAM_EDGES;
+  const edges = graph.edges.slice(0, maxEdges);
+
+  const wanted = new Set<string>();
+  for (const edge of edges) { wanted.add(edge.from); wanted.add(edge.to); }
+  const drawn: GraphNode[] = graph.nodes.filter(node => wanted.has(node.name));
+  for (const node of graph.nodes) {
+    if (drawn.length >= maxNodes) break;
+    if (!wanted.has(node.name)) drawn.push(node);
+  }
+  const kept = new Set(drawn.slice(0, maxNodes).map(node => node.name));
+  const keptEdges = edges.filter(edge => kept.has(edge.from) && kept.has(edge.to));
+
+  const id = new Map<string, string>();
+  [...kept].forEach((name, index) => id.set(name, `n${index}`));
+
+  const entries = new Set(graph.entryPoints);
+  // The hub list is the five most called, which in a small package is simply
+  // everybody - and a picture where every box is marked says nothing. An
+  // object one other object calls is not a hub.
+  const hubs = new Set(graph.hubs.filter(hub => hub.callsIn > 1).map(hub => hub.name));
+  const orphans = new Set(graph.orphans);
+  const role = (name: string) =>
+    hubs.has(name) ? 'hub' : entries.has(name) ? 'entry' : orphans.has(name) ? 'orphan' : undefined;
+
+  const lines: string[] = [];
+  if (format === 'mermaid') {
+    lines.push('flowchart LR');
+    if (options.title) lines.push(`  %% ${label(options.title)}`);
+    for (const node of drawn.slice(0, maxNodes)) {
+      const kind = role(node.name);
+      lines.push(`  ${id.get(node.name)}["${label(node.name)}"]${kind ? `:::${kind}` : ''}`);
+    }
+    for (const edge of keptEdges) {
+      const text = edge.calls > 1 ? `|${edge.calls}|` : '';
+      lines.push(`  ${id.get(edge.from)} -->${text} ${id.get(edge.to)}`);
+    }
+    lines.push('  classDef hub fill:#fff3e0,stroke:#ef6c00,stroke-width:2px');
+    lines.push('  classDef entry fill:#e8f5e9,stroke:#2e7d32');
+    lines.push('  classDef orphan stroke-dasharray:4 3,color:#777');
+  } else {
+    lines.push(`digraph ${JSON.stringify(label(options.title || 'package'))} {`);
+    lines.push('  rankdir=LR;');
+    lines.push('  node [shape=box, fontname="Helvetica"];');
+    for (const node of drawn.slice(0, maxNodes)) {
+      const kind = role(node.name);
+      const style = kind === 'hub'
+        ? ', style=filled, fillcolor="#fff3e0", penwidth=2'
+        : kind === 'entry'
+          ? ', style=filled, fillcolor="#e8f5e9"'
+          : kind === 'orphan'
+            ? ', style=dashed, fontcolor="#777777"'
+            : '';
+      lines.push(`  ${id.get(node.name)} [label="${label(node.name)}"${style}];`);
+    }
+    for (const edge of keptEdges) {
+      const text = edge.calls > 1 ? ` [label="${edge.calls}"]` : '';
+      lines.push(`  ${id.get(edge.from)} -> ${id.get(edge.to)}${text};`);
+    }
+    lines.push('}');
+  }
+
+  const hiddenNodes = graph.nodes.length - kept.size;
+  const hiddenEdges = graph.edges.length + graph.edgesHidden - keptEdges.length;
+  return {
+    format,
+    text: lines.join('\n'),
+    nodes: kept.size,
+    edges: keptEdges.length,
+    ...(hiddenNodes > 0 || hiddenEdges > 0
+      ? {
+        truncated: true,
+        note: `Drawn: ${kept.size} of ${graph.nodes.length} objects and ${keptEdges.length} of ${graph.edges.length + graph.edgesHidden} edges, heaviest first. The picture is of the busiest part, not of everything.`
+      }
+      : {})
+  };
+}

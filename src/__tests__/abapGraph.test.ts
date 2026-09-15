@@ -1,4 +1,4 @@
-import { buildGraph, functionModulesOf } from '../lib/abapGraph';
+import { buildGraph, functionModulesOf, renderDiagram } from '../lib/abapGraph';
 import type { ScannedObject } from '../lib/abapGraph';
 import type { CallKind, CallSite } from '../lib/abapCalls';
 
@@ -130,5 +130,74 @@ describe('functionModulesOf', () => {
       'ENDFUNCTION.'
     ].join('\n');
     expect(functionModulesOf([{ source: include }])).toEqual(['Z_APP_SAVE']);
+  });
+});
+
+describe('renderDiagram', () => {
+  const graph = buildGraph(PACKAGE);
+
+  it('draws mermaid with every object and the calls between them', () => {
+    const picture = renderDiagram(graph, 'mermaid', { title: 'ZAPP' });
+    expect(picture.format).toBe('mermaid');
+    expect(picture.text.startsWith('flowchart LR')).toBe(true);
+    expect(picture.text).toContain('%% ZAPP');
+    expect(picture.text).toContain('["ZCL_A"]');
+    expect(picture.nodes).toBe(graph.nodes.length);
+    expect(picture.edges).toBe(graph.edges.length);
+    expect(picture.truncated).toBeUndefined();
+  });
+
+  it('marks what is worth seeing at a glance, and nothing else', () => {
+    // Every object here has exactly one caller, so none of them is a hub -
+    // and a picture in which every box is marked says nothing at all. The
+    // hub list is the five most called, which in a small package is everyone.
+    const picture = renderDiagram(graph, 'mermaid');
+    expect(picture.text).not.toContain(':::hub');
+    expect(picture.text).toContain('["ZCL_LONELY"]:::orphan');
+
+    const called = buildGraph([
+      { name: 'ZCL_ONE', objectType: 'CLAS/OC', packageName: 'ZAPP', calls: [call('ZCL_SHARED', 'method', 3, 'RUN')] },
+      { name: 'ZCL_TWO', objectType: 'CLAS/OC', packageName: 'ZAPP', calls: [call('ZCL_SHARED', 'method', 4, 'RUN')] },
+      { name: 'ZCL_SHARED', objectType: 'CLAS/OC', packageName: 'ZAPP', calls: [] }
+    ]);
+    expect(renderDiagram(called, 'mermaid').text).toContain('["ZCL_SHARED"]:::hub');
+  });
+
+  it('marks the object work enters the package through', () => {
+    const chain = buildGraph([
+      { name: 'ZR_REPORT', objectType: 'PROG/P', packageName: 'ZAPP', calls: [call('ZCL_A', 'method', 3, 'RUN')] },
+      { name: 'ZCL_A', objectType: 'CLAS/OC', packageName: 'ZAPP', calls: [] }
+    ]);
+    expect(renderDiagram(chain, 'mermaid').text).toContain('["ZR_REPORT"]:::entry');
+  });
+
+  it('labels an edge with its weight only when there is more than one call', () => {
+    const picture = renderDiagram(graph, 'mermaid');
+    expect(picture.text).toMatch(/-->\|2\| n\d/);
+    expect(picture.text).toMatch(/--> n\d/);
+  });
+
+  it('draws the same graph as dot', () => {
+    const picture = renderDiagram(graph, 'dot', { title: 'ZAPP' });
+    expect(picture.text.startsWith('digraph "ZAPP" {')).toBe(true);
+    expect(picture.text).toContain('rankdir=LR;');
+    expect(picture.text).toContain('label="ZCL_A"');
+    expect(picture.text.trimEnd().endsWith('}')).toBe(true);
+  });
+
+  it('draws the heaviest part and says what it left out', () => {
+    const picture = renderDiagram(graph, 'mermaid', { maxEdges: 1 });
+    expect(picture.edges).toBe(1);
+    expect(picture.truncated).toBe(true);
+    expect(picture.note).toContain('heaviest first');
+  });
+
+  it('keeps an object no edge touches while there is room for it', () => {
+    const withOrphan = buildGraph([
+      ...PACKAGE,
+      { name: 'ZCL_LONELY', objectType: 'CLAS/OC', packageName: 'ZAPP', calls: [] }
+    ]);
+    const picture = renderDiagram(withOrphan, 'mermaid');
+    expect(picture.text).toContain('["ZCL_LONELY"]:::orphan');
   });
 });

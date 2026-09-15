@@ -841,4 +841,61 @@ describe('abapGraph', () => {
     expect(result.scanned.objects).toBe(0);
     expect(result.emptyNote).toMatch(/packageTree/);
   });
+
+  it('draws the graph when a notation is asked for, and refuses one it cannot draw', async () => {
+    const { handler } = graphHandlers();
+    const drawn = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', diagram: 'mermaid' }));
+    expect(drawn.diagram.format).toBe('mermaid');
+    expect(drawn.diagram.text).toContain('flowchart LR');
+    expect(drawn.diagram.text).toContain('ZCL_APP_HELPER');
+
+    const plain = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(plain.diagram).toBeUndefined();
+
+    await expect(handler.handleAbapGraph({ packageName: 'ZAPP', diagram: 'svg' }))
+      .rejects.toThrow(/mermaid.*dot/);
+  });
+
+  it('says which packages the outside targets live in, and which names answered to nothing', async () => {
+    const searched: string[] = [];
+    const { handler } = graphHandlers({
+      searchObject: async (query: string) => {
+        searched.push(query);
+        if (query === 'ZCL_APP_WRITER') {
+          return [{ 'adtcore:name': 'ZCL_APP_WRITER', 'adtcore:type': 'CLAS/OC', 'adtcore:packageName': 'ZAPP_OUT' }];
+        }
+        if (query === 'ZORDERS') {
+          return [{ 'adtcore:name': 'ZORDERS', 'adtcore:type': 'TABL/DT', 'adtcore:packageName': 'ZAPP_DDIC' }];
+        }
+        return [];
+      }
+    });
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', resolveOutside: true }));
+
+    expect(searched.length).toBeGreaterThan(0);
+    const packages = result.outsidePackages.map((entry: any) => entry.package);
+    expect(packages).toContain('ZAPP_OUT');
+    expect(packages).toContain('ZAPP_DDIC');
+    expect(result.outsidePackages.find((entry: any) => entry.package === 'ZAPP_OUT').objects[0])
+      .toMatchObject({ name: 'ZCL_APP_WRITER', objectType: 'CLAS/OC' });
+    expect(result.outsideUnresolved).toBeUndefined();
+  });
+
+  it('reports a name the search answered nothing for instead of dropping it', async () => {
+    const { handler } = graphHandlers({ searchObject: async () => [] });
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP', resolveOutside: true }));
+    expect(result.outsidePackages).toEqual([]);
+    expect(result.outsideUnresolved).toContain('ZORDERS');
+    // A function module never resolves this way, and that is worth saying
+    // rather than leaving it to look like a missing object.
+    expect(result.outsideUnresolvedNote).toMatch(/function module/i);
+  });
+
+  it('leaves the outside targets as names unless asked where they live', async () => {
+    let searches = 0;
+    const { handler } = graphHandlers({ searchObject: async () => { searches += 1; return []; } });
+    const result = answer(await handler.handleAbapGraph({ packageName: 'ZAPP' }));
+    expect(searches).toBe(0);
+    expect(result.outsidePackages).toBeUndefined();
+  });
 });

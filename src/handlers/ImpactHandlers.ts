@@ -11,8 +11,8 @@ import type { ImpactObject, ImpactPlace, UsageRow } from '../lib/impact';
 import { includedPrograms, includeSourceUrl } from '../lib/sourceScan';
 import { extractCallsAcross, groupCalls, CALL_KINDS } from '../lib/abapCalls';
 import type { CallSite, UnresolvedCall } from '../lib/abapCalls';
-import { buildGraph, functionModulesOf } from '../lib/abapGraph';
-import type { ScannedObject } from '../lib/abapGraph';
+import { buildGraph, functionModulesOf, renderDiagram } from '../lib/abapGraph';
+import type { ScannedObject, OutsideTarget, DiagramFormat } from '../lib/abapGraph';
 import { sourceCache } from '../lib/sourceCache';
 import { describeAdtError } from '../lib/adtError';
 
@@ -38,6 +38,8 @@ const MAX_INCLUDES = 60;
 /** How many objects of a package abapGraph reads, and how many sources in all. */
 const DEFAULT_GRAPH_OBJECTS = 60;
 const DEFAULT_GRAPH_SOURCES = 200;
+/** How many outside targets abapGraph looks up when asked where they live. */
+const DEFAULT_RESOLVE_OUTSIDE = 40;
 
 export class ImpactHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
@@ -230,6 +232,26 @@ export class ImpactHandlers extends BaseHandler {
             maxStatementChars: {
               type: 'number',
               description: 'With places, how much of each statement to quote. Default 160.'
+            },
+            diagram: {
+              type: 'string',
+              description: 'Also draw the graph: "mermaid" (renders in most markdown viewers) or "dot" (graphviz). The picture holds the heaviest edges, not all of them, and says what it left out.'
+            },
+            maxDiagramNodes: {
+              type: 'number',
+              description: 'Objects to draw, default 60.'
+            },
+            maxDiagramEdges: {
+              type: 'number',
+              description: 'Edges to draw, heaviest first, default 120.'
+            },
+            resolveOutside: {
+              type: 'boolean',
+              description: 'Look up where the targets outside the package live, and group them by package - the answer to "what does this package depend on", which a list of names is not. Costs one quick search per distinct target, so it is off by default. A function module is not found this way: the search does not index modules by their own name.'
+            },
+            maxResolve: {
+              type: 'number',
+              description: 'With resolveOutside, how many targets to look up, heaviest first. Default 40.'
             }
           },
           required: ['packageName']
@@ -694,6 +716,44 @@ export class ImpactHandlers extends BaseHandler {
     }
   }
 
+  /**
+   * Where the targets outside the package live.
+   *
+   * The graph names what the package calls beyond its own walls, and a list of
+   * names is not the answer to "what does this package depend on" - the answer
+   * is the packages those names belong to, which is a much shorter list and
+   * the one worth reading. A quick search per name says it, so this costs a
+   * backend call per distinct target and is asked for rather than assumed.
+   */
+  private async resolveOutside(targets: OutsideTarget[], max: number) {
+    const wanted = targets.slice(0, max);
+    const byPackage = new Map<string, { package: string; objects: Array<{ name: string; objectType: string; calls: number }>; calls: number }>();
+    const unresolved: string[] = [];
+
+    for (const target of wanted) {
+      const name = target.target.toUpperCase();
+      let hit: any;
+      try {
+        const hits = await this.readClient.searchObject(target.target, undefined, 5);
+        hit = (hits || []).find((row: any) => String(row['adtcore:name'] || '').toUpperCase() === name);
+      } catch {
+        // A search that fails is one name unresolved, not a failed graph.
+      }
+      if (!hit) { unresolved.push(target.target); continue; }
+      const packageName = String(hit['adtcore:packageName'] || '').toUpperCase() || '(unknown)';
+      const entry = byPackage.get(packageName) || { package: packageName, objects: [], calls: 0 };
+      entry.objects.push({ name, objectType: String(hit['adtcore:type'] || ''), calls: target.calls });
+      entry.calls += target.calls;
+      byPackage.set(packageName, entry);
+    }
+
+    return {
+      packages: [...byPackage.values()].sort((a, b) => b.calls - a.calls || a.package.localeCompare(b.package)),
+      unresolved,
+      notLookedUp: targets.length > wanted.length ? targets.length - wanted.length : 0
+    };
+  }
+
   /** One level of a package, as nodes. */
   private async packageNodes(packageName: string): Promise<PackageNode[]> {
     const structure = await this.readClient.nodeContents('DEVC/K', packageName);
@@ -814,6 +874,22 @@ export class ImpactHandlers extends BaseHandler {
         maxStatementChars: Number(args?.maxStatementChars) || undefined
       });
 
+      const wantedFormat = String(args?.diagram || '').trim().toLowerCase();
+      if (wantedFormat && wantedFormat !== 'mermaid' && wantedFormat !== 'dot') {
+        throw new McpError(ErrorCode.InvalidParams, `diagram takes "mermaid" or "dot", not '${args.diagram}'.`);
+      }
+      const diagram = wantedFormat
+        ? renderDiagram(graph, wantedFormat as DiagramFormat, {
+          title: packageName,
+          maxNodes: Number(args?.maxDiagramNodes) || undefined,
+          maxEdges: Number(args?.maxDiagramEdges) || undefined
+        })
+        : undefined;
+
+      const resolved = args?.resolveOutside === true
+        ? await this.resolveOutside(graph.outside, Math.max(1, Number(args?.maxResolve) || DEFAULT_RESOLVE_OUTSIDE))
+        : undefined;
+
       this.trackRequest(startTime, true);
       return {
         content: [{
@@ -851,6 +927,19 @@ export class ImpactHandlers extends BaseHandler {
             cycles: graph.cycles,
             outside: graph.outside,
             ...(graph.outsideHidden ? { outsideHidden: graph.outsideHidden } : {}),
+            ...(resolved
+              ? {
+                outsidePackages: resolved.packages,
+                ...(resolved.unresolved.length
+                  ? {
+                    outsideUnresolved: resolved.unresolved,
+                    outsideUnresolvedNote: 'These names answered to no object in the repository search. A function module always lands here - the search does not index modules by their own name - and so does anything the scanner read out of a string.'
+                  }
+                  : {}),
+                ...(resolved.notLookedUp ? { outsideNotLookedUp: resolved.notLookedUp } : {})
+              }
+              : {}),
+            ...(diagram ? { diagram } : {}),
             ...(unread.length ? { unread } : {}),
             ...(includesUnread.length ? { includesUnread } : {}),
             ...(walked.truncated || readBudgetReached
