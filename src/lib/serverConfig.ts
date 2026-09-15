@@ -4,6 +4,30 @@
  * Every value is read lazily: dotenv loads .env after the module graph is
  * imported, so anything captured at import time would miss it.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+/**
+ * The version this server tells a client about on initialize.
+ *
+ * It used to be a literal in the constructor, and the literal stopped being
+ * true three releases ago: the server announced 1.0.0 while the package was
+ * at 1.3.0, so the one place a client can ask which build it is talking to
+ * answered with a number nobody had shipped. Read it from the package
+ * instead, from beside the compiled file and from beside the sources, which
+ * is where the tests run from.
+ */
+export const serverVersion = (): string => {
+  for (const candidate of [join(__dirname, '..', '..', 'package.json'), join(__dirname, '..', '..', '..', 'package.json')]) {
+    try {
+      const version = JSON.parse(readFileSync(candidate, 'utf8'))?.version;
+      if (typeof version === 'string' && version.trim()) return version.trim();
+    } catch {
+      // Not there, or not readable - try the next place.
+    }
+  }
+  return '0.0.0';
+};
 
 const truthy = (value: string | undefined): boolean =>
   !!value && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
