@@ -8,6 +8,158 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.6.0] — the tools nobody had ever called, and the questions before a release
+
+Ninety-three of the 180 tools had never been reached by a smoke run. Forty-six
+of those only read, so they were called against a live system one after
+another and their answers compared with what their descriptions promised. What
+follows is what came back. Three new tools answer the questions that get asked
+before a transport is released; everything else in this release is an answer
+that was already being given, and was wrong or unreadable.
+
+### Tools that could not work at all
+
+`classIncludes` threw `clas.includes is not iterable` on every call ever made
+to it. Its schema takes a class name; the library method behind it is a pure
+function over a class structure, and a name has no `includes` to iterate. The
+structure is read first now, and an object that has no includes - a program,
+say - is told so and pointed at `mainPrograms`.
+
+`syntaxCheckTypes` answered `{}` on every system it has ever run on. The
+library hands back a `Map`, and `JSON.stringify` writes a `Map` as `{}`. It
+answers with the flavours themselves now: two of them on a classic ERP system,
+each with the object types it accepts.
+
+`packageSearchHelp` declared its type as a free string where the endpoint
+takes exactly four names — `applicationcomponents`, `softwarecomponents`,
+`transportlayers`, `translationrelevances` — and anything else answers 404. The
+four are in the schema, and a classic ERP release, which serves none of them,
+is reported as a release without the endpoint rather than as a bad request.
+
+### Answers that were empty but looked like answers
+
+Six reads answered success with nothing in it, which is indistinguishable from
+a real empty result:
+
+- `featureDetails`, `collectionFeatureDetails` and `findCollectionByUrl` each
+  answered `{"status":"success"}` and no field at all, for a title that exists
+  and for one that does not alike. They say `found: false` now, with the
+  nearest titles or addresses and how many there were to choose from.
+  `collectionFeatureDetails` turned out to match template links rather than
+  collection addresses — `/sap/bc/adt/oo/classes`, a collection that plainly
+  exists, is found by nothing there — which is now said rather than implied;
+- `objectTypes` answered an empty list as a successful retrieval. The endpoint
+  behind it keeps only the named items carrying a type and a `usedBy` field,
+  and a classic ERP release sends neither, so nothing ever survives the parse.
+  It says so and points at `loadTypes`;
+- `ddicRepositoryAccess` answered an empty list for a name the dictionary does
+  not know, and for an address rather than a name;
+- `syntaxCheckCdsUrl` called a view that does not exist clean: the backend
+  answers an empty message list, which is exactly what a passed check looks
+  like. The object is confirmed first;
+- `inactiveObjects` was the one tool of the server answering with a bare array.
+
+### Object-shaped parameters, checked before the library reads a field of undefined
+
+`checkRepo`, `renamePreview`, `fixEdits` and `bindingDetails` each ended in
+`Cannot read properties of undefined` — a TypeError reported as a transport
+error — when handed something that was not the object the library
+dereferences. Three of them declared that object as a **string** in their own
+schema, so the wrong shape was what the schema asked for. Each now names the
+fields that are missing and the call that produces them.
+
+Every abapGit read says the plugin is absent the way `gitRepos` already did:
+`/sap/bc/adt/abapgit/...` answering 404 is a system without abapGit, not a
+failed call.
+
+### Catalogues, cut to a size that can be read
+
+Three discovery reads handed back the whole system. Measured on a classic ERP
+system: `loadTypes` **141,045 characters**, `adtDiscovery` **42,033**,
+`adtCompatibiliyGraph` **29,039**. Each now answers with a summary over the
+whole catalogue — totals, categories, namespaces — plus one filtered page, so
+a narrowed answer can never be read as a complete one. `classComponents` did
+the same with 13,501 characters of backend tree for one class, and now answers
+a component list filtered by name, type and visibility.
+
+`abapDocumentation` and `atcDocumentation` answered with whole HTML pages -
+13,893 characters of doctype, head and icon links around a few paragraphs of
+help - and answer with the text now, the page only when `html` is set.
+Quick-fix proposals arrived with their descriptions escaped twice over
+(`&lt;p&gt;Starts the rename wizard`) and are decoded, keeping every field
+`fixEdits` needs so a row can be handed straight back.
+
+### An answer about something else entirely
+
+`transportsByConfig` with an address no configuration has was not refused by
+the backend: it dropped the filter and answered with **every transport request
+in the system**, 327,499 characters, shaped exactly like the answer for the
+configuration that was asked about. The address is checked against
+`transportConfigurations` first, and a system with no configurations at all is
+said to have none.
+
+`atcCheckVariant` posts to the worklist endpoint, and that endpoint answers
+with an id whatever name it is given: a variant invented on the spot got one,
+the empty string got one, and the same name got a **different id on every
+call**. The run started on such a worklist fails several calls later with a
+bare 500, and nothing connects that failure to the name. Code Inspector keeps
+the variants in `SCICHKV_HD`, so the name is checked there first and refused
+with the global variants of the system named. A name outside `A-Z`, digits,
+underscore and the namespace slash is refused before it can travel into the
+query string.
+
+### What the data preview actually accepts
+
+The freestyle SQL endpoint refuses a statement longer than **255 characters**,
+and says so as "Maximum number of characters in a row exceeds 255" — which
+reads as a limit on the rows of the result rather than on the query. Measured:
+250 characters answer, 292 do not, and wrapping the text over several lines
+changes nothing, because the whole statement is counted. `runQuery` now checks
+the length before the call and names the ways out; the limit is in the schema,
+where a caller composing a join can see it.
+
+### Three questions asked before a transport is released
+
+- **`transportReadiness`** — a verdict per check: the status and owner of the
+  request, tasks still open under it, an empty request, objects that also sit
+  in other open requests, objects with an inactive version saved and never
+  activated, and locks this server still holds. A task number is resolved to
+  the request above it.
+- **`transportConflicts`** — the objects of a request that are also recorded
+  in somebody else open request, which is the case where the later release
+  overwrites the earlier work. On one customizing request measured live, 49 of
+  its 79 objects sat in 110 other open requests under 24 owners. Each object
+  costs a read, so the number examined is capped and the answer says how many
+  were left out.
+- **`objectTransports`** — every request one object has travelled in, newest
+  first, including the entries recorded under its parts (REPS and REPT for a
+  report, METH and CLSD for a class) which a search by the object name alone
+  never shows. One report came back with eleven requests under three owners.
+
+The activation check reads `REPOSRC` and the dictionary tables rather than
+ADT, because ADT cannot answer it: `objectStructure` reports version `active`
+for an object whose inactive version was saved years ago, and asking for
+version `inactive` explicitly answers with the active one rather than with
+nothing. A class is recorded in `REPOSRC` under its name padded with `=` to
+thirty characters plus a part suffix, which is how one request came back with
+ten parts of a class saved and never activated.
+
+### Smaller things said plainly
+
+`mainPrograms` answers for program and function-group includes only, and a
+class include is now told so instead of getting a bare 404. `findObjectPath`
+maps repository objects, not packages, which is what "No URI-Mapping defined
+for URI" meant. The ATC reads that answer a wrong id with a bare 500 say where
+a run result id and a marker id come from.
+
+### Numbers
+
+183 tools (180 before), 1,097 tests in 63 suites (1,032 in 60), 271 smoke
+checks (237). The tool list grew from 166,279 to about 176,000 characters -
+three new tools and the descriptions that record what the twenty-odd fixed
+ones actually do. Profiles remain the cheaper answer: `graph` 27 tools,
+`atc` 23, `min` 21.
+
 ## [1.5.0] — the answers that never fitted, and the ones that were not answers
 
 Every tool in this release was picked the same way: by calling it against a

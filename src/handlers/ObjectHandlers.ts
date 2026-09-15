@@ -139,7 +139,12 @@ export class ObjectHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to find object path');
+            // A package address is the common wrong input here, and the
+            // backend answers it with "No URI-Mapping defined for URI" - true,
+            // but it never says which addresses are mapped.
+            throw wrapAdtError(error, /uri-?mapping/i.test(String(error?.message || ''))
+                ? 'Failed to find object path: this endpoint maps the address of a repository object - a class, a program, a function group - not a package or a source page. Pass the object URL itself, e.g. /sap/bc/adt/oo/classes/cl_salv_table, and use packageTree for what a package contains'
+                : 'Failed to find object path');
         }
     }
 
@@ -175,12 +180,33 @@ export class ObjectHandlers extends BaseHandler {
         try {
             const types = await this.readClient.objectTypes();
             this.trackRequest(startTime, true);
+            const rows = Array.isArray(types) ? types : [];
+            // The endpoint behind this answers with named items, and only the
+            // ones carrying both a type and a usedBy field survive the parse.
+            // A classic ERP release sends neither, so the list comes back
+            // empty - which used to be reported as a successful retrieval.
+            if (!rows.length) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'success',
+                            found: false,
+                            count: 0,
+                            reason: 'This system publishes no object types through the information-system endpoint: the named items it answers with carry no type/usedBy pair, so nothing survives the parse.',
+                            hint: 'loadTypes answers the same question from the creation endpoints, and searchObject finds an object whose type is not known in advance.'
+                        }, null, 2)
+                    }]
+                };
+            }
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            found: true,
+                            count: rows.length,
                             types,
                             message: 'Object types retrieved successfully'
                         }, null, 2)

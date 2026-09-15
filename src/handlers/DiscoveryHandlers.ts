@@ -1,6 +1,16 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
+import {
+    pageLoadTypes,
+    pageDiscovery,
+    pageCompatibilityGraph,
+    discoveryTitles,
+    collectionHrefs,
+    templateLinks,
+    nearestTitles,
+    nearestHrefs
+} from '../lib/discoveryCatalog';
 import type { ToolDefinition } from '../types/tools.js';
 
 export class DiscoveryHandlers extends BaseHandler {
@@ -8,13 +18,13 @@ export class DiscoveryHandlers extends BaseHandler {
         return [
             {
                 name: 'featureDetails',
-                description: 'What one discovery feature offers, by title - the capabilities behind a collection.',
+                description: 'What one discovery feature offers, by title - the capabilities behind a collection. A title that is not in the discovery document is answered with found false and the titles closest to it, not with an empty success.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         title: {
                             type: 'string',
-                            description: 'The title of the feature.'
+                            description: 'The title of the feature, exactly as the discovery document spells it, e.g. Classes.'
                         }
                     },
                     required: ['title']
@@ -22,13 +32,13 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'collectionFeatureDetails',
-                description: 'What one collection of the discovery document offers: its capabilities, its supported types and its versions.',
+                description: 'What the collection behind a TEMPLATE LINK offers: its capabilities, its supported types and its versions. It matches template links, not collection addresses - /sap/bc/adt/oo/classes, a collection that plainly exists, is found by nothing here, and that is now said rather than answered with an empty success. For a collection address use findCollectionByUrl.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         url: {
                             type: 'string',
-                            description: 'The URL of the collection feature.'
+                            description: 'A template link, as adtDiscovery lists them with includeTemplates: true.'
                         }
                     },
                     required: ['url']
@@ -36,13 +46,13 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'findCollectionByUrl',
-                description: 'Which discovery collection serves a given URL - the reverse lookup of adtDiscovery, for when an address is in hand and its capabilities are not.',
+                description: 'Which discovery collection serves a given URL - the reverse lookup of adtDiscovery, for when an address is in hand and its capabilities are not. An address served by nothing is answered with found false and the nearest collections.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         url: {
                             type: 'string',
-                            description: 'The URL of the collection.'
+                            description: 'The address to resolve, e.g. /sap/bc/adt/oo/classes.'
                         }
                     },
                     required: ['url']
@@ -50,18 +60,52 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'loadTypes',
-                description: 'The object types the creation endpoints accept, with the templates behind them - what a wrong objtype is checked against.',
+                description: 'The object types the creation endpoints accept, with the templates behind them - what a wrong objtype is checked against. The whole catalogue is some 1,500 types and 141,000 characters on a classic ERP system, so the answer is a summary plus one filtered page.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        name: {
+                            type: 'string',
+                            description: 'Substring of the type id or its label, case-insensitive, e.g. CLAS or class.'
+                        },
+                        category: {
+                            type: 'string',
+                            description: 'Substring of the category id or label, e.g. source_library.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Types to return, default 50.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Types to skip before the page, default 0.'
+                        }
+                    }
                 }
             },
             {
                 name: 'adtDiscovery',
-                description: 'The ADT service document: every collection this system offers, with its URL and the object types it serves. This is where the address of an unfamiliar collection comes from.',
+                description: 'The ADT service document: every collection this system offers, with its URL and the object types it serves. This is where the address of an unfamiliar collection comes from. The whole document runs to some 42,000 characters, most of it template links, so the answer is a summary plus one filtered page and the links are left out unless asked for.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        search: {
+                            type: 'string',
+                            description: 'Substring of a collection address, its title or its workspace, e.g. atc or classes.'
+                        },
+                        includeTemplates: {
+                            type: 'boolean',
+                            description: 'Include the template links of each collection. Off by default - they are the bulk of the document.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Collections to return, default 60.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Collections to skip before the page, default 0.'
+                        }
+                    }
                 }
             },
             {
@@ -74,10 +118,27 @@ export class DiscoveryHandlers extends BaseHandler {
             },
             {
                 name: 'adtCompatibiliyGraph',
-                description: 'The ADT compatibility graph of this system: which protocol versions its collections speak. Diagnostic, for a call refused as an unsupported version.',
+                description: 'The ADT compatibility graph of this system: which protocol versions its collections speak. Diagnostic, for a call refused as an unsupported version. The graph runs to some 29,000 characters, so the answer is a summary plus one filtered page of edges.',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        namespace: {
+                            type: 'string',
+                            description: 'Substring of a namespace on either end of an edge, e.g. COM.SAP.ADT.ABAPUNIT.'
+                        },
+                        name: {
+                            type: 'string',
+                            description: 'Substring of a node name on either end of an edge.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Edges to return, default 50.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Edges to skip before the page, default 0.'
+                        }
+                    }
                 }
             }
         ];
@@ -104,22 +165,28 @@ export class DiscoveryHandlers extends BaseHandler {
         }
     }
 
+    private json(payload: unknown) {
+        return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    }
+
     async handleFeatureDetails(args: any): Promise<any> {
         const startTime = performance.now();
         try {
             const details = await this.readClient.featureDetails(args.title);
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            details
-                        })
-                    }
-                ]
-            };
+            if (!details) {
+                const titles = discoveryTitles((await this.readClient.adtDiscovery()) as any);
+                return this.json({
+                    status: 'success',
+                    found: false,
+                    title: args.title,
+                    reason: 'No feature of the discovery document carries this title.',
+                    nearestTitles: nearestTitles(titles, args.title),
+                    titleCount: titles.length,
+                    hint: 'Titles come from adtDiscovery - search it for the collection first.'
+                });
+            }
+            return this.json({ status: 'success', found: true, title: args.title, details });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get feature details');
@@ -131,17 +198,28 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const details = await this.readClient.collectionFeatureDetails(args.url);
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            details
-                        })
-                    }
-                ]
-            };
+            if (!details) {
+                // This lookup matches template links, not collection
+                // addresses: /sap/bc/adt/oo/classes, a collection that plainly
+                // exists, finds nothing here.
+                const discovery = (await this.readClient.adtDiscovery()) as any;
+                const templates = templateLinks(discovery);
+                const isCollection = collectionHrefs(discovery).includes(String(args.url));
+                return this.json({
+                    status: 'success',
+                    found: false,
+                    url: args.url,
+                    reason: isCollection
+                        ? 'That address is a collection, and this lookup matches the template links inside collections - no template of this system is published at it.'
+                        : 'No template link of the discovery document is published at this address.',
+                    nearestTemplates: nearestHrefs(templates, args.url),
+                    templateCount: templates.length,
+                    hint: isCollection
+                        ? 'For what a collection itself offers use findCollectionByUrl; template links are listed by adtDiscovery with includeTemplates: true.'
+                        : 'Template links come from adtDiscovery with includeTemplates: true.'
+                });
+            }
+            return this.json({ status: 'success', found: true, url: args.url, details });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get collection feature details');
@@ -153,17 +231,18 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const collection = await this.readClient.findCollectionByUrl(args.url);
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            collection
-                        })
-                    }
-                ]
-            };
+            if (!collection) {
+                const hrefs = collectionHrefs((await this.readClient.adtDiscovery()) as any);
+                return this.json({
+                    status: 'success',
+                    found: false,
+                    url: args.url,
+                    reason: 'No collection of the discovery document serves this address.',
+                    nearestCollections: nearestHrefs(hrefs, args.url),
+                    collectionCount: hrefs.length
+                });
+            }
+            return this.json({ status: 'success', found: true, url: args.url, collection });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to find collection by URL');
@@ -175,17 +254,15 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const types = await this.readClient.loadTypes();
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            types
-                        })
-                    }
-                ]
-            };
+            return this.json({
+                status: 'success',
+                ...pageLoadTypes(types as any, {
+                    name: args?.name,
+                    category: args?.category,
+                    maxResults: args?.maxResults,
+                    offset: args?.offset
+                })
+            });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to load types');
@@ -197,17 +274,15 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const discovery = await this.readClient.adtDiscovery();
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            discovery
-                        })
-                    }
-                ]
-            };
+            return this.json({
+                status: 'success',
+                ...pageDiscovery(discovery as any, {
+                    search: args?.search,
+                    includeTemplates: args?.includeTemplates,
+                    maxResults: args?.maxResults,
+                    offset: args?.offset
+                })
+            });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to perform ADT discovery');
@@ -219,17 +294,7 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const discovery = await this.readClient.adtCoreDiscovery();
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            discovery
-                        })
-                    }
-                ]
-            };
+            return this.json({ status: 'success', discovery });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to perform ADT core discovery');
@@ -241,17 +306,15 @@ export class DiscoveryHandlers extends BaseHandler {
         try {
             const graph = await this.readClient.adtCompatibiliyGraph();
             this.trackRequest(startTime, true);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            graph
-                        })
-                    }
-                ]
-            };
+            return this.json({
+                status: 'success',
+                ...pageCompatibilityGraph(graph as any, {
+                    namespace: args?.namespace,
+                    name: args?.name,
+                    maxResults: args?.maxResults,
+                    offset: args?.offset
+                })
+            });
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get ADT compatibility graph');

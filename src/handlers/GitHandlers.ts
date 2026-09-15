@@ -1,8 +1,16 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError, isMissingCollection } from '../lib/adtError';
+import { requireShape } from '../lib/argShape';
 import type { ToolDefinition } from '../types/tools.js';
 import { GitRepo, GitStaging } from 'abap-adt-api';
+
+/** What the abapGit calls dereference on the repository they are handed. */
+const REPO_LINKS_SHAPE = {
+    parameter: 'repo',
+    fields: ['links'],
+    producedBy: 'gitRepos'
+};
 
 export class GitHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -123,7 +131,7 @@ export class GitHandlers extends BaseHandler {
                     properties: {
                         repo: {
                             type: 'object',
-                            description: 'The Git repository object.'
+                            description: 'The repository row gitRepos answered with, passed back unchanged - the call reads its links.'
                         },
                         user: {
                             type: 'string',
@@ -145,11 +153,11 @@ export class GitHandlers extends BaseHandler {
                     properties: {
                         repo: {
                             type: 'object',
-                            description: 'The Git repository object.'
+                            description: 'The repository row gitRepos answered with, passed back unchanged - the call reads its links.'
                         },
                         staging: {
                             type: 'object',
-                            description: 'The staging information object.'
+                            description: 'The staging object stageRepo answered with, passed back unchanged.'
                         },
                         user: {
                             type: 'string',
@@ -170,8 +178,8 @@ export class GitHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         repo: {
-                            type: 'string',
-                            description: 'The Git repository.'
+                            type: 'object',
+                            description: 'The repository row gitRepos answered with, passed back unchanged - the call reads its links and its url, so a name or a key alone is not enough.'
                         },
                         user: {
                             type: 'string',
@@ -192,8 +200,8 @@ export class GitHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         repo: {
-                            type: 'string',
-                            description: 'The Git repository.'
+                            type: 'object',
+                            description: 'The repository row gitRepos answered with, passed back unchanged - the call reads its links and its url, so a name or a key alone is not enough.'
                         },
                         user: {
                             type: 'string',
@@ -214,8 +222,8 @@ export class GitHandlers extends BaseHandler {
                     type: 'object',
                     properties: {
                         repo: {
-                            type: 'string',
-                            description: 'The Git repository.'
+                            type: 'object',
+                            description: 'The repository row gitRepos answered with, passed back unchanged - the call reads its links and its url, so a name or a key alone is not enough.'
                         },
                         branch: {
                             type: 'string',
@@ -267,6 +275,18 @@ export class GitHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * abapGit is a plugin, not a part of ADT: on a system without it every one
+     * of these calls answers 404 "Resource /sap/bc/adt/abapgit/... does not
+     * exist". Passed on as it comes, that reads as a fault of the call rather
+     * than as a system that has no abapGit at all.
+     */
+    private gitError(error: unknown, label: string) {
+        return wrapAdtError(error, isMissingCollection(error)
+            ? 'abapGit is not installed on this system: the /sap/bc/adt/abapgit collection is absent, so no repository call can be served'
+            : label);
+    }
+
     async handleGitRepos(args: any): Promise<any> {
         const startTime = performance.now();
         try {
@@ -313,7 +333,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get external repo info');
+            throw this.gitError(error, 'Failed to get external repo info');
         }
     }
 
@@ -342,7 +362,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create git repo');
+            throw this.gitError(error, 'Failed to create git repo');
         }
     }
 
@@ -370,7 +390,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to pull git repo');
+            throw this.gitError(error, 'Failed to pull git repo');
         }
     }
 
@@ -392,12 +412,13 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to unlink git repo');
+            throw this.gitError(error, 'Failed to unlink git repo');
         }
     }
 
     async handleStageRepo(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.repo, REPO_LINKS_SHAPE);
         try {
             const result = await this.adtclient.stageRepo(
                 args.repo,
@@ -418,12 +439,13 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to stage repo');
+            throw this.gitError(error, 'Failed to stage repo');
         }
     }
 
     async handlePushRepo(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.repo, REPO_LINKS_SHAPE);
         try {
             const result = await this.adtclient.pushRepo(
                 args.repo,
@@ -445,12 +467,13 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to push repo');
+            throw this.gitError(error, 'Failed to push repo');
         }
     }
 
     async handleCheckRepo(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.repo, REPO_LINKS_SHAPE);
         try {
             const result = await this.readClient.checkRepo(
                 args.repo,
@@ -471,12 +494,17 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to check repo');
+            throw this.gitError(error, 'Failed to check repo');
         }
     }
 
     async handleRemoteRepoInfo(args: any): Promise<any> {
         const startTime = performance.now();
+        requireShape(args?.repo, {
+            parameter: 'repo',
+            fields: ['url'],
+            producedBy: 'gitRepos'
+        });
         try {
             const repoInfo = await this.readClient.remoteRepoInfo(
                 args.repo,
@@ -497,7 +525,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get remote repo info');
+            throw this.gitError(error, 'Failed to get remote repo info');
         }
     }
 
@@ -525,7 +553,7 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to switch repo branch');
+            throw this.gitError(error, 'Failed to switch repo branch');
         }
     }
 }

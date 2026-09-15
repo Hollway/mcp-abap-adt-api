@@ -6,6 +6,8 @@ import { AtcProposal } from 'abap-adt-api';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { objectUrlFor } from '../lib/packageWalk';
 import { describeAdtError } from '../lib/adtError';
+import { isVariantNameSafe, variantQuery, variantNames, judgeVariant } from '../lib/atcVariants';
+import { documentText } from '../lib/htmlText';
 import { filterUsers } from '../lib/userList';
 
 export class AtcHandlers extends BaseHandler {
@@ -145,13 +147,17 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcDocumentation',
-                description: 'The documentation of one ATC finding: what the check means and what it wants instead. Takes the documentationUri that atcCheck reports for each finding (atcWorklists carries the same URI). Answers with the document as the backend writes it, which is HTML. Verified live: a finding of the 075 master-language check answered with its Details of Analysis.',
+                description: 'The documentation of one ATC finding: what the check means and what it wants instead. Takes the documentationUri that atcCheck reports for each finding (atcWorklists carries the same URI). The backend writes it as an HTML page; what comes back is its text, with the page itself only when html is set. Verified live: a finding of the 075 master-language check answered with its Details of Analysis.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         docUri: {
                             type: 'string',
                             description: 'Documentation URI of the finding, from the atcWorklists answer.'
+                        },
+                        html: {
+                            type: 'boolean',
+                            description: 'Return the HTML page as well as the text. Off by default.'
                         }
                     },
                     required: ['docUri']
@@ -287,8 +293,38 @@ export class AtcHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Whether the system knows this check variant. The worklist endpoint takes
+     * any name and answers with an id, so the only honest moment to refuse one
+     * is before that call. Code Inspector keeps them in SCICHKV_HD; a system
+     * that will not answer that read is not argued with - the check says so
+     * and the call goes ahead.
+     */
+    private async verifyVariant(variant: string): Promise<{ checked: boolean; exists?: boolean; examples?: string[] }> {
+        if (!isVariantNameSafe(variant)) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `"${variant}" is not a check variant name: they are up to 30 characters of A-Z, digits, underscore and the namespace slash. The name also travels in a query string, so nothing else is passed on.`
+            );
+        }
+        try {
+            const rows = await this.readClient.runQuery(variantQuery(), 500);
+            return judgeVariant(variant, variantNames(rows));
+        } catch {
+            return { checked: false };
+        }
+    }
+
     async handleAtcCheckVariant(args: { variant: string }): Promise<any> {
         const startTime = performance.now();
+        const verdict = await this.verifyVariant(String(args?.variant ?? ''));
+        if (verdict.checked && !verdict.exists) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `This system has no ATC check variant called "${args?.variant}". The worklist endpoint would still answer with an id - a different one on every call - and the run started on it fails later with a bare 500. ` +
+                (verdict.examples?.length ? `Global variants here include: ${verdict.examples.join(', ')}.` : 'atcCustomizing names the system check variant.')
+            );
+        }
         try {
             const result = await this.readClient.atcCheckVariant(args.variant);
             this.trackRequest(startTime, true);
@@ -298,6 +334,9 @@ export class AtcHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            variant: args.variant,
+                            variantVerified: verdict.checked === true,
+                            worklistId: result,
                             result
                         })
                     }
@@ -349,7 +388,9 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ATC worklists');
+            throw wrapAdtError(error, describeAdtError(error).status === 500
+                ? `The ATC worklist ${args?.runResultId} could not be read. A run result id comes from createAtcRun or from the run step of atcCheck - a worklist id, or an id from another system, is answered with this same 500`
+                : 'Failed to get ATC worklists');
         }
     }
 
@@ -389,7 +430,8 @@ export class AtcHandlers extends BaseHandler {
                         status: 'success',
                         docUri: args.docUri,
                         contentType: response?.headers?.['content-type'],
-                        documentation: response?.body
+                        ...documentText(String(response?.body ?? ''), args?.html === true),
+                        documentation: documentText(String(response?.body ?? '')).text
                     })
                 }]
             };
@@ -417,7 +459,9 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ATC exempt proposal');
+            throw wrapAdtError(error, describeAdtError(error).status === 500
+                ? `No exemption proposal for marker ${args?.markerId}. The marker id comes from a finding of atcCheck - an invented one is answered with this same 500`
+                : 'Failed to get ATC exempt proposal');
         }
     }
 
@@ -547,7 +591,20 @@ export class AtcHandlers extends BaseHandler {
                 );
             }
         }
-        steps.push({ step: 'variant', variant, from: args?.variant ? 'argument' : 'systemCheckVariant' });
+        const verdict = await this.verifyVariant(variant);
+        if (verdict.checked && !verdict.exists) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `This system has no ATC check variant called "${variant}". The worklist would open on it anyway and the run would then fail with a bare 500. ` +
+                (verdict.examples?.length ? `Global variants here include: ${verdict.examples.join(', ')}.` : '')
+            );
+        }
+        steps.push({
+            step: 'variant',
+            variant,
+            from: args?.variant ? 'argument' : 'systemCheckVariant',
+            verified: verdict.checked === true
+        });
 
         let worklistId: string;
         const worklistStart = performance.now();

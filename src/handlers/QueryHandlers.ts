@@ -1,4 +1,6 @@
 import { ADTClient } from 'abap-adt-api';
+import { MAX_QUERY_CHARS } from '../lib/queryLimits';
+import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
@@ -87,13 +89,13 @@ export class QueryHandlers extends BaseHandler {
             },
             {
                 name: 'runQuery',
-                description: 'Run an Open SQL SELECT and get the rows back - joins, aggregates, GROUP BY, whatever the ABAP SQL console accepts. Reading only, and only SELECT: the endpoint refuses anything that writes, and for logic around the data (call a function module, compute, loop) use runSnippet. Ask for the rows you need with the rowNumber parameter: an UP TO n ROWS inside the query text is ignored by this endpoint, and without rowNumber the answer is 100 rows of every selected column. Field lists need commas between the fields - this endpoint speaks new Open SQL.',
+                description: 'Run an Open SQL SELECT of at most 255 characters and get the rows back - joins, aggregates, GROUP BY, whatever the ABAP SQL console accepts. Reading only, and only SELECT: the endpoint refuses anything that writes, and for logic around the data (call a function module, compute, loop) use runSnippet. Ask for the rows you need with the rowNumber parameter: an UP TO n ROWS inside the query text is ignored by this endpoint, and without rowNumber the answer is 100 rows of every selected column. Field lists need commas between the fields - this endpoint speaks new Open SQL.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         sqlQuery: {
                             type: 'string',
-                            description: 'The SQL query to execute.'
+                            description: 'The SELECT to run. At most 255 characters: the endpoint refuses a longer statement, and wrapping the text does not help because it counts the whole statement. Split a long IN list into several calls.'
                         },
                         rowNumber: {
                             type: 'number',
@@ -231,6 +233,19 @@ export class QueryHandlers extends BaseHandler {
 
     async handleRunQuery(args: any): Promise<any> {
         const startTime = performance.now();
+        // The endpoint refuses a statement longer than 255 characters, and says
+        // so as "Maximum number of characters in a row exceeds 255" - which
+        // sounds like a row of the result, not like the query. Measured: 250
+        // characters answer, 292 do not, and wrapping the text changes nothing
+        // because it is the whole statement that is counted.
+        const sql = String(args?.sqlQuery ?? '');
+        if (sql.length > MAX_QUERY_CHARS) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `This statement is ${sql.length} characters and the data preview endpoint refuses anything over ${MAX_QUERY_CHARS}. ` +
+                'Shorten it - drop the field list to what you read, alias the tables, or split a long IN list into several calls - or use tableContents for one table.'
+            );
+        }
         try {
             const result = await this.readClient.runQuery(
                 args.sqlQuery,

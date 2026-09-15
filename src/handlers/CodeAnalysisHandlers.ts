@@ -14,6 +14,9 @@ import {
 } from '../lib/symbolPosition';
 import type { CursorAt, SymbolPosition } from '../lib/symbolPosition';
 import { pageUsages, snippetableReferences } from '../lib/usageReferences';
+import { documentText } from '../lib/htmlText';
+import { fixProposalRows, FIX_PROPOSAL_FIELDS } from '../lib/quickFixes';
+import { requireShape } from '../lib/argShape';
 
 export class CodeAnalysisHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -38,11 +41,14 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'syntaxCheckCdsUrl',
-                description: 'Syntax check for a CDS object, which is addressed differently from ABAP: the DDL source URL goes in as the main URL. For ordinary ABAP use syntaxCheckCode.',
+                description: 'Syntax check for a CDS object, which is addressed differently from ABAP: the DDL source URL goes in as the main URL. For ordinary ABAP use syntaxCheckCode. A URL that names no object is said so - the backend answers an empty message list for a view that does not exist, which reads exactly like a clean check.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        cdsUrl: { type: 'string' }
+                        cdsUrl: {
+                            type: 'string',
+                            description: 'The DDL source URL, e.g. /sap/bc/adt/ddic/ddl/sources/i_country.'
+                        }
                     },
                     required: ['cdsUrl']
                 }
@@ -329,15 +335,34 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'abapDocumentation',
-                description: 'The ABAP keyword or object documentation for a position in a source - the F1 of ADT. Answers with the help text as it is written for that release, which is worth reading before guessing at a statement variant.',
+                description: 'The ABAP keyword or object documentation for a position in a source - the F1 of ADT. Answers with the help text as it is written for that release, which is worth reading before guessing at a statement variant. The backend sends a whole HTML page, some 14,000 characters of which the text is a fraction, so the text is what comes back unless html is set.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        objectUri: { type: 'string' },
-                        body: { type: 'string' },
-                        line: { type: 'number' },
-                        column: { type: 'number' },
-                        language: { type: 'string' }
+                        objectUri: {
+                            type: 'string',
+                            description: 'The source URL the position belongs to, e.g. /sap/bc/adt/oo/classes/cl_salv_table/source/main.'
+                        },
+                        body: {
+                            type: 'string',
+                            description: 'The source text the position is counted in.'
+                        },
+                        line: {
+                            type: 'number',
+                            description: 'Line of the cursor, counted from 1.'
+                        },
+                        column: {
+                            type: 'number',
+                            description: 'Column of the cursor, counted from 0.'
+                        },
+                        language: {
+                            type: 'string',
+                            description: 'Documentation language, e.g. EN. Defaults to the logon language.'
+                        },
+                        html: {
+                            type: 'boolean',
+                            description: 'Return the HTML page as well as the text. Off by default.'
+                        }
                     },
                     required: ['objectUri', 'body', 'line', 'column']
                 }
@@ -383,17 +408,51 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 throw new McpError(ErrorCode.MethodNotFound, `Unknown code analysis tool: ${toolName}`);
         }
     }
+    /**
+     * A CDS URL that names nothing answers with an empty message list, which is
+     * the same answer a clean view gets. The object is confirmed first, so a
+     * misspelled name is never reported as a passed check.
+     */
     async handleSyntaxCheckCdsUrl(args: any): Promise<any> {
         const startTime = performance.now();
         try {
+            let exists = true;
+            let objectName: string | undefined;
+            try {
+                const structure: any = await this.readClient.objectStructure(args.cdsUrl);
+                objectName = structure?.['adtcore:name'];
+                exists = !!structure;
+            } catch {
+                exists = false;
+            }
+            if (!exists) {
+                this.trackRequest(startTime, true);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'success',
+                            found: false,
+                            cdsUrl: args.cdsUrl,
+                            reason: 'No object answers at this URL, and the check endpoint reports an empty message list for it - which is not the same as a clean syntax check.',
+                            hint: 'CDS sources live at /sap/bc/adt/ddic/ddl/sources/<name>; searchObject finds the address.'
+                        })
+                    }]
+                };
+            }
             const result = await this.readClient.syntaxCheck(args.cdsUrl);
             this.trackRequest(startTime, true);
+            const messages = Array.isArray(result) ? result : [];
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            found: true,
+                            cdsUrl: args.cdsUrl,
+                            objectName,
+                            clean: messages.length === 0,
                             result
                         })
                     }
@@ -866,10 +925,22 @@ export class CodeAnalysisHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * The library answers with a Map, and JSON.stringify writes a Map as {} -
+     * so this tool reported an empty result on every system it ever ran on.
+     */
     async handleSyntaxCheckTypes(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.readClient.syntaxCheckTypes();
+            const checkTypes = await this.readClient.syntaxCheckTypes();
+            const result: Record<string, string[]> = {};
+            if (checkTypes instanceof Map) {
+                for (const [key, value] of checkTypes.entries()) {
+                    result[String(key)] = Array.isArray(value) ? value.map(String) : [];
+                }
+            } else if (checkTypes && typeof checkTypes === 'object') {
+                Object.assign(result, checkTypes);
+            }
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -877,6 +948,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            checkTypes: Object.keys(result).length,
                             result
                         })
                     }
@@ -1009,13 +1081,21 @@ export class CodeAnalysisHandlers extends BaseHandler {
         try {
             const result = await this.readClient.fixProposals(args.url, args.source, args.line, args.column);
             this.trackRequest(startTime, true);
+            const proposals = fixProposalRows(result);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            url: args.url,
+                            line: args.line,
+                            column: args.column,
+                            found: proposals.length,
+                            proposals,
+                            hint: proposals.length
+                                ? 'Hand one of these rows back to fixEdits, unchanged, to see the edits it would make.'
+                                : 'No quick fix is offered at this position.'
                         })
                     }
                 ]
@@ -1028,8 +1108,14 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
     async handleFixEdits(args: any): Promise<any> {
         const startTime = performance.now();
+        const proposal = this.parseObjectArg(args.proposal, 'proposal');
+        requireShape(proposal, {
+            parameter: 'proposal',
+            fields: FIX_PROPOSAL_FIELDS,
+            producedBy: 'fixProposals'
+        });
         try {
-            const result = await this.readClient.fixEdits(this.parseObjectArg(args.proposal, 'proposal'), args.source);
+            const result = await this.readClient.fixEdits(proposal as any, args.source);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -1090,18 +1176,28 @@ export class CodeAnalysisHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * The backend answers with a whole HTML page - doctype, head, icon links
+     * and all - of which the documentation is a small part. It is handed over
+     * as text unless the page itself was asked for.
+     */
     async handleAbapDocumentation(args: any): Promise<any> {
         const startTime = performance.now();
         try {
             const result = await this.readClient.abapDocumentation(args.objectUri, args.body, args.line, args.column, args.language);
             this.trackRequest(startTime, true);
+            const doc = documentText(String(result ?? ''), !!args?.html);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            objectUri: args.objectUri,
+                            line: args.line,
+                            column: args.column,
+                            found: doc.chars > 0,
+                            ...doc
                         })
                     }
                 ]

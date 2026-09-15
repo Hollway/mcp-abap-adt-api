@@ -1,6 +1,30 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, describeAdtError } from '../lib/adtError';
+import { lockRegistry } from '../lib/lockRegistry';
+import {
+    normalizeRequest,
+    isObjectNameSafe,
+    headerQuery,
+    headerQueries,
+    textQueries,
+    objectQueries,
+    entriesByObjectQueries,
+    inactiveSourceQueries,
+    inactiveDdicQueries,
+    rowsOf,
+    describeRequest,
+    textMap,
+    objectParts,
+    historyOf,
+    conflictsOf,
+    sourceNames,
+    ddicNames,
+    inactiveSources,
+    inactiveDdic,
+    readinessVerdict
+} from '../lib/transportHygiene';
+import type { TransportRow } from '../lib/transportHygiene';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 import type { TransportsOfUser, TransportTarget, TransportRequest } from "abap-adt-api";
@@ -220,18 +244,113 @@ export class TransportHandlers extends BaseHandler {
                 }
             },
             {
+                name: 'objectTransports',
+                description: 'Every transport request one object has ever travelled in, newest first, with who owned it, its status and its description. Reads the organizer tables, so it finds the entries recorded under the parts of an object - REPS and REPT for a report, METH and CLSD for a class - which a search by the object name alone never shows. Open requests are counted separately from released ones: an object sitting in an open request of somebody else is the case that overwrites work.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        objectName: {
+                            type: 'string',
+                            description: 'The object name as the repository spells it, e.g. ZCL_SOMETHING. Not a URL.'
+                        },
+                        includeReleased: {
+                            type: 'boolean',
+                            description: 'Include requests that are already released. On by default; turn it off to see only what is still open.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Requests to return, default 50. The counts always cover everything found.'
+                        }
+                    },
+                    required: ['objectName']
+                }
+            },
+            {
+                name: 'transportConflicts',
+                description: 'Which objects of a transport request are also recorded in somebody else open request - the case where two people change the same object and the later release wins. Takes a request or one of its tasks; the tasks of the request itself are never counted as conflicts with it. Reading only: it looks at the organizer tables and changes nothing.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        transport: {
+                            type: 'string',
+                            description: 'Request or task number, e.g. DEVK900123.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Conflict rows to return, default 100. The summary always counts everything examined.'
+                        },
+                        maxObjects: {
+                            type: 'number',
+                            description: 'Objects of the request to look up elsewhere, default 50. Each one is a read of the organizer tables, and a request holding a widely shared customizing table can take half a minute at 79 of them - the answer says how many were left out.'
+                        }
+                    },
+                    required: ['transport']
+                }
+            },
+            {
+                name: 'transportReadiness',
+                description: 'What stands between a transport request and its release, in one read: its status and owner, tasks still open under it, whether it is empty, objects that also sit in other open requests, objects with an inactive version saved and never activated, and locks this server still holds on them. Answers ready true or false with the reason for every check. The activation check is a read of REPOSRC and the dictionary tables, because ADT cannot answer it - objectStructure reports version active for an object whose inactive version was saved years ago.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        transport: {
+                            type: 'string',
+                            description: 'Request number, e.g. DEVK900123. A task number is accepted and the request above it is checked.'
+                        },
+                        checkActivation: {
+                            type: 'boolean',
+                            description: 'Look for inactive versions of the objects. On by default; one extra read per kind of object.'
+                        },
+                        maxObjects: {
+                            type: 'number',
+                            description: 'Objects to take into the activation and conflict reads, default 100. The answer says how many were left out.'
+                        }
+                    },
+                    required: ['transport']
+                }
+            },
+            {
                 name: 'transportsByConfig',
-                description: 'Transport requests of one organizer configuration, filtered as that configuration defines. For your own open requests use userTransports, which filters and shortens.',
+                description: 'Transport requests of one organizer configuration, filtered as that configuration defines. For your own open requests use userTransports, which filters and shortens. The configuration address is checked against transportConfigurations first: the backend ignores one it does not know and answers with every request in the system instead - 327,499 characters, measured, and nothing in it says the filter was dropped.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         configUri: {
                             type: 'string',
-                            description: 'The configuration URI.'
+                            description: 'The link of a configuration transportConfigurations answered with.'
                         },
                         targets: {
                             type: 'boolean',
                             description: 'Whether to include target systems.'
+                        },
+                        status: {
+                            type: 'string',
+                            description: 'Keep only requests with this status: "D" (modifiable), "R" (released) or "all" (default).',
+                            enum: ['D', 'R', 'all']
+                        },
+                        owner: {
+                            type: 'string',
+                            description: 'Keep only requests owned by this user (case-insensitive).'
+                        },
+                        numberLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose number contains this text.'
+                        },
+                        descriptionLike: {
+                            type: 'string',
+                            description: 'Keep only requests whose description contains this text (case-insensitive).'
+                        },
+                        includeTasks: {
+                            type: 'boolean',
+                            description: 'Include the tasks inside each request. Off by default.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Requests to return, default 100. The count always covers the whole answer.'
+                        },
+                        raw: {
+                            type: 'boolean',
+                            description: 'Return the unfiltered ADT structure instead of the flat list.'
                         }
                     },
                     required: ['configUri']
@@ -408,6 +527,12 @@ export class TransportHandlers extends BaseHandler {
                 return this.handleUserTransports(args);
             case 'transportDetails':
                 return this.handleTransportDetails(args);
+            case 'objectTransports':
+                return this.handleObjectTransports(args);
+            case 'transportConflicts':
+                return this.handleTransportConflicts(args);
+            case 'transportReadiness':
+                return this.handleTransportReadiness(args);
             case 'transportsByConfig':
                 return this.handleTransportsByConfig(args);
             case 'transportDelete':
@@ -679,7 +804,9 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get transport configuration');
+            throw wrapAdtError(error, describeAdtError(error).status === 404
+                ? `No transport organizer configuration at ${args?.url}: this takes the link of one transportConfigurations answered with, and a system with no configurations has none to take`
+                : 'Failed to get transport configuration');
         }
     }
 
@@ -827,18 +954,312 @@ export class TransportHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * An organizer configuration the system does not know is not refused: the
+     * backend drops the filter and answers with every request it holds, which
+     * measured 327,499 characters and reads exactly like the answer for the
+     * configuration that was asked about. The address is checked first.
+     */
+    /** One data-preview read, with the rows unwrapped. */
+    private async rows(sql: string, limit = 500): Promise<Record<string, any>[]> {
+        if (!sql) return [];
+        return rowsOf(await this.readClient.runQuery(sql, limit));
+    }
+
+    /**
+     * The same read in as many statements as the 255-character limit of the
+     * data preview forces - see MAX_QUERY_CHARS. The rows come back as one list.
+     */
+    private async allRows(queries: string[], limit = 500): Promise<Record<string, any>[]> {
+        const rows: Record<string, any>[] = [];
+        for (const query of queries) rows.push(...await this.rows(query, limit));
+        return rows;
+    }
+
+    /** The request, its tasks and their descriptions. */
+    private async requestAndTasks(number: string): Promise<{
+        request: TransportRow;
+        tasks: TransportRow[];
+        texts: Map<string, string>;
+        numbers: string[];
+    }> {
+        const headers = await this.rows(headerQuery(number));
+        if (!headers.length) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `No transport request or task ${number} exists on this system. userTransports lists the ones you own.`
+            );
+        }
+        const numbers = [...new Set(headers.map(row => String(row.TRKORR ?? '')).filter(Boolean))];
+        const texts = textMap(await this.allRows(textQueries(numbers)));
+        const rows = headers.map(row => describeRequest(row, texts));
+        const self = rows.find(row => row.number === number);
+        // A task was passed: the request above it is what gets released.
+        if (self && self.parent) {
+            return this.requestAndTasks(self.parent);
+        }
+        return {
+            request: self || rows[0],
+            tasks: rows.filter(row => row.number !== (self || rows[0]).number),
+            texts,
+            numbers
+        };
+    }
+
+    /**
+     * Where else these objects are recorded, with the header and description
+     * of every request that carries them. Own requests are read too - the
+     * caller decides what counts as a conflict.
+     */
+    private async entriesElsewhere(names: string[], own: Set<string>) {
+        if (!names.length) return { rows: [] as Record<string, any>[], texts: new Map<string, string>() };
+        const entries = await this.allRows(entriesByObjectQueries(names), 2000);
+        const numbers = [...new Set(entries.map(row => String(row.TRKORR ?? '')).filter(Boolean))]
+            .filter(number => !own.has(number));
+        if (!numbers.length) return { rows: [] as Record<string, any>[], texts: new Map<string, string>() };
+        const headers = await this.allRows(headerQueries(numbers), 2000);
+        const byNumber = new Map(headers.map(row => [String(row.TRKORR ?? ''), row]));
+        const open = headers
+            .filter(row => row.TRSTATUS === 'D' || row.TRSTATUS === 'L')
+            .map(row => String(row.TRKORR ?? ''));
+        const texts = textMap(open.length ? await this.allRows(textQueries(open), 1000) : []);
+        const rows = entries
+            .filter(row => byNumber.has(String(row.TRKORR ?? '')))
+            .map(row => ({ ...byNumber.get(String(row.TRKORR ?? '')), ...row }));
+        return { rows, texts };
+    }
+
+    async handleObjectTransports(args: any): Promise<any> {
+        const startTime = performance.now();
+        const objectName = String(args?.objectName ?? '').trim().toUpperCase();
+        if (!isObjectNameSafe(objectName)) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `"${args?.objectName}" is not a repository object name. Pass the name, e.g. ZCL_SOMETHING, not a URL.`
+            );
+        }
+        try {
+            const entries = await this.allRows(entriesByObjectQueries([objectName]), 1000);
+            const numbers = [...new Set(entries.map(row => String(row.TRKORR ?? '')).filter(Boolean))];
+            const headers = numbers.length ? await this.allRows(headerQueries(numbers), 1000) : [];
+            const byNumber = new Map(headers.map(row => [String(row.TRKORR ?? ''), row]));
+            const texts = numbers.length ? textMap(await this.allRows(textQueries(numbers))) : new Map<string, string>();
+            const history = historyOf(
+                objectName,
+                entries.map(row => ({ ...(byNumber.get(String(row.TRKORR ?? '')) || {}), ...row })),
+                texts
+            );
+            this.trackRequest(startTime, true);
+
+            const wanted = args?.includeReleased === false
+                ? history.requests.filter(request => request.open)
+                : history.requests;
+            const max = Number.isFinite(args?.maxResults) ? Math.max(1, Math.trunc(args.maxResults)) : 50;
+            const page = wanted.slice(0, max);
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        object: objectName,
+                        found: history.requests.length > 0,
+                        summary: history.summary,
+                        returned: page.length,
+                        more: page.length < wanted.length,
+                        requests: page,
+                        hint: history.requests.length
+                            ? undefined
+                            : 'No transport carries this object: it is local ($TMP), or the name is spelled differently in the repository.'
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            if (error instanceof McpError) throw error;
+            throw wrapAdtError(error, `Failed to read the transport history of ${objectName}`);
+        }
+    }
+
+    async handleTransportConflicts(args: any): Promise<any> {
+        const startTime = performance.now();
+        let number: string;
+        try {
+            number = normalizeRequest(args?.transport);
+        } catch (error: any) {
+            throw new McpError(ErrorCode.InvalidParams, error.message);
+        }
+        try {
+            const { request, tasks, texts, numbers } = await this.requestAndTasks(number);
+            const own = new Set([request.number, ...tasks.map(task => task.number), ...numbers]);
+            const all = objectParts(await this.allRows(objectQueries([...own]), 1000));
+            const maxObjects = Number.isFinite(args?.maxObjects) ? Math.max(1, Math.trunc(args.maxObjects)) : 50;
+            const names = [...new Set(all.map(part => part.name).filter(isObjectNameSafe))].slice(0, maxObjects);
+            const mine = all.filter(part => names.includes(part.name));
+            const others = await this.entriesElsewhere(names, own);
+            const found = conflictsOf(mine, others.rows, own, others.texts);
+            this.trackRequest(startTime, true);
+
+            const max = Number.isFinite(args?.maxResults) ? Math.max(1, Math.trunc(args.maxResults)) : 100;
+            const page = found.conflicts.slice(0, max);
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        request: request.number,
+                        requestStatus: request.statusText,
+                        owner: request.owner,
+                        summary: found.summary,
+                        objects: {
+                            total: all.length,
+                            examined: mine.length,
+                            skipped: all.length - mine.length
+                        },
+                        returned: page.length,
+                        more: page.length < found.conflicts.length,
+                        conflicts: page,
+                        hint: found.conflicts.length
+                            ? 'Whoever releases last overwrites the other. Agree on the order, or move the object out of one of the requests.'
+                            : undefined
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            if (error instanceof McpError) throw error;
+            throw wrapAdtError(error, `Failed to look for conflicts on ${number}`);
+        }
+    }
+
+    async handleTransportReadiness(args: any): Promise<any> {
+        const startTime = performance.now();
+        let number: string;
+        try {
+            number = normalizeRequest(args?.transport);
+        } catch (error: any) {
+            throw new McpError(ErrorCode.InvalidParams, error.message);
+        }
+        try {
+            const { request, tasks, numbers } = await this.requestAndTasks(number);
+            const own = new Set([request.number, ...tasks.map(task => task.number), ...numbers]);
+            const maxObjects = Number.isFinite(args?.maxObjects) ? Math.max(1, Math.trunc(args.maxObjects)) : 100;
+            const allParts = objectParts(await this.allRows(objectQueries([...own]), 2000));
+            const parts = allParts.slice(0, maxObjects);
+            const names = [...new Set(parts.map(part => part.name).filter(isObjectNameSafe))];
+
+            const elsewhere = await this.entriesElsewhere(names, own);
+            const conflicts = conflictsOf(parts, elsewhere.rows, own, elsewhere.texts);
+
+            const checkActivation = args?.checkActivation !== false;
+            const inactive: ReturnType<typeof inactiveSources> = [];
+            if (checkActivation) {
+                const { names: sources, prefixes } = sourceNames(parts);
+                inactive.push(...inactiveSources(await this.allRows(inactiveSourceQueries(sources, prefixes), 500)));
+                const ddic = ddicNames(parts);
+                const dictionary: [string, 'dd02l' | 'dd04l' | 'dd01l', string, string[]][] = [
+                    ['TABNAME', 'dd02l', 'DD02L', ddic.tables],
+                    ['ROLLNAME', 'dd04l', 'DD04L', ddic.dataElements],
+                    ['DOMNAME', 'dd01l', 'DD01L', ddic.domains]
+                ];
+                for (const [field, table, label, names] of dictionary) {
+                    const rows = await this.allRows(inactiveDdicQueries(table, field.toLowerCase(), names), 500);
+                    inactive.push(...inactiveDdic(rows, field, label));
+                }
+            }
+
+            const objectUrls = lockRegistry.all().map(lock => lock.objectUrl);
+            const locks = objectUrls.filter(url => names.some(name => url.toLowerCase().includes(name.toLowerCase())));
+
+            const verdict = readinessVerdict({
+                request,
+                tasks,
+                objects: parts,
+                conflicts: conflicts.conflicts,
+                inactive,
+                locks,
+                activationChecked: checkActivation
+            });
+            this.trackRequest(startTime, true);
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        request: request.number,
+                        description: request.description,
+                        owner: request.owner,
+                        type: request.typeText,
+                        requestStatus: request.statusText,
+                        ready: verdict.ready,
+                        checks: verdict.checks,
+                        objects: {
+                            total: allParts.length,
+                            examined: parts.length,
+                            skipped: allParts.length - parts.length
+                        },
+                        conflicts: conflicts.conflicts.slice(0, 20),
+                        inactive: inactive.slice(0, 20),
+                        tasks: tasks.map(task => ({ number: task.number, owner: task.owner, status: task.statusText }))
+                    })
+                }]
+            };
+        } catch (error: any) {
+            this.trackRequest(startTime, false);
+            if (error instanceof McpError) throw error;
+            throw wrapAdtError(error, `Failed to check whether ${number} is ready for release`);
+        }
+    }
+
     async handleTransportsByConfig(args: any): Promise<any> {
         const startTime = performance.now();
+        const configUri = String(args?.configUri ?? '');
+        let known: string[] = [];
         try {
-            const transports = await this.readClient.transportsByConfig(args.configUri, args.targets);
+            const configurations = await this.readClient.transportConfigurations();
+            known = (Array.isArray(configurations) ? configurations : [])
+                .map((c: any) => String(c?.link ?? ''))
+                .filter(Boolean);
+        } catch {
+            // The check is a courtesy; a system that will not list its
+            // configurations should not stop the call that was asked for.
+            known = [];
+        }
+        if (known.length && !known.some(link => link === configUri || link.endsWith(configUri) || configUri.endsWith(link))) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `No organizer configuration is published at ${configUri}. The backend would answer that with every transport request in the system, not with none. ` +
+                `The configurations this system has are: ${known.slice(0, 10).join(', ')}.`
+            );
+        }
+        if (!known.length) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'This system publishes no transport organizer configurations, so there is nothing this tool can be pointed at - and the backend would answer any address with every request it holds. Use userTransports for your own requests, or transportDetails for one by number.'
+            );
+        }
+        try {
+            const transports = await this.readClient.transportsByConfig(configUri, args.targets);
             this.trackRequest(startTime, true);
+            if (args?.raw === true) {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ status: 'success', configUri, transports }) }]
+                };
+            }
+            const requests = this.flattenTransports(transports, args);
+            const max = Number.isFinite(args?.maxResults) ? Math.max(1, Math.trunc(args.maxResults)) : 100;
+            const page = requests.slice(0, max);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            transports
+                            configUri,
+                            count: requests.length,
+                            returned: page.length,
+                            more: page.length < requests.length,
+                            requests: page
                         })
                     }
                 ]

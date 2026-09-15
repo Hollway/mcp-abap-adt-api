@@ -406,6 +406,9 @@ export class AbapAdtServer extends Server {
             case 'createTransportsConfig':
             case 'userTransports':
             case 'transportDetails':
+            case 'objectTransports':
+            case 'transportConflicts':
+            case 'transportReadiness':
             case 'transportsByConfig':
             case 'transportDelete':
             case 'transportRelease':

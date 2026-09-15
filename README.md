@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 180 tools, read-only guardrails and 961 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 183 tools, read-only guardrails and 1,097 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -25,7 +25,7 @@ The server is not published to a package registry: clone the repository, build i
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
-- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, plus creation, release and ownership tools. `registerInTransport` puts an object into a request by hand, for the writes that do not register themselves - it resolves a request to your own open task, names what each of the 67 exceptions of `TR_APPEND_TO_COMM_OBJS_KEYS` means, and verifies the entry in `E071` instead of trusting `sy-subrc`.
+- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, `transportReadiness` for what stands between a request and its release, `transportConflicts` for the objects of it that sit in somebody else open request, `objectTransports` for everywhere one object has travelled, plus creation, release and ownership tools. `registerInTransport` puts an object into a request by hand, for the writes that do not register themselves - it resolves a request to your own open task, names what each of the 67 exceptions of `TR_APPEND_TO_COMM_OBJS_KEYS` means, and verifies the entry in `E071` instead of trusting `sy-subrc`.
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC - `atcCheck` runs the checks over an object or a package and reports the findings, `atcDocumentation` gives the rule text - traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it - the write locks the text pool rather than the object, and activates both rows it leaves inactive. On a release that serves no `/sap/bc/adt/textelements` at all they fall back to `READ`/`INSERT TEXTPOOL` in a throwaway class, which needs neither lock nor activation; the answer says which way it went in `via`. That path also writes the program title, which ADT serves nowhere, and registers the object in a request - `registerInTransport` does that on its own too, resolving a request to your own task and verifying the entry in `E071` rather than trusting `sy-subrc`.
 - **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
@@ -70,17 +70,17 @@ The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `M
 
 ### The tool list is context
 
-Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **160,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
+Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **176,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
 
 | Profile | Tools | Tool list | What it serves |
 | --- | --- | --- | --- |
-| *(none)* | 180 | 160k | Everything. |
+| *(none)* | 183 | 176k | Everything. |
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
-| `ddic` | 40 | 47k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
+| `ddic` | 40 | 49k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
 | `atc` | 23 | 16k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
-| `graph` | 27 | 29k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
-| `read` | 79 | 87k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
-| `dev` | 132 | 131k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+| `graph` | 27 | 33k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
+| `read` | 79 | 98k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
+| `dev` | 135 | 147k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
 `healthcheck` also says which build answered - the version, when it was
 compiled and when the process started - because several servers share one build
@@ -451,6 +451,29 @@ answers what is inside one request - its tasks and every object recorded in
 it - and resolves a task number to the request holding it. `transportInfo` on
 an object URI shows which request would take a change. Ask the user which
 request to use rather than creating one.
+
+Three reads answer what is asked before a release, from the organizer tables
+themselves:
+
+* `transportReadiness` gives a verdict per check - status and owner, tasks
+  still open under the request, an empty request, objects that also sit in
+  other open requests, objects with an inactive version saved and never
+  activated, and locks this server still holds. A task number is resolved to
+  the request above it.
+* `transportConflicts` names the objects of a request that are also recorded
+  in somebody else open request, with whose request it is. On one customizing
+  request measured live, 49 of its 79 objects sat in 110 other open requests;
+  each object costs a read, so the number examined is capped and the answer
+  says how many were left out.
+* `objectTransports` answers where one object has travelled, newest first,
+  including the entries recorded under its parts - REPS and REPT for a report,
+  METH and CLSD for a class - which a search by the object name alone never
+  shows.
+
+The activation check reads `REPOSRC` and the dictionary tables rather than ADT,
+because ADT cannot answer it: `objectStructure` reports version `active` for an
+object whose inactive version was saved years ago, and asking for version
+`inactive` explicitly answers with the active one rather than with nothing.
 
 Pass the number of the request, not of a developer task: a task number is
 refused by a write with "not a change request".
