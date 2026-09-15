@@ -389,6 +389,19 @@ const check = (label, condition, detail) => {
     }
   }
 
+  // A standard SAP object is dropped from the run by the backend, so "no
+  // findings" there says nothing about the object - the answer has to say
+  // which of the two it is.
+  if (atc.payload.totalFindings === 0) {
+    const info = JSON.stringify(atc.payload.steps || []);
+    const wasExcluded = /excluded from ATC check run/i.test(info);
+    check('atcCheck tells an object the run excluded from one it checked and cleared',
+      wasExcluded
+        ? /excluded the object/.test(String(atc.payload.hint))
+        : /No findings at all/.test(String(atc.payload.hint)),
+      { excluded: wasExcluded, hint: atc.payload.hint });
+  }
+
   const atcNothing = await call('atcCheck', {});
   check('atcCheck asks what to check',
     atcNothing.isError === true && /What should be checked/.test(JSON.stringify(atcNothing.payload)),
@@ -907,6 +920,16 @@ const check = (label, condition, detail) => {
       check('atcCheck hands out the finding URI the exemption tools take',
         withFindings.every(finding => typeof finding.findingUri === 'string'),
         withFindings[0]);
+      // The one tool no run had ever reached: a standard object is excluded
+      // from the check, so there was never a finding to follow.
+      const documented = withFindings.find(finding => finding.documentationUri);
+      if (documented) {
+        const rule = await call('atcDocumentation', { docUri: documented.documentationUri });
+        check('atcDocumentation reads the rule behind a real finding',
+          !rule.isError && typeof rule.payload.documentation === 'string'
+          && rule.payload.documentation.length > 0,
+          { check: documented.check, chars: String(rule.payload.documentation || '').length });
+      }
     }
   }
 

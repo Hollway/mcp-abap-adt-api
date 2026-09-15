@@ -57,7 +57,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcCheck',
-                description: 'Run the ATC checks over an object or a whole package and report what they found: for each object, every finding with its priority, the check that raised it, the message, and the source line it points at. This is the whole sequence in one call - the check variant from the system customizing, a worklist, the run, the worklist read back - and getting it wrong is what made a run answer 500 (the run needs a worklist id where the library asks for a variant). Findings are ordered by priority, 1 being the worst.',
+                description: 'Run the ATC checks over an object or a whole package and report what they found: for each object, every finding with its priority, the check that raised it, the message, and the source line it points at. This is the whole sequence in one call - the check variant from the system customizing, a worklist, the run, the worklist read back - and getting it wrong is what made a run answer 500 (the run needs a worklist id where the library asks for a variant). Findings are ordered by priority, 1 being the worst. A standard SAP object answers with no findings because the backend drops it from the run - measured, and the answer says so rather than calling it clean; check custom code.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -145,7 +145,7 @@ export class AtcHandlers extends BaseHandler {
             },
             {
                 name: 'atcDocumentation',
-                description: 'The documentation of one ATC finding: what the check means and what it wants instead. Takes the documentation URI that atcWorklists reports for a finding. Returns the document as it comes from the backend, which is HTML.',
+                description: 'The documentation of one ATC finding: what the check means and what it wants instead. Takes the documentationUri that atcCheck reports for each finding (atcWorklists carries the same URI). Answers with the document as the backend writes it, which is HTML. Verified live: a finding of the 075 master-language check answered with its Details of Analysis.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -661,6 +661,13 @@ export class AtcHandlers extends BaseHandler {
             budget -= object.findings.length;
         }
 
+        // A run over a standard SAP object finds nothing because it checks
+        // nothing: the backend drops the object and says so among the run
+        // infos, where "no findings" otherwise reads as "nothing wrong".
+        const excluded = (run?.infos || [])
+            .map((info: any) => String(info?.description || ''))
+            .find((description: string) => /excluded from ATC check run/i.test(description));
+
         return {
             content: [{
                 type: 'text',
@@ -677,7 +684,11 @@ export class AtcHandlers extends BaseHandler {
                     objects: reported.filter((object: any) => object.findings.length > 0),
                     steps,
                     ...(total === 0
-                        ? { hint: `No findings at all under check variant ${variant}.` }
+                        ? {
+                            hint: excluded
+                                ? `No findings, but the run excluded the object: the backend reported "${excluded}". Standard SAP objects are excluded from an ATC run on this system, so this is not a clean bill of health - check a custom object instead.`
+                                : `No findings at all under check variant ${variant}.`
+                        }
                         : { note: 'Priority 1 is the worst. Read the rule behind a finding with atcDocumentation and its documentationUri; findingUri is what atcContactUri and the exemption tools take.' })
                 })
             }]
