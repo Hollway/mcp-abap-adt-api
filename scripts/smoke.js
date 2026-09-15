@@ -1255,6 +1255,57 @@ const check = (label, condition, detail) => {
     && mine.payload.requests.every(request => !!request.number && !!request.status),
     { count: mine.payload.count });
 
+  // Transport hygiene, read from the organizer tables. The request is
+  // whichever one the connected user owns - there is nothing to configure,
+  // and nothing here writes.
+  const longQuery = await call('runQuery', {
+    sqlQuery: `SELECT trkorr FROM e070 WHERE trkorr IN (${Array.from({ length: 30 }, () => "'DEVK900001'").join(', ')})`
+  });
+  check('runQuery refuses a statement past the 255 characters the endpoint accepts',
+    longQuery.isError === true && /refuses anything over 255/.test(JSON.stringify(longQuery.payload)),
+    longQuery.payload);
+
+  const anyRequest = (mine.payload.requests || [])[0];
+  if (anyRequest) {
+    const readiness = await call('transportReadiness', { transport: anyRequest.number });
+    check(`transportReadiness answers for ${anyRequest.number} with a verdict per check`,
+      typeof readiness.payload.ready === 'boolean'
+      && ['status', 'tasks', 'objects', 'conflicts', 'activation', 'locks']
+        .every(name => (readiness.payload.checks || []).some(check => check.check === name)),
+      (readiness.payload.checks || []).map(check => `${check.check}:${check.ok}`));
+    check('and says how many objects it examined and how many it left out',
+      readiness.payload.objects && typeof readiness.payload.objects.total === 'number'
+      && readiness.payload.objects.examined + readiness.payload.objects.skipped === readiness.payload.objects.total,
+      readiness.payload.objects);
+
+    const conflicts = await call('transportConflicts', { transport: anyRequest.number, maxObjects: 5 });
+    check('transportConflicts counts the objects it looked up and the requests they sit in',
+      typeof conflicts.payload.summary.objects === 'number'
+      && typeof conflicts.payload.summary.conflicting === 'number'
+      && conflicts.payload.conflicts.every(row => !!row.otherRequest && !!row.owner),
+      conflicts.payload.summary);
+
+    const objectRow = (readiness.payload.inactive || [])[0];
+    const objectName = objectRow ? String(objectRow.name).split(' ')[0] : undefined;
+    if (objectName) {
+      const travelled = await call('objectTransports', { objectName, maxResults: 3 });
+      check(`objectTransports answers the history of ${objectName}`,
+        travelled.payload.found === true && travelled.payload.summary.requests > 0,
+        travelled.payload.summary);
+    }
+  }
+
+  const missingRequest = await call('transportReadiness', { transport: 'ZZZK999999' });
+  check('transportReadiness says a request number nothing answers to is not there',
+    missingRequest.isError === true
+    && /(No transport request|not a transport request number)/.test(JSON.stringify(missingRequest.payload)),
+    missingRequest.payload);
+
+  const localObject = await call('objectTransports', { objectName: 'ZZZ_NO_SUCH_OBJECT_AT_ALL' });
+  check('objectTransports says an object travels in no request rather than answering with nothing',
+    localObject.payload.found === false && /\$TMP/.test(String(localObject.payload.hint)),
+    localObject.payload.hint);
+
   const repos = await call('gitRepos');
   check('gitRepos either lists the repositories or says abapGit is not installed here',
     repos.isError === true
