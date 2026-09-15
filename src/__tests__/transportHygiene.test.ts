@@ -28,8 +28,8 @@ import {
  *    these tools failed on a request with six objects;
  *  - a date column arrives as a Date, and String(Date) reads "Tue Sep 15";
  *  - a class is recorded in REPOSRC under its name padded with '=' to thirty
- *    characters plus a part suffix, which is how ZCL_ERP_OPEX_UI was found to
- *    have ten parts saved and never activated;
+ *    characters plus a part suffix, which is how one request was found to
+ *    carry ten parts of a class saved and never activated;
  *  - one report was recorded in eleven requests and one customizing table in
  *    forty-three open ones, which is the case this is for.
  */
