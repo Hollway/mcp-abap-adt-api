@@ -8,6 +8,128 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.5.0] — the answers that never fitted, and the ones that were not answers
+
+Every tool in this release was picked the same way: by calling it against a
+live system and comparing what came back with what its description promised.
+Two families had never been called by the smoke run at all, which is why what
+follows was there to find.
+
+### Where-used, cut to a size that can be read
+
+`usageReferences` reaches an endpoint with no paging of its own. Measured on a
+classic ERP system, `CL_ABAP_TYPEDESCR` answers with **40,660 rows and
+21,075,252 characters** — a hundred times the response cap, so the tool could
+only ever hand back a truncated blob. A class picked for being rarely used,
+`CL_ABAP_GZIP`, still answers with 256,575.
+
+Two things make that payload what it is, and both are dealt with now:
+
+- a row averages some 500 characters, most of it ADT bookkeeping — who is
+  responsible, the description, the package URI — around the hundred that
+  identify the place. Rows are trimmed to name, type, package, uri and the
+  `objectIdentifier` the next call needs;
+- the list is a tree flattened: one row per package, per object, per include.
+  Only the rows carrying an `objectIdentifier` are usage sites, and
+  `usageReferenceSnippets` silently drops every row without one — so a caller
+  handing back the grouping rows gets an empty answer and no reason for it.
+
+The answer is now a summary over the whole result — rows, usage sites,
+objects, packages, counts by type, the heaviest packages — and one page of
+rows, steered with `maxResults`, `offset` and `onlyWithSnippets`. Snippet rows
+that carry no identifier are refused with the reason rather than answered with
+nothing. The fetch still costs the backend what it costs; what is saved is the
+reading.
+
+### A cursor checked before a call is spent on it
+
+The position-taking calls were pass-throughs, and the backend answers a wrong
+position without saying it was wrong:
+
+- a line counted from 0 instead of 1 answered confidently about a **different
+  class**, and nothing in the answer said so;
+- a cursor on blank space answered `{url: "", line: 0, column: 0}` with status
+  200 — an answer shaped like a result;
+- a line past the end of the source answered HTTP 500;
+- `codeCompletion` answered `[]` for both, which reads as "nothing may be
+  written here" rather than "you are not pointing at the source".
+
+The position is now checked against the source before the call, the name under
+the cursor is quoted back in the answer, and nothing found is said as
+`found: false`. Lines count from 1 and columns from 0, which is now written in
+the schema rather than left to be discovered.
+
+The source these calls take is the text the backend parses, so **a page of a
+source is not a smaller source but a broken one**: the first 400 lines of
+`CL_SALV_TABLE` — the page a caller would naturally read — answer "The source
+code of this class is incomplete". `source` may now be omitted, and then the
+whole stored source is read, from the session cache when it is there.
+
+`codeCompletionFull` answers a single string, not the "proposals with the text
+to insert and the position to insert it at" its description promised;
+`patternKey` is the `IDENTIFIER` of a `codeCompletion` proposal, and a value
+naming no proposal makes the backend raise rather than answer empty. Both are
+written down now, a blank key is refused, and an empty answer says so.
+`prettyPrinterSetting` answers two settings — indentation and case style — not
+the three the description implied.
+
+### Three answers that did not fit, and three that were not answers
+
+- **`nodeContents`** answers a whole level at once: `SABAPDEMOS` holds 802
+  nodes and 238,596 characters, past the cap. A node writes the same SAPGUI
+  bridge URI twice, as `OBJECT_URI` and `OBJECT_VIT_URI`. The level is now
+  counted by object type and returned one trimmed page at a time, with
+  `maxResults`, `offset` and `objectType`.
+- **`dumps`** answers six entries in 61,644 characters, because each carries
+  its whole ST22 page — 11,739 characters for the first. Headers only by
+  default, with the runtime error and the program that died pulled out of the
+  categories; `full: true` for the pages themselves, `max` for the count.
+- **`ddicElement`** answers `T000` with its 17 fields and a data element with
+  an empty shell and status 200 — the same answer a name that does not exist
+  gets. Which is precisely what the tool said it was for: "a data element, a
+  domain or a type". It reaches the CDS element-info endpoint, it answers for
+  entities with fields, and it now says `found: false` with where to go
+  instead.
+- **`unitTestEvaluation`** without a class read `testmethods` off `undefined`,
+  and the TypeError left as a *transport* error — a diagnosis pointing at the
+  network for a missing argument.
+- **`gitRepos`** and **`annotationDefinitions`** answer 404 "Resource … does
+  not exist" where the collection is simply not installed on this release.
+  That is not the same as having nothing to list, and both now say which.
+- **`atcCheck`** over a standard SAP object answered "No findings at all" —
+  a clean bill of health for an object the backend had dropped from the run,
+  as its own run info said: "SAP object(s) were excluded from ATC check run".
+  The exclusion is now quoted and explained.
+
+### `atcDocumentation`, verified at last
+
+It was the only tool never confirmed against a live system: the run used to
+answer 500 for a check variant name where a worklist id belongs, and once that
+was fixed there was still no finding to follow, because the object under check
+was a standard one and those are excluded. A custom class on the same system
+answered with 115 findings over three priorities, and the documentation of the
+first — the 075 master-language check — came back as the HTML the backend
+writes.
+
+### Which build is answering
+
+The version was told to the client once, on `initialize`, where a caller
+cannot ask again — so "is this process running what I just compiled" was
+answered by calling a tool and watching how it behaved. The version alone
+cannot answer it anyway: every build inside a working session carries the same
+number, and several servers share one build directory. `healthcheck` now
+carries a `server` block with the version, the modification time of the file
+the process actually loaded, and the time that process started. Both answers
+carry it, the failing one included — that is when it is needed most.
+
+### Checks
+
+1,032 tests in 60 suites, and 237 smoke checks against a live system — 41 of
+them new. Twenty cover the navigation family and nineteen the reading tools
+neither had ever been called by a smoke run, which is exactly where the
+defects above were sitting. One of them was found by the smoke itself rather
+than by the probe that preceded it: the truncated source.
+
 ## [1.4.0] — the rows an endpoint really returns, and the shape drawn
 
 ### The two data preview endpoints count rows their own way

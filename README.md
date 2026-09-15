@@ -82,7 +82,10 @@ Every tool this server offers is described to the model before it is asked anyth
 | `read` | 79 | 87k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
 | `dev` | 132 | 131k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
-`healthcheck` is served whatever the list says — a server that cannot say which system it is on is a worse trade than one extra tool — and it reports `toolsExposed`, `toolsTotal` and `toolListChars`, so the cost is a number rather than a guess, and it names any token in these settings that matches no tool and no group, because a typo in an include list narrows the server in silence. A tool left out is refused if called anyway, naming what is served instead.
+`healthcheck` also says which build answered - the version, when it was
+compiled and when the process started - because several servers share one build
+directory and a stale process announces the same version a restarted one does.
+It is served whatever the list says — a server that cannot say which system it is on is a worse trade than one extra tool — and it reports `toolsExposed`, `toolsTotal` and `toolListChars`, so the cost is a number rather than a guess, and it names any token in these settings that matches no tool and no group, because a typo in an include list narrows the server in silence. A tool left out is refused if called anyway, naming what is served instead.
 
 A narrowed list is the only real lever: what is left is not padding. Every description here records something the backend does that its documentation does not, which is what keeps a model from calling `activateByName` and believing it.
 
@@ -258,7 +261,17 @@ objects, activating them, running tests, and handling transports.
 
 * `searchObject` resolves a name to an object URI, e.g.
   /sap/bc/adt/oo/classes/zcl_invoice. `objectStructure` describes an object,
-  `nodeContents` lists a package, `usageReferences` finds callers.
+  `nodeContents` lists a package, `usageReferences` finds callers. The last two
+  reach endpoints that answer a whole level or a whole where-used tree at once -
+  40,660 rows for a widely used class, 802 nodes for a large package - so both
+  answer with counts over everything and one page of rows, steered by
+  `maxResults` and `offset`.
+* Position-taking calls - `findDefinition`, the `codeCompletion` family - count
+  lines from 1 and columns from 0, and check the position against the source
+  before spending a call: the backend answers a line out by one with a
+  confident answer about a different object. Leave `source` out and the whole
+  stored source is read; never pass a page of one, which the backend rejects as
+  incomplete.
 * `getObjectSource` takes the URI plus /source/main. It serves the INACTIVE
   version by default, so reading your own edit back proves nothing about what
   the system runs - pass version="active" for that. Use startLine/maxLines

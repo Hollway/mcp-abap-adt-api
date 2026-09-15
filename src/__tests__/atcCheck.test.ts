@@ -5,7 +5,7 @@ import { AtcHandlers } from '../handlers/AtcHandlers';
  *
  * Measured live: CL_SALV_TABLE answered with zero findings and a run info
  * reading "SAP object(s) were excluded from ATC check run", while the tool
- * said "No findings at all under check variant ARMTEK" - which reads as a
+ * said "No findings at all under the system check variant" - which reads as a
  * clean bill of health for an object that was never looked at. A custom
  * class on the same system answered with 115 findings, each carrying the
  * documentationUri that atcDocumentation takes.
