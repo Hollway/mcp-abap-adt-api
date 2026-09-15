@@ -1164,9 +1164,22 @@ const check = (label, condition, detail) => {
   // The reading tools no smoke run had ever called. Three of them answer past
   // the response cap unless they are narrowed, and three answer nothing in a
   // way that reads like an answer.
-  const discovery = await call('adtDiscovery');
-  check('adtDiscovery lists the collections this system serves',
-    Array.isArray(discovery.payload.discovery) && discovery.payload.discovery.length > 0);
+  const discovery = await call('adtDiscovery', { maxResults: 5 });
+  check('adtDiscovery counts every collection this system serves and returns one page',
+    discovery.payload.summary.collections > discovery.payload.summary.returned
+    && discovery.payload.summary.returned <= 5
+    && JSON.stringify(discovery.payload).length < 20000,
+    { summary: discovery.payload.summary, chars: JSON.stringify(discovery.payload).length });
+  check('and leaves the template links out of the page unless they are asked for',
+    discovery.payload.collections.every(collection => collection.templateLinks === undefined),
+    discovery.payload.collections[0]);
+  const searchedDiscovery = await call('adtDiscovery', { search: 'atc', maxResults: 5 });
+  check('adtDiscovery narrows to the collections a search matches',
+    searchedDiscovery.payload.summary.matched > 0
+    && searchedDiscovery.payload.summary.matched < discovery.payload.summary.collections
+    && searchedDiscovery.payload.collections.every(collection => /atc/i.test(
+      `${collection.href} ${collection.title} ${collection.workspace}`)),
+    searchedDiscovery.payload.collections.map(collection => collection.href));
 
   const feedList = await call('feeds');
   check('feeds names the dump feed among the ones it publishes',
@@ -1260,6 +1273,164 @@ const check = (label, condition, detail) => {
   check('unitTestEvaluation asks for the test class instead of failing on undefined',
     noClass.isError === true && /Pass clas/.test(JSON.stringify(noClass.payload)),
     noClass.payload);
+
+  // The second half of the never-called reading tools. Three of them answered
+  // whole catalogues - 141,045 characters for loadTypes alone - and six
+  // answered nothing at all in a way that read like an answer.
+  const types = await call('loadTypes', { name: 'CLAS', maxResults: 3 });
+  check('loadTypes counts the whole catalogue and returns one filtered page of it',
+    types.payload.summary.total > types.payload.summary.matched
+    && types.payload.summary.returned <= 3
+    && JSON.stringify(types.payload).length < 20000,
+    { summary: types.payload.summary, chars: JSON.stringify(types.payload).length });
+  check('and every type on the page matches what was asked for',
+    types.payload.types.every(type => /clas/i.test(`${type.type} ${type.label}`)),
+    types.payload.types.map(type => type.type));
+
+  const compat = await call('adtCompatibiliyGraph', { maxResults: 3 });
+  check('adtCompatibiliyGraph counts its nodes and edges and returns a page of edges',
+    compat.payload.summary.edges >= compat.payload.summary.returned
+    && compat.payload.summary.nodes > 0
+    && compat.payload.edges.every(edge => !!edge.from && !!edge.to)
+    && JSON.stringify(compat.payload).length < 20000,
+    { summary: compat.payload.summary, chars: JSON.stringify(compat.payload).length });
+
+  const noFeature = await call('featureDetails', { title: 'No Such Feature At All' });
+  check('featureDetails says a title is not there rather than answering with nothing',
+    noFeature.payload.found === false && typeof noFeature.payload.titleCount === 'number',
+    noFeature.payload);
+
+  const collectionTemplate = await call('collectionFeatureDetails', { url: '/sap/bc/adt/oo/classes' });
+  check('collectionFeatureDetails says a collection address is not the template link it matches on',
+    collectionTemplate.payload.found === false && /collection/i.test(String(collectionTemplate.payload.reason)),
+    collectionTemplate.payload.reason);
+
+  const served = await call('findCollectionByUrl', { url: '/sap/bc/adt/oo/classes' });
+  check('findCollectionByUrl resolves a collection address to the collection that serves it',
+    served.payload.found === true && !!served.payload.collection,
+    served.payload.found);
+  const unserved = await call('findCollectionByUrl', { url: '/sap/bc/adt/no/such/collection' });
+  check('and says so, with the nearest addresses, when nothing serves one',
+    unserved.payload.found === false && (unserved.payload.nearestCollections || []).length > 0,
+    unserved.payload.nearestCollections);
+
+  const checkTypes = await call('syntaxCheckTypes');
+  check('syntaxCheckTypes answers with the flavours themselves, not with an empty Map',
+    checkTypes.payload.checkTypes > 0
+    && Object.values(checkTypes.payload.result).every(list => Array.isArray(list)),
+    checkTypes.payload.result);
+
+  const catalogue = await call('objectTypes');
+  check('objectTypes either lists the types or says this system publishes none',
+    catalogue.payload.found === true
+      ? catalogue.payload.count > 0
+      : /loadTypes/.test(String(catalogue.payload.hint)),
+    { found: catalogue.payload.found, count: catalogue.payload.count });
+
+  const includes = await call('classIncludes', { clas: CLASS_NAME });
+  check(`classIncludes answers for ${CLASS_NAME} by name, which used to throw on every call`,
+    includes.payload.found === true
+    && !!includes.payload.result.main
+    && includes.payload.includes.every(include => !!include.includeType && !!include.url),
+    Object.keys(includes.payload.result || {}));
+
+  const methods = await call('classComponents', { url: CLASS_NAME, type: 'CLAS/OM', maxResults: 3 });
+  check('classComponents counts the components of a class and returns one filtered page',
+    methods.payload.summary.total >= methods.payload.summary.matched
+    && methods.payload.components.length <= 3
+    && methods.payload.components.every(component => component.type === 'CLAS/OM')
+    && JSON.stringify(methods.payload).length < 20000,
+    { summary: methods.payload.summary, chars: JSON.stringify(methods.payload).length });
+
+  const keyword = await call('abapDocumentation', {
+    objectUri: CLASS_URL,
+    body: `CLASS ${CLASS_NAME.toLowerCase()} DEFINITION.\nENDCLASS.`,
+    line: 1,
+    column: 2
+  });
+  check('abapDocumentation answers with the text of the page, not with the page',
+    keyword.payload.text !== undefined
+    && keyword.payload.chars < keyword.payload.htmlChars
+    && !/<html|<head|doctype/i.test(String(keyword.payload.text)),
+    { chars: keyword.payload.chars, htmlChars: keyword.payload.htmlChars });
+
+  const fixes = await call('fixProposals', {
+    url: CLASS_URL,
+    source: `CLASS ${CLASS_NAME.toLowerCase()} DEFINITION PUBLIC FINAL CREATE PRIVATE.\n  PUBLIC SECTION.\nENDCLASS.\nCLASS ${CLASS_NAME.toLowerCase()} IMPLEMENTATION.\nENDCLASS.`,
+    line: 1,
+    column: 7
+  });
+  check('fixProposals answers with proposals whose description can be read',
+    typeof fixes.payload.found === 'number'
+    && (fixes.payload.proposals || []).every(proposal => !/&lt;|&gt;/.test(String(proposal.description))),
+    (fixes.payload.proposals || []).map(proposal => proposal.name));
+  const badProposal = await call('fixEdits', { proposal: {}, source: 'REPORT z.' });
+  check('fixEdits names what a proposal is missing instead of reading a field of undefined',
+    badProposal.isError === true && /fixProposals/.test(JSON.stringify(badProposal.payload)),
+    badProposal.payload);
+
+  const unknownDdic = await call('ddicRepositoryAccess', { path: 'ZZZ_NO_SUCH_NAME' });
+  check('ddicRepositoryAccess says the dictionary knows nothing under a name',
+    unknownDdic.payload.found === false, unknownDdic.payload);
+
+  const wrongHelp = await call('packageSearchHelp', { type: 'PACKAGE' });
+  check('packageSearchHelp refuses a value-help name that is not one of the four',
+    wrongHelp.isError === true && /applicationcomponents/.test(JSON.stringify(wrongHelp.payload)),
+    wrongHelp.payload);
+  const help = await call('packageSearchHelp', { type: 'transportlayers' });
+  check('and either answers the value help or says this release does not serve it',
+    help.isError === true
+      ? /does not serve the package value helps/.test(JSON.stringify(help.payload))
+      : typeof help.payload.found === 'number',
+    help.isError ? help.payload.error : help.payload.found);
+
+  const noCds = await call('syntaxCheckCdsUrl', { cdsUrl: '/sap/bc/adt/ddic/ddl/sources/zzz_no_such_view' });
+  check('syntaxCheckCdsUrl does not call a view that is not there clean',
+    noCds.payload.found === false && noCds.payload.clean === undefined,
+    noCds.payload);
+
+  const inactive = await call('inactiveObjects');
+  check('inactiveObjects answers in an envelope with a count, like every other tool',
+    inactive.payload.status === 'success' && typeof inactive.payload.count === 'number',
+    inactive.payload);
+
+  const classInclude = await call('mainPrograms', { includeUrl: `${CLASS_URL.replace('/source/main', '')}/includes/implementations` });
+  check('mainPrograms says which includes it answers for when the backend only says 404',
+    classInclude.isError === true && /classIncludes/.test(JSON.stringify(classInclude.payload)),
+    classInclude.payload);
+
+  const packagePath = await call('findObjectPath', { objectUrl: `/sap/bc/adt/packages/${PACKAGE_NAME.toLowerCase()}` });
+  check('findObjectPath says which addresses it maps when it is handed a package',
+    packagePath.isError === true
+      ? /repository object/.test(JSON.stringify(packagePath.payload))
+      : Array.isArray(packagePath.payload.path),
+    packagePath.isError ? packagePath.payload.error : 'answered');
+
+  const madeUpVariant = await call('atcCheckVariant', { variant: 'ZZZ_NO_SUCH_VARIANT' });
+  check('atcCheckVariant refuses a variant the system does not have instead of opening a worklist on it',
+    madeUpVariant.isError === true && /no ATC check variant/.test(JSON.stringify(madeUpVariant.payload)),
+    madeUpVariant.payload);
+  const unsafeVariant = await call('atcCheckVariant', { variant: 'DEFAULT&checkVariant=OTHER' });
+  check('and refuses a name that would carry something else into the query string',
+    unsafeVariant.isError === true && /not a check variant name/.test(JSON.stringify(unsafeVariant.payload)),
+    unsafeVariant.payload);
+
+  const madeUpConfig = await call('transportsByConfig', { configUri: '/sap/bc/adt/cts/transportrequests/searchconfiguration/configurations/zzz' });
+  check('transportsByConfig refuses an address no configuration has, rather than answering with every request in the system',
+    madeUpConfig.isError === true
+    && /(no organizer configuration|publishes no transport organizer)/.test(JSON.stringify(madeUpConfig.payload)),
+    madeUpConfig.payload);
+
+  const repoAsName = await call('checkRepo', { repo: 'ZREPO' });
+  check('checkRepo says what a repository object is instead of reading a field of undefined',
+    repoAsName.isError === true && /gitRepos/.test(JSON.stringify(repoAsName.payload)),
+    repoAsName.payload);
+
+  const externalRepo = await call('gitExternalRepoInfo', { repourl: 'https://example.invalid/none.git' });
+  check('gitExternalRepoInfo says abapGit is absent the same way gitRepos does',
+    externalRepo.isError !== true
+    || /abapGit is not installed|Failed to get external repo info/.test(JSON.stringify(externalRepo.payload)),
+    externalRepo.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
