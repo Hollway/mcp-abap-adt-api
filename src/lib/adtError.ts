@@ -115,6 +115,21 @@ export function wrapAdtError(e: unknown, label: string): AdtToolError {
   return new AdtToolError({ ...info, error: `${label}: ${info.error}` }, e);
 }
 
+/**
+ * The collection this call needs is not on this system at all.
+ *
+ * ADT answers "Resource /sap/bc/adt/... does not exist" with 404 both for a
+ * feature the system never had and for one that is simply switched off - and
+ * a caller reading that line cannot tell it from a typo in a URL. Measured on
+ * a classic ERP system: abapGit (/sap/bc/adt/abapgit/repos) and the CDS
+ * annotation definitions both answer this way, and neither means the list is
+ * empty.
+ */
+export function isMissingCollection(e: unknown): boolean {
+  const info = e instanceof AdtToolError ? e.info : describeAdtError(e);
+  return info.status === 404 && /does not exist/i.test(String(info.error || ''));
+}
+
 /** Serializable payload for a failed tool call. */
 export function errorPayload(e: unknown): Record<string, unknown> {
   const info = e instanceof AdtToolError ? e.info : describeAdtError(e);

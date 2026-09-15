@@ -198,6 +198,13 @@ const check = (label, condition, detail) => {
   check('healthcheck reaches ADT', health.payload.status === 'healthy', health.payload);
   check('healthcheck names the system', !!(health.payload.system && health.payload.system.url));
   check('healthcheck reports latency', typeof health.payload.adt.latencyMs === 'number');
+  // Which build answered: the smoke drives the dist it was told to, and a
+  // stale one is worth catching here rather than in a puzzling result later.
+  const build = health.payload.server || {};
+  check('healthcheck names the build that answered',
+    build.version === require('../package.json').version, build);
+  check('healthcheck says when that build was compiled and when it started',
+    !Number.isNaN(Date.parse(build.built)) && !Number.isNaN(Date.parse(build.startedAt)), build);
 
   const login = await call('login');
   check('login returns a valid result', login.payload.status === 'success', login.payload);
@@ -380,6 +387,19 @@ const check = (label, condition, detail) => {
       check('atcDocumentation reads the rule behind a finding',
         !rule.isError && String(JSON.stringify(rule.payload)).length > 100, rule.payload);
     }
+  }
+
+  // A standard SAP object is dropped from the run by the backend, so "no
+  // findings" there says nothing about the object - the answer has to say
+  // which of the two it is.
+  if (atc.payload.totalFindings === 0) {
+    const info = JSON.stringify(atc.payload.steps || []);
+    const wasExcluded = /excluded from ATC check run/i.test(info);
+    check('atcCheck tells an object the run excluded from one it checked and cleared',
+      wasExcluded
+        ? /excluded the object/.test(String(atc.payload.hint))
+        : /No findings at all/.test(String(atc.payload.hint)),
+      { excluded: wasExcluded, hint: atc.payload.hint });
   }
 
   const atcNothing = await call('atcCheck', {});
@@ -900,6 +920,16 @@ const check = (label, condition, detail) => {
       check('atcCheck hands out the finding URI the exemption tools take',
         withFindings.every(finding => typeof finding.findingUri === 'string'),
         withFindings[0]);
+      // The one tool no run had ever reached: a standard object is excluded
+      // from the check, so there was never a finding to follow.
+      const documented = withFindings.find(finding => finding.documentationUri);
+      if (documented) {
+        const rule = await call('atcDocumentation', { docUri: documented.documentationUri });
+        check('atcDocumentation reads the rule behind a real finding',
+          !rule.isError && typeof rule.payload.documentation === 'string'
+          && rule.payload.documentation.length > 0,
+          { check: documented.check, chars: String(rule.payload.documentation || '').length });
+      }
     }
   }
 
@@ -977,6 +1007,259 @@ const check = (label, condition, detail) => {
     outward.payload.outsidePackages);
   check('and leaves them as plain names when it was not asked',
     drawn.payload.outsidePackages === undefined, drawn.payload.outsidePackages);
+
+  // The navigation family: position-taking calls and where-used. None of it
+  // was smoked before, and none of it is forgiving - a position out by one is
+  // answered confidently about the wrong object, and a where-used answer runs
+  // to millions of characters unless it is paged.
+  const navSource = await call('getObjectSource', { objectSourceUrl: CLASS_URL, startLine: 1, maxLines: 400 });
+  const navLines = String(navSource.payload.source || '').split(/\r?\n/);
+  const navText = navLines.join('\n');
+  let navAt = null;
+  for (let index = 0; index < navLines.length && !navAt; index++) {
+    const arrow = navLines[index].indexOf('=>');
+    const name = arrow > 0 && (navLines[index].slice(0, arrow).match(/([A-Za-z_][\w]*)\s*$/) || [])[1];
+    if (name) navAt = { line: index + 1, start: arrow - name.length, end: arrow, afterArrow: arrow + 2, name };
+  }
+  check(`${CLASS_NAME} has a static call to point a cursor at`, !!navAt);
+
+  if (navAt) {
+    // No source passed: the whole stored one is read. A page of a source is a
+    // different, broken source as far as the backend is concerned, and the
+    // 400 lines read above are exactly the page a caller would send.
+    const definition = await call('findDefinition', {
+      url: CLASS_URL, line: navAt.line, startCol: navAt.start, endCol: navAt.end
+    });
+    check('findDefinition resolves the name under the cursor and quotes it back',
+      definition.payload.found === true
+      && String(definition.payload.at || '').toLowerCase() === navAt.name.toLowerCase()
+      && typeof definition.payload.result.url === 'string',
+      definition.payload);
+    check('and says the source came from the server rather than the call',
+      definition.payload.sourceFrom === 'server', definition.payload.sourceFrom);
+
+    if (navSource.payload.totalLines > navLines.length) {
+      const cut = await call('findDefinition', {
+        url: CLASS_URL, source: navText, line: navAt.line, startCol: navAt.start, endCol: navAt.end
+      });
+      check('a source cut to a page is refused by the backend, with its own words',
+        cut.isError === true && /incomplete/i.test(JSON.stringify(cut.payload)), cut.payload);
+    }
+
+    const offSource = await call('findDefinition', {
+      url: CLASS_URL, source: navText, line: navAt.line, startCol: 0, endCol: 1
+    });
+    check('findDefinition refuses a cursor that is not on a name rather than answering an empty URL',
+      offSource.isError === true && /not on a name/.test(JSON.stringify(offSource.payload)),
+      offSource.payload);
+
+    const past = await call('findDefinition', {
+      url: CLASS_URL, line: navSource.payload.totalLines + 500, startCol: 0, endCol: 1
+    });
+    check('findDefinition refuses a line outside the source instead of spending a call on a 500',
+      past.isError === true && /outside the source/.test(JSON.stringify(past.payload)),
+      past.payload);
+
+    const proposals = await call('codeCompletion', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow
+    });
+    check('codeCompletion proposes something after a static call arrow',
+      proposals.payload.proposals > 0 && Array.isArray(proposals.payload.result),
+      { proposals: proposals.payload.proposals });
+
+    const outside = await call('codeCompletion', {
+      sourceUrl: CLASS_URL, line: navSource.payload.totalLines + 500, column: 1
+    });
+    check('codeCompletion refuses a position outside the source instead of answering an empty list',
+      outside.isError === true && /outside the source/.test(JSON.stringify(outside.payload)),
+      outside.payload);
+
+    const first = (proposals.payload.result || [])[0];
+    if (first && first.IDENTIFIER) {
+      const inserted = await call('codeCompletionFull', {
+        sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow, patternKey: first.IDENTIFIER
+      });
+      check('codeCompletionFull answers one insert text, or says the proposal inserts none',
+        typeof inserted.payload.result === 'string'
+        && (inserted.payload.result.length > 0 || /no insert text/.test(String(inserted.payload.hint))),
+        inserted.payload);
+    }
+    const blankKey = await call('codeCompletionFull', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow, patternKey: ' '
+    });
+    check('codeCompletionFull refuses a blank patternKey rather than letting the backend raise',
+      blankKey.isError === true && /IDENTIFIER of the proposal/.test(JSON.stringify(blankKey.payload)),
+      blankKey.payload);
+
+    const element = await call('codeCompletionElement', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow
+    });
+    check('codeCompletionElement names what the cursor is on',
+      typeof element.payload.result === 'object' && typeof element.payload.result.name === 'string',
+      element.payload.result && element.payload.result.name);
+  }
+
+  const usages = await call('usageReferences', {
+    url: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}`, maxResults: 5
+  });
+  check('usageReferences answers a summary of the whole tree and one small page of it',
+    usages.payload.summary.total >= usages.payload.returned
+    && usages.payload.returned <= 5
+    && typeof usages.payload.summary.usageSites === 'number'
+    && JSON.stringify(usages.payload).length < 40000,
+    { summary: usages.payload.summary, returned: usages.payload.returned, chars: JSON.stringify(usages.payload).length });
+  check('usageReferences says how to ask for the next page when there is one',
+    usages.payload.more === false || /offset=/.test(String(usages.payload.hint)),
+    usages.payload.hint);
+
+  const sites = await call('usageReferences', {
+    url: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}`, maxResults: 3, onlyWithSnippets: true
+  });
+  check('onlyWithSnippets keeps just the rows a snippet can be fetched for',
+    sites.payload.rows.every(row => typeof row.objectIdentifier === 'string' && row.objectIdentifier.length > 0),
+    sites.payload.rows.map(row => row.name));
+
+  if ((sites.payload.rows || []).length > 0) {
+    const snippets = await call('usageReferenceSnippets', { references: sites.payload.rows.slice(0, 2) });
+    check('usageReferenceSnippets reads the call sites of the rows it was given',
+      snippets.payload.asked > 0 && Array.isArray(snippets.payload.result),
+      { asked: snippets.payload.asked, ignored: snippets.payload.ignored });
+  }
+  const groupingRows = (usages.payload.rows || []).filter(row => !row.objectIdentifier);
+  if (groupingRows.length > 0) {
+    const refusedRows = await call('usageReferenceSnippets', { references: groupingRows.slice(0, 2) });
+    check('usageReferenceSnippets refuses the grouping rows instead of answering nothing',
+      refusedRows.isError === true && /onlyWithSnippets/.test(JSON.stringify(refusedRows.payload)),
+      refusedRows.payload);
+  }
+
+  const printerSetting = await call('prettyPrinterSetting');
+  check('prettyPrinterSetting answers the two settings it has',
+    typeof printerSetting.payload.settings === 'object'
+    && 'abapformatter:style' in printerSetting.payload.settings,
+    printerSetting.payload.settings);
+
+  const formatted = await call('prettyPrinter', {
+    source: 'report z_smoke.\ndata lv_x type i.\nif lv_x = 1.\nwrite / lv_x.\nendif.'
+  });
+  check('prettyPrinter reformats the source it is given and writes nothing',
+    /REPORT/.test(String(formatted.payload.result || formatted.payload.source || '')),
+    formatted.payload.result || formatted.payload.source);
+
+  // The refactorings, at the steps that only read. extractMethodEvaluate
+  // answers even for a standard SAP class; renameEvaluate refuses a symbol
+  // used too widely, and that refusal is the thing worth checking.
+  if (navAt) {
+    const extract = await call('extractMethodEvaluate', {
+      uri: CLASS_URL,
+      range: JSON.stringify({ start: { line: navAt.line, column: 0 }, end: { line: navAt.line + 1, column: 0 } })
+    });
+    check('extractMethodEvaluate answers with a proposal that quotes the lines it would move',
+      extract.isError === true
+        ? /refactoring|not possible/i.test(JSON.stringify(extract.payload))
+        : typeof extract.payload.result === 'object' && !!extract.payload.result.genericRefactoring,
+      extract.isError ? extract.payload : Object.keys(extract.payload.result || {}));
+  }
+
+  // The reading tools no smoke run had ever called. Three of them answer past
+  // the response cap unless they are narrowed, and three answer nothing in a
+  // way that reads like an answer.
+  const discovery = await call('adtDiscovery');
+  check('adtDiscovery lists the collections this system serves',
+    Array.isArray(discovery.payload.discovery) && discovery.payload.discovery.length > 0);
+
+  const feedList = await call('feeds');
+  check('feeds names the dump feed among the ones it publishes',
+    Array.isArray(feedList.payload.feeds)
+    && feedList.payload.feeds.some(feed => /dumps/.test(String(feed.href))),
+    (feedList.payload.feeds || []).map(feed => feed.href));
+
+  const shortDumps = await call('dumps', { max: 3 });
+  check('dumps answers the headers without the ST22 pages behind them',
+    typeof shortDumps.payload.count === 'number'
+    && shortDumps.payload.returned <= 3
+    && (shortDumps.payload.dumps.dumps || []).every(entry => entry.text === undefined),
+    { count: shortDumps.payload.count, returned: shortDumps.payload.returned });
+  check('and the headers still say which runtime error it was',
+    (shortDumps.payload.dumps.dumps || []).length === 0
+    || (shortDumps.payload.dumps.dumps || []).every(entry => typeof entry.textChars === 'number'),
+    (shortDumps.payload.dumps.dumps || [])[0]);
+
+  const classMeta = await call('objectStructure', { objectUrl: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}` });
+  check('objectStructure reads the metadata of a class and its source link',
+    classMeta.payload.structure.metaData['adtcore:name'] === CLASS_NAME
+    || String(classMeta.payload.structure.objectUrl).includes(CLASS_NAME.toLowerCase()),
+    classMeta.payload.structure.objectUrl);
+  const tableMeta = await call('objectStructure', { objectUrl: `/sap/bc/adt/ddic/structures/${STRUCTURE_NAME.toLowerCase()}` });
+  check('objectStructure reads a table from the structures collection both types share',
+    tableMeta.payload.structure.metaData['adtcore:name'] === STRUCTURE_NAME,
+    tableMeta.payload.structure.metaData['adtcore:name']);
+
+  const searched = await call('searchObject', { query: `${CLASS_NAME}*`, max: 3 });
+  check('searchObject finds an object by name, with its type and package',
+    (searched.payload.results || []).some(row => row['adtcore:name'] === CLASS_NAME
+      && row['adtcore:type'] === 'CLAS/OC' && !!row['adtcore:packageName']),
+    searched.payload.results);
+  const missed = await call('searchObject', { query: 'ZZZ_NO_SUCH_OBJECT_AT_ALL*', max: 3 });
+  check('searchObject answers an empty list for a name nothing matches',
+    Array.isArray(missed.payload.results) && missed.payload.results.length === 0);
+
+  const registration = await call('objectRegistrationInfo', { objectUrl: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}` });
+  check('objectRegistrationInfo says how the object travels and whether a key is needed',
+    !!registration.payload.info.object && 'reg:isRequired' in registration.payload.info.object,
+    registration.payload.info.object);
+
+  const level = await call('nodeContents', { parent_type: 'DEVC/K', parent_name: PACKAGE_NAME, maxResults: 5 });
+  check(`nodeContents counts the whole level of ${PACKAGE_NAME} and returns one page of it`,
+    level.payload.counts.nodes >= level.payload.returned
+    && level.payload.returned <= 5
+    && JSON.stringify(level.payload).length < 40000,
+    { nodes: level.payload.counts.nodes, returned: level.payload.returned, chars: JSON.stringify(level.payload).length });
+  check('and says which types the level holds, so the next page can be narrowed',
+    Object.keys(level.payload.counts.byType || {}).length > 0, level.payload.counts.byType);
+
+  const nowhere = await call('nodeContents', { parent_type: 'DEVC/K', parent_name: 'ZZZ_NO_SUCH_PACKAGE' });
+  check('nodeContents says an empty level cannot be told from a package that is not there',
+    nowhere.payload.total === 0 && /unknown package/.test(String(nowhere.payload.hint)),
+    nowhere.payload.hint);
+
+  const entity = await call('ddicElement', { path: STRUCTURE_NAME });
+  check(`ddicElement reads the fields of ${STRUCTURE_NAME} with their data elements`,
+    entity.payload.found === true && entity.payload.fields > 0,
+    { found: entity.payload.found, fields: entity.payload.fields });
+  const notAnEntity = await call('ddicElement', { path: 'WERKS_D' });
+  check('ddicElement says a data element gets the same empty shell as a name that is not there',
+    notAnEntity.payload.found === false && /getDataElementProperties/.test(String(notAnEntity.payload.hint)),
+    notAnEntity.payload.hint);
+
+  const configurations = await call('transportConfigurations');
+  check('transportConfigurations answers with a list, empty or not',
+    Array.isArray(configurations.payload.configurations));
+
+  const mine = await call('userTransports', { user: process.env.SAP_USER, status: 'all' });
+  check('userTransports answers a flat list of requests for the connected user',
+    typeof mine.payload.count === 'number' && Array.isArray(mine.payload.requests)
+    && mine.payload.requests.every(request => !!request.number && !!request.status),
+    { count: mine.payload.count });
+
+  const repos = await call('gitRepos');
+  check('gitRepos either lists the repositories or says abapGit is not installed here',
+    repos.isError === true
+      ? /abapGit is not installed/.test(JSON.stringify(repos.payload))
+      : Array.isArray(repos.payload.repos),
+    repos.payload);
+
+  const annotations = await call('annotationDefinitions');
+  check('annotationDefinitions either answers or says this system does not serve them',
+    annotations.isError === true
+      ? /does not serve the CDS annotation definitions/.test(JSON.stringify(annotations.payload))
+      : !!annotations.payload,
+    annotations.isError ? annotations.payload.error : 'served');
+
+  const noClass = await call('unitTestEvaluation', {});
+  check('unitTestEvaluation asks for the test class instead of failing on undefined',
+    noClass.isError === true && /Pass clas/.test(JSON.stringify(noClass.payload)),
+    noClass.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);

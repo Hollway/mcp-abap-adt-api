@@ -4,7 +4,7 @@
  * Every value is read lazily: dotenv loads .env after the module graph is
  * imported, so anything captured at import time would miss it.
  */
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -28,6 +28,29 @@ export const serverVersion = (): string => {
   }
   return '0.0.0';
 };
+
+/**
+ * When the build that is answering was compiled.
+ *
+ * The version alone cannot say whether a process is running the code just
+ * compiled: inside one working session every build carries the same number,
+ * and five servers share one dist, so a process left over from before the
+ * build announces exactly what a restarted one does. The modification time of
+ * the file actually loaded does say it - __filename is the compiled module
+ * when the server runs from dist, and the source file when the tests run it.
+ */
+export const buildStamp = (): string | undefined => {
+  try {
+    return statSync(__filename).mtime.toISOString();
+  } catch {
+    // A bundle with no file behind it, or a read that is not allowed.
+    return undefined;
+  }
+};
+
+/** When this process started, which is when it last picked up a build. */
+export const startedAt = (): string =>
+  new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
 
 const truthy = (value: string | undefined): boolean =>
   !!value && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());

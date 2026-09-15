@@ -1,6 +1,9 @@
+import { statSync } from 'fs';
 import {
   isReadOnly,
   excludedTokens,
+  buildStamp,
+  startedAt,
   assumedSessionTimeoutMs,
   logLevel,
   maxResponseChars,
@@ -52,6 +55,18 @@ describe('serverConfig', () => {
     expect(logLevel()).toBe('debug');
     process.env.LOG_LEVEL = 'chatty';
     expect(logLevel()).toBe('warn');
+  });
+
+  it('stamps the build with the time of the file it is running from', () => {
+    const stamp = buildStamp();
+    expect(stamp).toBe(statSync(require.resolve('../lib/serverConfig')).mtime.toISOString());
+    expect(new Date(stamp as string).getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('reports a start time no later than now and no older than the process', () => {
+    const started = new Date(startedAt()).getTime();
+    expect(started).toBeLessThanOrEqual(Date.now() + 1000);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(Math.floor(process.uptime()) * 1000 - 1000);
   });
 
   it('falls back to a sane response cap', () => {

@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, isMissingCollection } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { GitRepo, GitStaging } from 'abap-adt-api';
 
@@ -285,7 +285,9 @@ export class GitHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get git repos');
+            throw wrapAdtError(error, isMissingCollection(error)
+                ? 'abapGit is not installed on this system: the /sap/bc/adt/abapgit collection is absent, which is not the same as having no repositories'
+                : 'Failed to get git repos');
         }
     }
 
