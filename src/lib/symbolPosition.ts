@@ -110,6 +110,75 @@ export const locateMethod = (source: string, name: string): SymbolPosition | und
     }
   ]);
 
+/**
+ * What a cursor position points at in the source the caller is sending.
+ *
+ * Every position-taking call was a pass-through, and the backend answers a
+ * wrong position without saying it was wrong. Measured on a classic ERP
+ * system, against CL_ABAP_TYPEDESCR:
+ *
+ *  - a line counted from 0 instead of 1 answered confidently about a
+ *    different class (CL_ABAP_INTFDESCR for CL_ABAP_ELEMDESCR);
+ *  - a cursor on blank space answered `{url: "", line: 0, column: 0}` with
+ *    status success;
+ *  - a line past the end of the source answered HTTP 500;
+ *  - codeCompletion answered `[]` for both, which reads like "nothing may be
+ *    written here" rather than "you are not pointing at the source".
+ *
+ * The source is already a required argument of all of these, so the position
+ * can be checked against it before a call is spent, and the name under the
+ * cursor can be handed back for the caller to recognise.
+ */
+export interface CursorAt {
+  /** The line, quoted so a caller can see what it pointed at. */
+  lineText: string;
+  /** The identifier under the cursor, when it is on one. */
+  token?: string;
+  /** Why the position is not usable, when it is not. */
+  problem?: string;
+  /**
+   * The position is not in the source at all, as opposed to merely not on a
+   * name. Completion is asked at blank positions all the time - that is what
+   * completing is - so only the first of the two is always an error.
+   */
+  outside?: boolean;
+}
+
+/** ABAP names carry underscores, slashes and the interface tilde. */
+const NAME_CHAR = /[A-Za-z0-9_/~]/;
+
+export const cursorAt = (source: string, line: number, column: number): CursorAt => {
+  const lines = String(source ?? '').split(NEWLINES);
+  if (!Number.isFinite(line) || line < 1 || line > lines.length) {
+    return {
+      lineText: '',
+      outside: true,
+      problem: `Line ${line} is outside the source you passed, which has ${lines.length} lines. Lines count from 1.`
+    };
+  }
+  const lineText = lines[line - 1];
+  if (!Number.isFinite(column) || column < 0 || column > lineText.length) {
+    return {
+      lineText,
+      outside: true,
+      problem: `Column ${column} is outside line ${line}, which is ${lineText.length} characters long. Columns count from 0.`
+    };
+  }
+  // A cursor sitting just after a name belongs to it, the way an editor caret
+  // does - so look left as well as right.
+  let start = column;
+  while (start > 0 && NAME_CHAR.test(lineText[start - 1])) start--;
+  let end = column;
+  while (end < lineText.length && NAME_CHAR.test(lineText[end])) end++;
+  if (end === start) {
+    return {
+      lineText,
+      problem: `Column ${column} of line ${line} is not on a name. The line reads: ${JSON.stringify(lineText)}`
+    };
+  }
+  return { lineText, token: lineText.slice(start, end) };
+};
+
 /** ADT source URL of a class or interface, from its name. */
 export const classSourceUrl = (name: string): string =>
   `/sap/bc/adt/oo/classes/${encodeURIComponent(name.trim().toLowerCase())}/source/main`;

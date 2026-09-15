@@ -985,6 +985,159 @@ const check = (label, condition, detail) => {
   check('and leaves them as plain names when it was not asked',
     drawn.payload.outsidePackages === undefined, drawn.payload.outsidePackages);
 
+  // The navigation family: position-taking calls and where-used. None of it
+  // was smoked before, and none of it is forgiving - a position out by one is
+  // answered confidently about the wrong object, and a where-used answer runs
+  // to millions of characters unless it is paged.
+  const navSource = await call('getObjectSource', { objectSourceUrl: CLASS_URL, startLine: 1, maxLines: 400 });
+  const navLines = String(navSource.payload.source || '').split(/\r?\n/);
+  const navText = navLines.join('\n');
+  let navAt = null;
+  for (let index = 0; index < navLines.length && !navAt; index++) {
+    const arrow = navLines[index].indexOf('=>');
+    const name = arrow > 0 && (navLines[index].slice(0, arrow).match(/([A-Za-z_][\w]*)\s*$/) || [])[1];
+    if (name) navAt = { line: index + 1, start: arrow - name.length, end: arrow, afterArrow: arrow + 2, name };
+  }
+  check(`${CLASS_NAME} has a static call to point a cursor at`, !!navAt);
+
+  if (navAt) {
+    // No source passed: the whole stored one is read. A page of a source is a
+    // different, broken source as far as the backend is concerned, and the
+    // 400 lines read above are exactly the page a caller would send.
+    const definition = await call('findDefinition', {
+      url: CLASS_URL, line: navAt.line, startCol: navAt.start, endCol: navAt.end
+    });
+    check('findDefinition resolves the name under the cursor and quotes it back',
+      definition.payload.found === true
+      && String(definition.payload.at || '').toLowerCase() === navAt.name.toLowerCase()
+      && typeof definition.payload.result.url === 'string',
+      definition.payload);
+    check('and says the source came from the server rather than the call',
+      definition.payload.sourceFrom === 'server', definition.payload.sourceFrom);
+
+    if (navSource.payload.totalLines > navLines.length) {
+      const cut = await call('findDefinition', {
+        url: CLASS_URL, source: navText, line: navAt.line, startCol: navAt.start, endCol: navAt.end
+      });
+      check('a source cut to a page is refused by the backend, with its own words',
+        cut.isError === true && /incomplete/i.test(JSON.stringify(cut.payload)), cut.payload);
+    }
+
+    const offSource = await call('findDefinition', {
+      url: CLASS_URL, source: navText, line: navAt.line, startCol: 0, endCol: 1
+    });
+    check('findDefinition refuses a cursor that is not on a name rather than answering an empty URL',
+      offSource.isError === true && /not on a name/.test(JSON.stringify(offSource.payload)),
+      offSource.payload);
+
+    const past = await call('findDefinition', {
+      url: CLASS_URL, line: navSource.payload.totalLines + 500, startCol: 0, endCol: 1
+    });
+    check('findDefinition refuses a line outside the source instead of spending a call on a 500',
+      past.isError === true && /outside the source/.test(JSON.stringify(past.payload)),
+      past.payload);
+
+    const proposals = await call('codeCompletion', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow
+    });
+    check('codeCompletion proposes something after a static call arrow',
+      proposals.payload.proposals > 0 && Array.isArray(proposals.payload.result),
+      { proposals: proposals.payload.proposals });
+
+    const outside = await call('codeCompletion', {
+      sourceUrl: CLASS_URL, line: navSource.payload.totalLines + 500, column: 1
+    });
+    check('codeCompletion refuses a position outside the source instead of answering an empty list',
+      outside.isError === true && /outside the source/.test(JSON.stringify(outside.payload)),
+      outside.payload);
+
+    const first = (proposals.payload.result || [])[0];
+    if (first && first.IDENTIFIER) {
+      const inserted = await call('codeCompletionFull', {
+        sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow, patternKey: first.IDENTIFIER
+      });
+      check('codeCompletionFull answers one insert text, or says the proposal inserts none',
+        typeof inserted.payload.result === 'string'
+        && (inserted.payload.result.length > 0 || /no insert text/.test(String(inserted.payload.hint))),
+        inserted.payload);
+    }
+    const blankKey = await call('codeCompletionFull', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow, patternKey: ' '
+    });
+    check('codeCompletionFull refuses a blank patternKey rather than letting the backend raise',
+      blankKey.isError === true && /IDENTIFIER of the proposal/.test(JSON.stringify(blankKey.payload)),
+      blankKey.payload);
+
+    const element = await call('codeCompletionElement', {
+      sourceUrl: CLASS_URL, line: navAt.line, column: navAt.afterArrow
+    });
+    check('codeCompletionElement names what the cursor is on',
+      typeof element.payload.result === 'object' && typeof element.payload.result.name === 'string',
+      element.payload.result && element.payload.result.name);
+  }
+
+  const usages = await call('usageReferences', {
+    url: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}`, maxResults: 5
+  });
+  check('usageReferences answers a summary of the whole tree and one small page of it',
+    usages.payload.summary.total >= usages.payload.returned
+    && usages.payload.returned <= 5
+    && typeof usages.payload.summary.usageSites === 'number'
+    && JSON.stringify(usages.payload).length < 40000,
+    { summary: usages.payload.summary, returned: usages.payload.returned, chars: JSON.stringify(usages.payload).length });
+  check('usageReferences says how to ask for the next page when there is one',
+    usages.payload.more === false || /offset=/.test(String(usages.payload.hint)),
+    usages.payload.hint);
+
+  const sites = await call('usageReferences', {
+    url: `/sap/bc/adt/oo/classes/${CLASS_NAME.toLowerCase()}`, maxResults: 3, onlyWithSnippets: true
+  });
+  check('onlyWithSnippets keeps just the rows a snippet can be fetched for',
+    sites.payload.rows.every(row => typeof row.objectIdentifier === 'string' && row.objectIdentifier.length > 0),
+    sites.payload.rows.map(row => row.name));
+
+  if ((sites.payload.rows || []).length > 0) {
+    const snippets = await call('usageReferenceSnippets', { references: sites.payload.rows.slice(0, 2) });
+    check('usageReferenceSnippets reads the call sites of the rows it was given',
+      snippets.payload.asked > 0 && Array.isArray(snippets.payload.result),
+      { asked: snippets.payload.asked, ignored: snippets.payload.ignored });
+  }
+  const groupingRows = (usages.payload.rows || []).filter(row => !row.objectIdentifier);
+  if (groupingRows.length > 0) {
+    const refusedRows = await call('usageReferenceSnippets', { references: groupingRows.slice(0, 2) });
+    check('usageReferenceSnippets refuses the grouping rows instead of answering nothing',
+      refusedRows.isError === true && /onlyWithSnippets/.test(JSON.stringify(refusedRows.payload)),
+      refusedRows.payload);
+  }
+
+  const printerSetting = await call('prettyPrinterSetting');
+  check('prettyPrinterSetting answers the two settings it has',
+    typeof printerSetting.payload.settings === 'object'
+    && 'abapformatter:style' in printerSetting.payload.settings,
+    printerSetting.payload.settings);
+
+  const formatted = await call('prettyPrinter', {
+    source: 'report z_smoke.\ndata lv_x type i.\nif lv_x = 1.\nwrite / lv_x.\nendif.'
+  });
+  check('prettyPrinter reformats the source it is given and writes nothing',
+    /REPORT/.test(String(formatted.payload.result || formatted.payload.source || '')),
+    formatted.payload.result || formatted.payload.source);
+
+  // The refactorings, at the steps that only read. extractMethodEvaluate
+  // answers even for a standard SAP class; renameEvaluate refuses a symbol
+  // used too widely, and that refusal is the thing worth checking.
+  if (navAt) {
+    const extract = await call('extractMethodEvaluate', {
+      uri: CLASS_URL,
+      range: JSON.stringify({ start: { line: navAt.line, column: 0 }, end: { line: navAt.line + 1, column: 0 } })
+    });
+    check('extractMethodEvaluate answers with a proposal that quotes the lines it would move',
+      extract.isError === true
+        ? /refactoring|not possible/i.test(JSON.stringify(extract.payload))
+        : typeof extract.payload.result === 'object' && !!extract.payload.result.genericRefactoring,
+      extract.isError ? extract.payload : Object.keys(extract.payload.result || {}));
+  }
+
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
 

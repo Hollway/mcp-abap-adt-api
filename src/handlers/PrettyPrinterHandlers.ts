@@ -9,7 +9,7 @@ export class PrettyPrinterHandlers extends BaseHandler {
         return [
             {
                 name: 'prettyPrinterSetting',
-                description: 'How pretty-printing is set for this user: whether keywords go upper or lower case, and how identifiers are treated. Worth reading before formatting a source that is not yours, because the setting decides what the reformat does to every line.',
+                description: 'How pretty-printing is set for this user. Two settings come back and no more: "abapformatter:indentation", whether lines are indented at all, and "abapformatter:style", what happens to case - keywordUpper on a classic ERP system leaves identifiers as they are written and upper-cases keywords. Worth reading before formatting a source that is not yours, because the setting decides what the reformat does to every line.',
                 inputSchema: {
                     type: 'object',
                     properties: {}

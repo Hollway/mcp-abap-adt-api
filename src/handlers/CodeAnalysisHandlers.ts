@@ -6,12 +6,14 @@ import { ADTClient } from 'abap-adt-api';
 import { sourceCache } from '../lib/sourceCache.js';
 import {
     classSourceUrl,
+    cursorAt,
     interfaceSourceUrl,
     locateMethod,
     locateType,
     objectUrlOf
 } from '../lib/symbolPosition';
-import type { SymbolPosition } from '../lib/symbolPosition';
+import type { CursorAt, SymbolPosition } from '../lib/symbolPosition';
+import { pageUsages, snippetableReferences } from '../lib/usageReferences';
 
 export class CodeAnalysisHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -47,44 +49,83 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletion',
-                description: 'Completion proposals for a cursor position: what may be written at line/column of this source. Needs the source and the position, exactly like the editor, so it is worth having when composing a call against an unfamiliar interface; codeCompletionFull adds the insert text and codeCompletionElement the details of one proposal.',
+                description: 'Completion proposals for a cursor position: what may be written at line/column of this source. Needs the source and the position, exactly like the editor, so it is worth having when composing a call against an unfamiliar interface. A position outside the source is refused here rather than answered with an empty list, which is what the backend does and which reads like "nothing may be written here". Each proposal carries IDENTIFIER - that is the patternKey codeCompletionFull takes; codeCompletionElement gives the details of what is under the cursor.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        sourceUrl: { type: 'string' },
-                        source: { type: 'string' },
-                        line: { type: 'number' },
-                        column: { type: 'number' }
+                        sourceUrl: {
+                            type: 'string',
+                            description: 'Source URL the position is in, e.g. /sap/bc/adt/oo/classes/cl_abap_gzip/source/main.'
+                        },
+                        source: {
+                            type: 'string',
+                            description: 'The source as the editor holds it, including whatever is half-written at the cursor. Omit it to complete against the stored source. A page of a source is not a smaller source: the backend parses what it is sent.'
+                        },
+                        line: { type: 'number', description: 'Line of the cursor, counting from 1.' },
+                        column: { type: 'number', description: 'Column of the cursor in that line, counting from 0.' }
                     },
-                    required: ['sourceUrl', 'source', 'line', 'column']
+                    required: ['sourceUrl', 'line', 'column']
                 }
             },
             {
                 name: 'findDefinition',
-                description: 'Where the symbol under a cursor position is defined - the F3 of ADT. Takes the source URL with a line and column, and answers with the object and position of the declaration, so it needs the source read first to count the position. To go the other way, use usageReferences or impactOf.',
+                description: 'Where the symbol under a cursor position is defined - the F3 of ADT. Takes the source URL with a line and column, and answers with the object and position of the declaration, so it needs the source read first to count the position. The position is checked against the source you pass before the call is spent, and the answer quotes the name the cursor was on: a line out by one is answered confidently, about a different object, and nothing in the backend answer says so. When nothing is found the answer says found: false rather than handing back an empty URL. To go the other way, use usageReferences or impactOf.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        url: { type: 'string' },
-                        source: { type: 'string' },
-                        line: { type: 'number' },
-                        startCol: { type: 'number' },
-                        endCol: { type: 'number' },
-                        implementation: { type: 'boolean' },
-                        mainProgram: { type: 'string' }
+                        url: {
+                            type: 'string',
+                            description: 'Source URL the position is in, e.g. /sap/bc/adt/oo/classes/cl_abap_gzip/source/main.'
+                        },
+                        source: {
+                            type: 'string',
+                            description: 'The source itself, only for a text not yet written to the system - omit it and the whole stored source is read, from the session cache when it is there. Never pass a page of a source: the position is resolved inside the text sent, and a class cut short answers "The source code of this class is incomplete".'
+                        },
+                        line: { type: 'number', description: 'Line of the name, counting from 1.' },
+                        startCol: { type: 'number', description: 'Column where the name starts, counting from 0.' },
+                        endCol: { type: 'number', description: 'Column just past the end of the name, counting from 0.' },
+                        implementation: {
+                            type: 'boolean',
+                            description: 'Go to the implementation rather than the declaration - the difference between a method definition and its METHOD block.'
+                        },
+                        mainProgram: {
+                            type: 'string',
+                            description: 'For a position inside an include: the program it compiles as part of.'
+                        }
                     },
-                    required: ['url', 'source', 'line', 'startCol', 'endCol']
+                    required: ['url', 'line', 'startCol', 'endCol']
                 }
             },
             {
                 name: 'usageReferences',
-                description: 'Where-used for the symbol at a cursor position, or for the whole object when no position is given. The answer is a flat list that is really a tree - one row per package, per object, and per place inside it - so it is large: a widely used class answers with hundreds of rows and over a hundred thousand characters, past the response cap. Prefer impactOf, which asks this and rolls it up; use whereUsedMethod for one method by name.',
+                description: 'Where-used for the symbol at a cursor position, or for the whole object when no position is given. The backend answers with the whole tree at once and has no paging of its own - measured, CL_ABAP_TYPEDESCR answers with 40,660 rows and 21 million characters, a hundred times the response cap - so the answer is summarised and paged here: counts of rows, usage sites, objects and packages over the whole result, then one page of rows trimmed to name, type, package, uri and the objectIdentifier that usageReferenceSnippets needs. The rows are a tree flattened: only those carrying an objectIdentifier are usage sites, and onlyWithSnippets keeps just those. The fetch still costs what it costs on the backend; what is saved is the reading. For a rolled-up answer over the whole tree use impactOf, for one method by name whereUsedMethod.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        url: { type: 'string' },
-                        line: { type: 'number' },
-                        column: { type: 'number' }
+                        url: {
+                            type: 'string',
+                            description: 'Object URL, e.g. /sap/bc/adt/oo/classes/cl_abap_gzip. A source URL works too.'
+                        },
+                        line: {
+                            type: 'number',
+                            description: 'Line of the symbol to ask about, counting from 1. Without it the whole object is asked about.'
+                        },
+                        column: {
+                            type: 'number',
+                            description: 'Column inside that line, counting from 0.'
+                        },
+                        maxResults: {
+                            type: 'number',
+                            description: 'Rows in this page, default 100. The summary always counts the whole answer, not the page.'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Rows to skip, for the next page. Default 0.'
+                        },
+                        onlyWithSnippets: {
+                            type: 'boolean',
+                            description: 'Keep only rows that carry an objectIdentifier - the usage sites, the only rows usageReferenceSnippets can show source for. The grouping rows of the tree are dropped.'
+                        }
                     },
                     required: ['url']
                 }
@@ -174,17 +215,23 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletionFull',
-                description: 'Completion proposals with the text to insert and the position to insert it at, for a cursor position in a source. The fuller form of codeCompletion.',
+                description: 'The text one completion proposal would insert, for a cursor position in a source. Measured, it answers a single string - not a list of proposals, and not the position to insert it at, whatever its name suggests: run codeCompletion for the list, then this for the one entry you picked. patternKey is that entry\'s IDENTIFIER, and a value that names no proposal makes the backend raise an exception rather than answer empty.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        sourceUrl: { type: 'string' },
-                        source: { type: 'string' },
-                        line: { type: 'number' },
-                        column: { type: 'number' },
-                        patternKey: { type: 'string' }
+                        sourceUrl: {
+                            type: 'string',
+                            description: 'Source URL the position is in, the same one codeCompletion was asked with.'
+                        },
+                        source: { type: 'string', description: 'The source as the editor holds it; omit it for the stored one.' },
+                        line: { type: 'number', description: 'Line of the cursor, counting from 1.' },
+                        column: { type: 'number', description: 'Column of the cursor in that line, counting from 0.' },
+                        patternKey: {
+                            type: 'string',
+                            description: 'IDENTIFIER of the proposal from codeCompletion. A name it does not know answers 500 "Обнаружена особая ситуация" / "Exception occurred".'
+                        }
                     },
-                    required: ['sourceUrl', 'source', 'line', 'column', 'patternKey']
+                    required: ['sourceUrl', 'line', 'column', 'patternKey']
                 }
             },
             {
@@ -200,25 +247,31 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'codeCompletionElement',
-                description: 'The details behind one completion proposal: its type, its documentation, where it comes from. Follows codeCompletion for the entry you want to know more about.',
+                description: 'What the name under the cursor is: its name, its ADT type, a link to its documentation and its components. It answers about the position, not about a proposal from codeCompletion - put the cursor on the name you are asking about.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        sourceUrl: { type: 'string' },
-                        source: { type: 'string' },
-                        line: { type: 'number' },
-                        column: { type: 'number' }
+                        sourceUrl: {
+                            type: 'string',
+                            description: 'Source URL the position is in, e.g. /sap/bc/adt/oo/classes/cl_abap_gzip/source/main.'
+                        },
+                        source: { type: 'string', description: 'The source as the editor holds it; omit it for the stored one.' },
+                        line: { type: 'number', description: 'Line of the cursor, counting from 1.' },
+                        column: { type: 'number', description: 'Column of the cursor in that line, counting from 0.' }
                     },
-                    required: ['sourceUrl', 'source', 'line', 'column']
+                    required: ['sourceUrl', 'line', 'column']
                 }
             },
             {
                 name: 'usageReferenceSnippets',
-                description: 'The source lines around each usage, for references you already have from usageReferences - pass those rows back in. One more backend call and a much larger answer, so ask for it when the call site itself matters.',
+                description: 'The source lines around each usage, for references you already have from usageReferences - pass those rows back in. The request is built out of objectIdentifier alone, and rows without one are the grouping rows of the tree: handing those over answers with nothing and says nothing, so they are refused here with the reason. One backend call and a large answer - roughly 3,000 characters per usage site - so ask for the sites that matter rather than a page of them.',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        references: { type: 'array' }
+                        references: {
+                            type: 'array',
+                            description: 'Rows from usageReferences, as they came. Only those carrying objectIdentifier count; ask usageReferences with onlyWithSnippets to get just those.'
+                        }
                     },
                     required: ['references']
                 }
@@ -444,21 +497,31 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
     async handleCodeCompletion(args: any): Promise<any> {
         const startTime = performance.now();
+        const source = await this.positionSource(args.sourceUrl, args.source);
+        const cursor = this.checkCursor(source.text, args.line, args.column);
         try {
             const result = await this.readClient.codeCompletion(
                 args.sourceUrl,
-                args.source,
+                source.text,
                 args.line,
                 args.column
             );
             this.trackRequest(startTime, true);
+            const proposals = Array.isArray(result) ? result : [];
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            proposals: proposals.length,
+                            at: cursor.token,
+                            line: cursor.lineText,
+                            sourceFrom: source.from,
+                            result,
+                            hint: proposals.length === 0
+                                ? 'No proposals here. The backend answers an empty list both when nothing may be written at this position and when the source it was sent does not parse as far as the cursor.'
+                                : 'IDENTIFIER of a proposal is the patternKey codeCompletionFull takes.'
                         })
                     }
                 ]
@@ -469,12 +532,51 @@ export class CodeAnalysisHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * The position, checked against the source that was passed with it.
+     *
+     * A position outside the source is always the caller's mistake, and the
+     * backend answers it with a wrong object, an empty list or a 500 rather
+     * than with a complaint. A position that is merely not on a name is a
+     * mistake only where a name is what the call is about: completion is
+     * asked at blank positions by definition.
+     */
+    /**
+     * The source a position is counted against.
+     *
+     * These calls send the source with the position, and the backend resolves
+     * the position inside the text it is given - so a page of a source is not
+     * a smaller version of it but a different, broken one. Measured live: the
+     * first 400 lines of CL_SALV_TABLE, which is how a caller would naturally
+     * read a large class, answered "The source code of this class is
+     * incomplete". Omitting it now reads the whole thing, from the cache when
+     * this session already has it, which is what a caller wants unless it is
+     * asking about an edit it has not written yet.
+     */
+    private async positionSource(url: any, given: any): Promise<{ text: string; from: 'argument' | 'server' }> {
+        if (typeof given === 'string' && given.length > 0) return { text: given, from: 'argument' };
+        if (typeof url !== 'string' || url.length === 0) {
+            throw new McpError(ErrorCode.InvalidParams, 'Pass the source URL, or the source itself.');
+        }
+        return { text: await this.sourceOf(url), from: 'server' };
+    }
+
+    private checkCursor(source: any, line: any, column: any, needsName = false): CursorAt {
+        const cursor = cursorAt(source, line, column);
+        if (cursor.problem && (cursor.outside || needsName)) {
+            throw new McpError(ErrorCode.InvalidParams, cursor.problem);
+        }
+        return cursor;
+    }
+
     async handleFindDefinition(args: any): Promise<any> {
         const startTime = performance.now();
+        const source = await this.positionSource(args.url, args.source);
+        const cursor = this.checkCursor(source.text, args.line, args.startCol, true);
         try {
             const result = await this.readClient.findDefinition(
                 args.url,
-                args.source,
+                source.text,
                 args.line,
                 args.startCol,
                 args.endCol,
@@ -482,13 +584,24 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 args.mainProgram
             );
             this.trackRequest(startTime, true);
+            // An empty URL is how the backend says it found nothing, and it
+            // says it with status 200 - which reads as an answer rather than
+            // as the absence of one.
+            const found = !!(result && result.url);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            found,
+                            at: cursor.token,
+                            line: cursor.lineText,
+                            sourceFrom: source.from,
+                            result: found ? result : undefined,
+                            hint: found
+                                ? undefined
+                                : `No definition for "${cursor.token}" at line ${args.line}, column ${args.startCol}. The backend answers this for a name it cannot navigate to - a keyword, a literal, or a symbol from a source it does not compile the way it was sent. Check the position is the one you meant: lines count from 1 and columns from 0, and a line out by one answers about a different object without saying so.`
                         })
                     }
                 ]
@@ -502,11 +615,16 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleUsageReferences(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.readClient.usageReferences(
+            const rows = await this.readClient.usageReferences(
                 args.url,
                 args.line,
                 args.column
             );
+            const page = pageUsages(rows, {
+                offset: args.offset,
+                maxResults: args.maxResults,
+                onlyWithSnippets: args.onlyWithSnippets
+            });
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -514,7 +632,13 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            ...page,
+                            hint: page.more
+                                ? `More rows follow: ask again with offset=${page.offset + page.returned}.`
+                                : undefined,
+                            snippetsHint: page.summary.usageSites > 0 && !args.onlyWithSnippets
+                                ? `${page.summary.usageSites} of the ${page.summary.total} rows are usage sites with source behind them; onlyWithSnippets keeps just those.`
+                                : undefined
                         })
                     }
                 ]
@@ -766,16 +890,29 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
     async handleCodeCompletionFull(args: any): Promise<any> {
         const startTime = performance.now();
+        if (typeof args.patternKey !== 'string' || args.patternKey.trim().length === 0) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Pass patternKey - the IDENTIFIER of the proposal from codeCompletion whose insert text you want.'
+            );
+        }
+        const source = await this.positionSource(args.sourceUrl, args.source);
+        this.checkCursor(source.text, args.line, args.column);
         try {
-            const result = await this.readClient.codeCompletionFull(args.sourceUrl, args.source, args.line, args.column, args.patternKey);
+            const result = await this.readClient.codeCompletionFull(args.sourceUrl, source.text, args.line, args.column, args.patternKey);
             this.trackRequest(startTime, true);
+            const text = typeof result === 'string' ? result : '';
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            sourceFrom: source.from,
+                            result,
+                            hint: text.length === 0
+                                ? `The backend answered with no insert text for "${args.patternKey}". It does that for a proposal that inserts nothing on its own - check the IDENTIFIER came from codeCompletion at this very position.`
+                                : undefined
                         })
                     }
                 ]
@@ -810,8 +947,10 @@ export class CodeAnalysisHandlers extends BaseHandler {
 
     async handleCodeCompletionElement(args: any): Promise<any> {
         const startTime = performance.now();
+        const source = await this.positionSource(args.sourceUrl, args.source);
+        this.checkCursor(source.text, args.line, args.column);
         try {
-            const result = await this.readClient.codeCompletionElement(args.sourceUrl, args.source, args.line, args.column);
+            const result = await this.readClient.codeCompletionElement(args.sourceUrl, source.text, args.line, args.column);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -833,7 +972,18 @@ export class CodeAnalysisHandlers extends BaseHandler {
     async handleUsageReferenceSnippets(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.readClient.usageReferenceSnippets(this.parseObjectArg(args.references, 'references'));
+            const passed = this.parseObjectArg(args.references, 'references');
+            const usable = snippetableReferences(passed);
+            if (usable.length === 0) {
+                const given = Array.isArray(passed) ? passed.length : 0;
+                throw new McpError(
+                    ErrorCode.InvalidParams,
+                    given === 0
+                        ? 'Pass the rows usageReferences answered with - references is empty.'
+                        : `None of the ${given} rows carries an objectIdentifier, and the request is built out of that alone - these are the grouping rows of the tree, not usage sites. Ask usageReferences again with onlyWithSnippets: true.`
+                );
+            }
+            const result = await this.readClient.usageReferenceSnippets(usable);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -841,6 +991,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            asked: usable.length,
+                            ignored: (Array.isArray(passed) ? passed.length : 0) - usable.length,
                             result
                         })
                     }
