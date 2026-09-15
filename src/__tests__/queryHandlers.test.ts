@@ -1,29 +1,37 @@
 import { QueryHandlers } from '../handlers/QueryHandlers';
 
 /**
- * The data preview endpoint takes its row cap from the rowNumber query
- * parameter and ignores an UP TO n ROWS written into the SQL text - measured
- * live, where a SELECT ... UP TO 3 ROWS answered with a hundred rows. These
- * tests hold the consequence in place: the limit the caller asked for is the
- * limit that travels, wherever they wrote it, and the answer says which cap
- * applied and whether it cut the result short.
+ * Three things the data preview endpoints do that nobody would guess, all
+ * measured live, and all of them held in place here:
+ *
+ *  - the row cap is the rowNumber parameter; an UP TO n ROWS in the query text
+ *    is ignored, so a SELECT ... UP TO 3 ROWS answered with a hundred rows;
+ *  - the ddic endpoint behind tableContents answers with rowNumber+1 rows,
+ *    having fetched one past the cap to see whether more follows, while the
+ *    freestyle endpoint behind runQuery answers with exactly rowNumber;
+ *  - the filter of tableContents is not a WHERE clause but a whole SELECT, and
+ *    a bare condition is rejected outright.
  */
 const answer = (result: any) => JSON.parse(result.content[0].text);
 
 const rowsOf = (count: number) =>
   Array.from({ length: count }, (_, index) => ({ BUKRS: `${1000 + index}` }));
 
-const handler = (available = 100) => {
-  const asked: { sql: string; rowNumber: number }[] = [];
+/**
+ * `extra` is what the endpoint hands back beyond the cap: one row for the ddic
+ * endpoint, none for freestyle.
+ */
+const handler = (available = 100, extra = { freestyle: 0, ddic: 1 }) => {
+  const asked: { sql?: string; entity?: string; rowNumber: number }[] = [];
   const client = {
     stateful: 'stateless',
     runQuery: async (sql: string, rowNumber: number) => {
       asked.push({ sql, rowNumber });
-      return { columns: [{ name: 'BUKRS' }], values: rowsOf(Math.min(available, rowNumber)) };
+      return { columns: [{ name: 'BUKRS' }], values: rowsOf(Math.min(available, rowNumber + extra.freestyle)) };
     },
-    tableContents: async (name: string, rowNumber: number) => {
-      asked.push({ sql: name, rowNumber });
-      return { columns: [{ name: 'BUKRS' }], values: rowsOf(Math.min(available, rowNumber)) };
+    tableContents: async (entity: string, rowNumber: number, _decode: boolean, sql?: string) => {
+      asked.push({ entity, sql, rowNumber });
+      return { columns: [{ name: 'BUKRS' }], values: rowsOf(Math.min(available, rowNumber + extra.ddic)) };
     }
   };
   return { handlers: new QueryHandlers(client as any), asked };
@@ -42,7 +50,7 @@ describe('runQuery row limits', () => {
     const result = answer(await handlers.handleRunQuery({ sqlQuery: 'SELECT bukrs FROM t001 UP TO 5 ROWS' }));
     expect(asked[0].rowNumber).toBe(5);
     expect(result.rows).toMatchObject({ limit: 5, limitedBy: 'upToRows', returned: 5 });
-    expect(result.rows.hint).toContain('ignores UP TO 5 ROWS');
+    expect(result.rows.limitNote).toContain('ignores UP TO 5 ROWS');
   });
 
   it('says so when rowNumber and the text disagree, because the text loses', async () => {
@@ -59,11 +67,17 @@ describe('runQuery row limits', () => {
     const { handlers, asked } = handler(400);
     const result = answer(await handlers.handleRunQuery({ sqlQuery: 'SELECT bukrs FROM t001' }));
     expect(asked[0].rowNumber).toBe(100);
-    expect(result.rows).toMatchObject({ limit: 100, limitedBy: 'default', more: true });
-    expect(result.rows.hint).toContain('more rows');
+    expect(result.rows).toMatchObject({ limit: 100, limitedBy: 'default' });
   });
 
-  it('reports no more rows when the result stopped short of the cap', async () => {
+  it('will not claim there is more when the cap was merely filled', async () => {
+    const { handlers } = handler(400);
+    const result = answer(await handlers.handleRunQuery({ sqlQuery: 'SELECT bukrs FROM t001', rowNumber: 5 }));
+    expect(result.rows.more).toBe('unknown');
+    expect(result.rows.hint).toContain('filled the cap exactly');
+  });
+
+  it('reports nothing about more rows when the result stopped short of the cap', async () => {
     const { handlers } = handler(4);
     const result = answer(await handlers.handleRunQuery({ sqlQuery: 'SELECT bukrs FROM t001', rowNumber: 10 }));
     expect(result.rows).toMatchObject({ returned: 4, limit: 10 });
@@ -90,11 +104,46 @@ describe('runQuery row limits', () => {
   });
 });
 
-describe('tableContents row limits', () => {
-  it('caps by rowNumber and reports it the same way', async () => {
+describe('tableContents', () => {
+  it('trims the row the ddic endpoint adds, and spends it on saying there is more', async () => {
     const { handlers, asked } = handler(400);
-    const result = answer(await handlers.handleTableContents({ ddicEntityName: 'T001', rowNumber: 7 }));
-    expect(asked[0].rowNumber).toBe(7);
-    expect(result.rows).toMatchObject({ returned: 7, limit: 7, limitedBy: 'rowNumber', more: true });
+    const result = answer(await handlers.handleTableContents({ ddicEntityName: 'T001', rowNumber: 4 }));
+    expect(asked[0].rowNumber).toBe(4);
+    expect(result.result.values).toHaveLength(4);
+    expect(result.rows).toMatchObject({ returned: 4, limit: 4, limitedBy: 'rowNumber', more: true });
+  });
+
+  it('does not invent a further row when the table ended', async () => {
+    const { handlers } = handler(3);
+    const result = answer(await handlers.handleTableContents({ ddicEntityName: 'T001', rowNumber: 10 }));
+    expect(result.rows).toMatchObject({ returned: 3 });
+    expect(result.rows.more).toBeUndefined();
+  });
+
+  it('completes a bare condition into the SELECT the endpoint insists on', async () => {
+    const { handlers, asked } = handler();
+    const result = answer(await handlers.handleTableContents({
+      ddicEntityName: 'T001',
+      sqlQuery: "BUKRS = '1000'",
+      rowNumber: 5
+    }));
+    expect(asked[0].sql).toBe("SELECT * FROM T001 WHERE BUKRS = '1000'");
+    expect(result.sqlRewritten).toBe("SELECT * FROM T001 WHERE BUKRS = '1000'");
+  });
+
+  it('takes a leading WHERE off rather than writing it twice', async () => {
+    const { handlers, asked } = handler();
+    await handlers.handleTableContents({ ddicEntityName: 'T001', sqlQuery: "where bukrs = '1000'" });
+    expect(asked[0].sql).toBe("SELECT * FROM T001 WHERE bukrs = '1000'");
+  });
+
+  it('passes a SELECT written out in full through untouched', async () => {
+    const { handlers, asked } = handler();
+    const result = answer(await handlers.handleTableContents({
+      ddicEntityName: 'T001',
+      sqlQuery: 'SELECT bukrs FROM t001'
+    }));
+    expect(asked[0].sql).toBe('SELECT bukrs FROM t001');
+    expect(result.sqlRewritten).toBeUndefined();
   });
 });
