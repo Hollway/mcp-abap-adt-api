@@ -8,6 +8,87 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.4.0] — the rows an endpoint really returns, and the shape drawn
+
+### The two data preview endpoints count rows their own way
+
+`runQuery` and `tableContents` reach two different ADT endpoints, and neither
+of them behaves the way the tools said. Measured live, on a table every system
+has:
+
+- **`UP TO n ROWS` in the query text is ignored.** `SELECT … UP TO 3 ROWS` with
+  no `rowNumber` answered with a hundred rows; the same query with
+  `rowNumber: 3` answered with three. The only cap the backend honours is the
+  `rowNumber` query parameter — and the tool description used to advise the
+  opposite, so following it cost a hundred rows of every selected column.
+  A limit written into the text is now read out and applied as `rowNumber`.
+- **`tableContents` answers with `rowNumber + 1` rows.** It reads one row past
+  the cap to see whether anything follows, then hands that row over as if it
+  had been asked for: `rowNumber: 1` returned two rows, `4` returned five. The
+  extra row is now trimmed and spent on the answer it was fetched for.
+- **The filter of `tableContents` is not a `WHERE` clause.** A bare condition
+  is refused — "Only the SELECT statement is allowed" — although both the tool
+  and its parameter described the argument as a filter. A condition is now
+  completed into `SELECT * FROM <entity> WHERE <condition>`, and the answer
+  says what was actually sent (`sqlRewritten`).
+
+Both tools now answer with a `rows` block: how many rows came back, which cap
+produced that number (`rowNumber`, `upToRows` or the library's default
+hundred), and whether the result stopped at the cap. `more: true` means a row
+beyond the cap was really seen; `more: 'unknown'` means the result merely
+filled the cap exactly, which is all the freestyle endpoint behind `runQuery`
+can ever say.
+
+Two things that were measured and turned out to be fixed already, recorded
+because the opposite was believed for a year: two `runQuery` calls in one
+message no longer break the session, and a query naming a field that does not
+exist answers with SAP's own diagnosis and leaves the session alive. Both were
+cured by moving reads onto the stateless clone.
+
+### `abapGraph` draws, and says which packages it leans on
+
+- **`diagram: "mermaid" | "dot"`.** A shape is easier seen than read out of
+  sixty edges. The picture holds the heaviest edges and says what it left out;
+  entry points and orphans are marked, and a hub is marked only when more than
+  one object calls it — the hub list is the five most called, which in a small
+  package is everybody, and a picture where every box is marked says nothing.
+- **`resolveOutside`.** The targets outside the package were names, which is
+  not the answer to what a package depends on: the answer is the packages
+  those names live in. They are now looked up and grouped, at one quick search
+  per name, which is why it is asked for rather than assumed. A function module
+  never resolves this way — the repository search does not index modules by
+  their own name — and the answer says so instead of leaving it to look like a
+  missing object.
+
+### Two more profiles, and a server that admits which build it is
+
+| Profile | Tools | Tool list | What it serves |
+| --- | --- | --- | --- |
+| `graph` | 27 | 29k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
+| `atc` | 23 | 16k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
+
+Both are written tool by tool rather than by group, because the analysis tools
+sit in `codeAnalysis` next to completion and syntax checks, and the reads sit
+in `source` next to the writes.
+
+A token in `SAP_TOOLS_INCLUDE`, `SAP_TOOLS_EXCLUDE` or `SAP_READONLY_ALLOW`
+that matches neither a group nor a tool used to narrow the server in silence —
+a misspelled group serves fewer tools than intended, a misspelled exclusion
+hides nothing while looking like a fence. `healthcheck` now names them, and
+every preset is checked against the real tool list in a test.
+
+And the version the server announces on `initialize` was a literal: it said
+1.0.0 while the package was at 1.3.0, so the one place a client can ask which
+build it is talking to answered with a number nobody had shipped. It is read
+from the package now.
+
+### Checks
+
+995 tests in 56 suites, and 196 smoke checks against a live system — 17 of
+them new, covering the query tools, which had never had a live check at all.
+That absence is how an endpoint ignoring `UP TO` and another returning a row
+more than asked for both went unnoticed.
+
 ## [1.3.0] — the graph of a whole package
 
 ### `abapGraph`: a package, not an object at a time
