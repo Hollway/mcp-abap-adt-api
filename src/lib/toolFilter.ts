@@ -45,7 +45,29 @@ export const TOOL_PRESETS: Readonly<Record<string, readonly string[]>> = {
     'prettyPrinter', 'refactor', 'rename', 'messageClass'
   ],
   /** Dictionary work: tables, structures, data elements, domains, and the sources around them. */
-  ddic: ['health', 'auth', 'ddic', 'object', 'source', 'package', 'node', 'revision']
+  ddic: ['health', 'auth', 'ddic', 'object', 'source', 'package', 'node', 'revision'],
+  /**
+   * Understanding a system nobody documented: what calls what, what a change
+   * would break, the shape of a package. Named tool by tool rather than by
+   * group, because the analysis tools sit in codeAnalysis next to completion,
+   * fixes and syntax checks, and the reading tools sit in source next to the
+   * ones that write.
+   */
+  graph: [
+    'health', 'auth',
+    'searchObject', 'objectStructure', 'findObjectPath', 'objectTypes',
+    'getObjectSource', 'findInSource', 'sourceOutline', 'readSources',
+    'packageTree', 'searchInPackage', 'nodeContents', 'mainPrograms',
+    'classComponents', 'classIncludes', 'listFunctionGroup',
+    'usageReferences', 'whereUsedMethod', 'typeHierarchy', 'findDefinition',
+    'impactOf', 'abapPath', 'callsFrom', 'abapGraph'
+  ],
+  /** Quality checks and what it takes to read one: the ATC group, plus enough navigation to reach the object. */
+  atc: [
+    'health', 'auth', 'atc',
+    'searchObject', 'objectStructure', 'findObjectPath',
+    'getObjectSource', 'findInSource', 'packageTree', 'searchInPackage'
+  ]
 };
 
 /** The groups a preset name stands for; unknown names stand for nothing. */

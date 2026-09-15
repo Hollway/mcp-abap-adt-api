@@ -59,7 +59,7 @@ Clone it, build it, and point your client at `dist/main.js` with the environment
 | `SAP_READONLY_ALLOW` | Groups or tool names let through the read-only fence, e.g. `debugger` for a system that must not be developed on but does need debugging. Exclusion wins over an allowance, and these tools keep `readOnlyHint: false`. |
 | `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, enhancement, textElement, messageClass, package, rap, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
 | `SAP_TOOLS_INCLUDE` | The other way round: groups or tool names to serve, to the exclusion of everything else. Cheaper to write when a session needs ten tools rather than all of them. Exclusion still wins, and `healthcheck` is served either way. |
-| `SAP_TOOLS_PROFILE` | A ready-made include list: `min`, `ddic`, `read` or `dev`. See [the tool list is context](#the-tool-list-is-context). |
+| `SAP_TOOLS_PROFILE` | A ready-made include list: `min`, `ddic`, `graph`, `atc`, `read` or `dev`. See [the tool list is context](#the-tool-list-is-context). |
 | `SAP_MAX_RESPONSE_CHARS` | Cap on a single answer (default 200000). Over it, the answer is replaced by an envelope with the size and a preview. |
 | `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr - over stdio, stdout carries the protocol. Over HTTP, `info` adds one line per request carrying its id, the caller and the tool. |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `0` accepts a self-signed certificate (development only). |
@@ -70,17 +70,19 @@ The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `M
 
 ### The tool list is context
 
-Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **158,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
+Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **160,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
 
 | Profile | Tools | Tool list | What it serves |
 | --- | --- | --- | --- |
-| *(none)* | 180 | 158k | Everything. |
+| *(none)* | 180 | 160k | Everything. |
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
 | `ddic` | 40 | 47k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
-| `read` | 79 | 86k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
-| `dev` | 132 | 130k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+| `atc` | 23 | 16k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
+| `graph` | 27 | 29k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
+| `read` | 79 | 87k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
+| `dev` | 132 | 131k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
-`healthcheck` is served whatever the list says — a server that cannot say which system it is on is a worse trade than one extra tool — and it reports `toolsExposed`, `toolsTotal` and `toolListChars`, so the cost is a number rather than a guess. A tool left out is refused if called anyway, naming what is served instead.
+`healthcheck` is served whatever the list says — a server that cannot say which system it is on is a worse trade than one extra tool — and it reports `toolsExposed`, `toolsTotal` and `toolListChars`, so the cost is a number rather than a guess, and it names any token in these settings that matches no tool and no group, because a typo in an include list narrows the server in silence. A tool left out is refused if called anyway, naming what is served instead.
 
 A narrowed list is the only real lever: what is left is not padding. Every description here records something the backend does that its documentation does not, which is what keeps a model from calling `activateByName` and believing it.
 

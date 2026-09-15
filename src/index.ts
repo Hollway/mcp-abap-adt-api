@@ -50,7 +50,7 @@ import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
-import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars } from './lib/serverConfig';
+import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars, serverVersion } from './lib/serverConfig';
 import { refusalFor, annotationsFor, presetGroups, TOOL_PRESETS } from './lib/toolFilter';
 import type { ToolProfile } from './lib/toolFilter';
 
@@ -202,7 +202,7 @@ export class AbapAdtServer extends Server {
     super(
       {
         name: "mcp-abap-adt-api",
-        version: "1.0.0",
+        version: serverVersion(),
       },
       {
         capabilities: {
@@ -726,6 +726,26 @@ export class AbapAdtServer extends Server {
       }));
   }
 
+  /**
+   * Tokens in the narrowing settings that name neither a group nor a tool.
+   *
+   * A typo in SAP_TOOLS_INCLUDE is silent and expensive in both directions:
+   * a misspelled group serves fewer tools than intended, a misspelled name in
+   * SAP_TOOLS_EXCLUDE hides nothing while looking like a fence. The profile
+   * name itself is already checked on startup; these are the free-form lists
+   * beside it, and healthcheck is where someone looks when the tool they
+   * expected is not there.
+   */
+  private unknownTokens(): string[] {
+    const known = new Set<string>();
+    for (const group of this.toolGroups()) {
+      known.add(group.group);
+      for (const tool of group.tools) known.add(tool.name);
+    }
+    const used = [...servedTokens(), ...excludedTokens(), ...readOnlyAllowances()];
+    return [...new Set(used.filter(token => !known.has(token)))].sort();
+  }
+
   /** The active read-only / exclusion / allowance profile. */
   private profile(): ToolProfile {
     return {
@@ -788,6 +808,7 @@ export class AbapAdtServer extends Server {
     const allowed = [...readOnlyAllowances()];
     const served = [...servedTokens()];
     const exposed = this.exposedTools();
+    const unknown = this.unknownTokens();
     const profile = {
       readOnly: isReadOnly(),
       excluded: excluded.length ? excluded : undefined,
@@ -799,7 +820,13 @@ export class AbapAdtServer extends Server {
       // What the tool list costs the caller before a word is said. The whole
       // list is some 160,000 characters, and narrowing it is the only way to
       // spend less - so the number is worth stating rather than guessing at.
-      toolListChars: JSON.stringify(exposed).length
+      toolListChars: JSON.stringify(exposed).length,
+      ...(unknown.length
+        ? {
+          unknownTokens: unknown,
+          unknownTokensNote: 'These name no tool and no group of this server, so they narrow or hide nothing. Usually a typo in SAP_TOOLS_INCLUDE, SAP_TOOLS_EXCLUDE or SAP_READONLY_ALLOW.'
+        }
+        : {})
     };
     const session = {
       loggedin: this.adtClient.loggedin,
