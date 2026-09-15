@@ -165,6 +165,10 @@ const check = (label, condition, detail) => {
     clientInfo: { name: 'smoke', version: '0' }
   });
   check('initialize', !!init.result, init.error);
+  check('the server names the version of the package it was built from',
+    init.result && init.result.serverInfo
+    && init.result.serverInfo.version === require('../package.json').version,
+    init.result && init.result.serverInfo);
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
   const tools = (await send('tools/list', {})).result.tools;
@@ -899,6 +903,81 @@ const check = (label, condition, detail) => {
     }
   }
 
+  // The two data preview endpoints, which count rows differently and neither
+  // of them the way the SQL text asks. Everything here is a read of a table
+  // every system has.
+  const capped = await call('runQuery', { sqlQuery: 'SELECT mandt FROM t000', rowNumber: 3 });
+  check('runQuery returns exactly the rows asked for by rowNumber',
+    capped.payload.status === 'success'
+    && capped.payload.result.values.length <= 3
+    && capped.payload.rows.limitedBy === 'rowNumber',
+    capped.payload.rows);
+
+  const upTo = await call('runQuery', { sqlQuery: 'SELECT mandt FROM t000 UP TO 2 ROWS' });
+  check('an UP TO n ROWS the endpoint ignores is applied as the row cap instead',
+    upTo.payload.result.values.length <= 2
+    && upTo.payload.rows.limitedBy === 'upToRows'
+    && /ignores UP TO 2 ROWS/.test(String(upTo.payload.rows.limitNote)),
+    upTo.payload.rows);
+
+  const tableRows = await call('tableContents', { ddicEntityName: 'T000', rowNumber: 2 });
+  check('tableContents trims the extra row its endpoint adds past the cap',
+    tableRows.payload.status === 'success' && tableRows.payload.result.values.length === 2,
+    tableRows.payload.rows);
+  check('tableContents spends that extra row on saying whether there is more',
+    tableRows.payload.rows.more === true || tableRows.payload.rows.more === undefined,
+    tableRows.payload.rows);
+
+  const filtered = await call('tableContents', { ddicEntityName: 'T000', sqlQuery: "MANDT = '000'", rowNumber: 5 });
+  check('a bare condition is completed into the SELECT the endpoint insists on',
+    filtered.payload.status === 'success'
+    && /^SELECT \* FROM T000 WHERE/.test(String(filtered.payload.sqlRewritten)),
+    filtered.payload.sqlRewritten || filtered.payload);
+
+  const badField = await call('runQuery', { sqlQuery: 'SELECT nosuchfield FROM t000', rowNumber: 1 });
+  check('a query naming a field that does not exist answers with SAP\'s own diagnosis',
+    badField.isError === true && /NOSUCHFIELD/i.test(JSON.stringify(badField.payload)),
+    badField.payload);
+  const afterBadField = await call('runQuery', { sqlQuery: 'SELECT mandt FROM t000', rowNumber: 1 });
+  check('and does not take the session down with it',
+    afterBadField.payload.status === 'success', afterBadField.payload);
+
+  // The package graph, drawn and followed outwards.
+  const drawn = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false, diagram: 'mermaid'
+  });
+  check('abapGraph draws the package when a notation is asked for',
+    drawn.payload.diagram && drawn.payload.diagram.format === 'mermaid'
+    && /^flowchart LR/.test(drawn.payload.diagram.text),
+    drawn.payload.diagram);
+  check('the drawing holds only objects the graph actually has',
+    (drawn.payload.diagram.text.match(/\["([^"]+)"\]/g) || [])
+      .map(box => box.slice(2, -2))
+      .every(name => drawn.payload.nodes.some(node => node.name === name)),
+    drawn.payload.diagram.text);
+
+  const dot = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false, diagram: 'dot'
+  });
+  check('and draws the same graph as dot when that is what is wanted',
+    /^digraph /.test(String(dot.payload.diagram.text)) && dot.payload.diagram.text.trim().endsWith('}'),
+    dot.payload.diagram && dot.payload.diagram.text.slice(0, 80));
+
+  const badFormat = await call('abapGraph', { packageName: PACKAGE_NAME, diagram: 'svg' });
+  check('abapGraph refuses a notation it cannot draw',
+    badFormat.isError === true && /mermaid/.test(JSON.stringify(badFormat.payload)),
+    badFormat.payload);
+
+  const outward = await call('abapGraph', {
+    packageName: PACKAGE_NAME, maxObjects: 8, onlyCustom: false, resolveOutside: true, maxResolve: 5
+  });
+  check('abapGraph says which packages the targets outside this one live in',
+    Array.isArray(outward.payload.outsidePackages)
+    && outward.payload.outsidePackages.every(entry => typeof entry.package === 'string' && entry.objects.length > 0),
+    outward.payload.outsidePackages);
+  check('and leaves them as plain names when it was not asked',
+    drawn.payload.outsidePackages === undefined, drawn.payload.outsidePackages);
+
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
 
@@ -919,6 +998,22 @@ const check = (label, condition, detail) => {
   check('SAP_TOOLS_INCLUDE serves a single tool named on its own',
     named.length === 2 && named.some(tool => tool.name === 'impactOf'),
     named.map(tool => tool.name));
+
+  const graphProfile = await toolsListOf({ SAP_TOOLS_PROFILE: 'graph' });
+  check(`SAP_TOOLS_PROFILE=graph serves the analysis tools and nothing that writes (${graphProfile.length} tools)`,
+    ['abapGraph', 'callsFrom', 'impactOf', 'abapPath'].every(name => graphProfile.some(tool => tool.name === name))
+    && !graphProfile.some(tool => ['setObjectSource', 'deleteObject', 'activateSafe'].includes(tool.name)),
+    graphProfile.map(tool => tool.name));
+
+  const atcProfile = await toolsListOf({ SAP_TOOLS_PROFILE: 'atc' });
+  check(`SAP_TOOLS_PROFILE=atc serves the checks (${atcProfile.length} tools)`,
+    atcProfile.some(tool => tool.name === 'atcCheck') && !atcProfile.some(tool => tool.name === 'abapGraph'),
+    atcProfile.map(tool => tool.name));
+
+  const typo = await callOn({ SAP_TOOLS_INCLUDE: 'source,sources' }, 'healthcheck', {});
+  check('a token in the tool lists that matches nothing is named rather than silently ignored',
+    (typo.payload.profile.unknownTokens || []).includes('sources'),
+    typo.payload.profile);
 
   const refused = await callOn({ SAP_TOOLS_INCLUDE: 'impactOf' }, 'packageTree', { packageName: PACKAGE_NAME });
   check('a tool left out of the list is refused when called anyway',
