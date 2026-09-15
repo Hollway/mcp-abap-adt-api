@@ -50,7 +50,7 @@ import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
-import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars, serverVersion } from './lib/serverConfig';
+import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars, serverVersion, buildStamp, startedAt } from './lib/serverConfig';
 import { refusalFor, annotationsFor, presetGroups, TOOL_PRESETS } from './lib/toolFilter';
 import type { ToolProfile } from './lib/toolFilter';
 
@@ -77,7 +77,7 @@ config({ path: path.resolve(__dirname, '../.env') });
 
 const HEALTHCHECK_TOOL: ToolDefinition = {
   name: 'healthcheck',
-  description: 'Check ADT connectivity. Calls the backend and reports which SAP system this server talks to (url, client, language, user), the session state, the active tool profile and the round-trip latency; on failure it reports whether the session is dead.',
+  description: 'Check ADT connectivity. Calls the backend and reports which SAP system this server talks to (url, client, language, user), which build is answering (version, when it was compiled, when the process started - the way to tell a restart took effect, since several servers share one build directory), the session state, the active tool profile and the round-trip latency; on failure it reports whether the session is dead.',
   inputSchema: {
     type: 'object',
     properties: {}
@@ -793,6 +793,18 @@ export class AbapAdtServer extends Server {
    */
   private async healthcheck() {
     const owner = currentSession().owner;
+    // Which build is answering. The version is what was shipped; it is told
+    // to the client on initialize, where a caller cannot ask for it again.
+    // The other two are what a version cannot say - whether this process is
+    // the one the last compile and restart produced. Every build inside a
+    // working session carries the same number, and five servers share one
+    // dist, so a process left over from before the build answers with the
+    // same version a restarted one does.
+    const server = {
+      version: serverVersion(),
+      built: buildStamp(),
+      startedAt: startedAt()
+    };
     const system = {
       url: this.adtClient.baseUrl,
       client: this.adtClient.client || undefined,
@@ -842,6 +854,7 @@ export class AbapAdtServer extends Server {
       return {
         status: 'healthy',
         timestamp: new Date().toISOString(),
+        server,
         system,
         pooledSession: pooled,
         profile,
@@ -857,6 +870,7 @@ export class AbapAdtServer extends Server {
       return {
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
+        server,
         system,
         pooledSession: pooled,
         profile,

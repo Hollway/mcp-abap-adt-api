@@ -198,6 +198,13 @@ const check = (label, condition, detail) => {
   check('healthcheck reaches ADT', health.payload.status === 'healthy', health.payload);
   check('healthcheck names the system', !!(health.payload.system && health.payload.system.url));
   check('healthcheck reports latency', typeof health.payload.adt.latencyMs === 'number');
+  // Which build answered: the smoke drives the dist it was told to, and a
+  // stale one is worth catching here rather than in a puzzling result later.
+  const build = health.payload.server || {};
+  check('healthcheck names the build that answered',
+    build.version === require('../package.json').version, build);
+  check('healthcheck says when that build was compiled and when it started',
+    !Number.isNaN(Date.parse(build.built)) && !Number.isNaN(Date.parse(build.startedAt)), build);
 
   const login = await call('login');
   check('login returns a valid result', login.payload.status === 'success', login.payload);
