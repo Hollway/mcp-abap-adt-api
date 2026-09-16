@@ -125,20 +125,40 @@ export function splitInactive(
 /**
  * Package URI of an object, from the path the workbench shows for it.
  *
- * findObjectPath answers with the chain from the package down to the object,
- * and the package step is the DEVC entry - the object's own metadata does not
- * carry it. Returns undefined rather than throwing: this is a convenience, and
- * the caller still has a clear error for the case where it does not work.
+ * findObjectPath answers with the whole chain from the top of the package tree
+ * down to the object, and the object's own metadata does not carry its package.
+ * The chain is where it has to be read - but it is the step CLOSEST to the
+ * object, not the first one: ZCL_MM comes back as ZMM, ZMM_BASE, ZCL_MM, and
+ * taking the first DEVC named the superpackage ZMM. The object really sits in
+ * ZMM_BASE, so a package move was built against a package the object is not in
+ * and the backend refused the preview with "Package assignment of object
+ * changed since the refactoring started", and an activation that needed a
+ * parentUri was given the wrong one.
+ *
+ * Returns undefined rather than throwing: this is a convenience, and the caller
+ * still has a clear error for the case where it does not work.
  */
 export async function packageUriOf(
   client: ADTClient,
   objectUrl: string
 ): Promise<string | undefined> {
   try {
-    const path: any[] = await client.findObjectPath(objectUrl.split('#')[0]);
-    const devc = (path || []).find(step =>
-      `${step?.['adtcore:type'] || ''}`.toUpperCase().startsWith('DEVC'));
-    const name = devc?.['adtcore:name'];
+    const url = objectUrl.split('#')[0];
+    const path: any[] = await client.findObjectPath(url);
+    const isPackage = (step: any) =>
+      `${step?.['adtcore:type'] || ''}`.toUpperCase().startsWith('DEVC');
+
+    // The object's own step names its package in parentUri; the package steps
+    // are ordered from the root down, so the last one is the innermost.
+    const self = (path || []).find(step =>
+      `${step?.['adtcore:uri'] || ''}`.split('#')[0] === url && !isPackage(step));
+    const parentUri = `${self?.['adtcore:parentUri'] || ''}`;
+    const fromParent = parentUri
+      ? decodeURIComponent(parentUri.split('/').pop() || '')
+      : '';
+
+    const packages = (path || []).filter(isPackage);
+    const name = fromParent || packages[packages.length - 1]?.['adtcore:name'];
     if (!name) return undefined;
     return `/sap/bc/adt/packages/${encodeURIComponent(String(name).toLowerCase())}`;
   } catch {
