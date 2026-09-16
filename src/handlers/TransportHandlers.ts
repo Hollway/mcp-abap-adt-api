@@ -4,6 +4,7 @@ import { wrapAdtError, describeAdtError } from '../lib/adtError';
 import { lockRegistry } from '../lib/lockRegistry';
 import {
     normalizeRequest,
+    requestArgument,
     isObjectNameSafe,
     headerQuery,
     headerQueries,
@@ -624,7 +625,7 @@ export class TransportHandlers extends BaseHandler {
      */
     async handleTransportDetails(args: any): Promise<any> {
         const startTime = performance.now();
-        const number = String(args?.transportNumber || '').toUpperCase();
+        const number = String(requestArgument(args) || '').toUpperCase();
         try {
             let details: any = await this.readClient.transportDetails(number);
             let via = 'transportDetails';
@@ -710,7 +711,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, `Failed to read transport ${args?.transportNumber}`);
+            throw wrapAdtError(error, `Failed to read transport ${requestArgument(args)}`);
         }
     }
 
@@ -1084,7 +1085,7 @@ export class TransportHandlers extends BaseHandler {
         const startTime = performance.now();
         let number: string;
         try {
-            number = normalizeRequest(args?.transport);
+            number = normalizeRequest(requestArgument(args));
         } catch (error: any) {
             throw new McpError(ErrorCode.InvalidParams, error.message);
         }
@@ -1135,7 +1136,7 @@ export class TransportHandlers extends BaseHandler {
         const startTime = performance.now();
         let number: string;
         try {
-            number = normalizeRequest(args?.transport);
+            number = normalizeRequest(requestArgument(args));
         } catch (error: any) {
             throw new McpError(ErrorCode.InvalidParams, error.message);
         }
@@ -1273,7 +1274,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportDelete(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.transportDelete(args.transportNumber);
+            const result = await this.adtclient.transportDelete(requestArgument(args) as string);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -1295,7 +1296,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportRelease(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.transportRelease(args.transportNumber, args.ignoreLocks, args.IgnoreATC);
+            const result = await this.adtclient.transportRelease(requestArgument(args) as string, args.ignoreLocks, args.IgnoreATC);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -1317,7 +1318,7 @@ export class TransportHandlers extends BaseHandler {
     async handleTransportSetOwner(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.transportSetOwner(args.transportNumber, args.targetuser);
+            const result = await this.adtclient.transportSetOwner(requestArgument(args) as string, args.targetuser);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -1336,17 +1337,42 @@ export class TransportHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Add somebody to a request - which, in the transport system, means giving
+     * them a task of their own inside it.
+     *
+     * The raw answer is three tm: fields, and the number in them is the NEW
+     * task, not the request that was passed. Measured live: adding a user to
+     * EUDK9A3P84 answered with EUDK9A3P86, and the next call - which took the
+     * request number - then had two open tasks to choose between without
+     * anything having said a second one appeared.
+     */
     async handleTransportAddUser(args: any): Promise<any> {
+        const request = String(requestArgument(args) || '');
+        const user = String(args?.user || '').toUpperCase();
+        if (!request || !user) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Pass the request (transportNumber) and the user to add. The user gets a task of their own inside the request.'
+            );
+        }
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.transportAddUser(args.transportNumber, args.user);
+            const result: any = await this.adtclient.transportAddUser(request, user);
             this.trackRequest(startTime, true);
+            const task = result?.['tm:number'];
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            request,
+                            user,
+                            ...(task && task !== request ? { taskCreated: task } : {}),
+                            note: task && task !== request
+                                ? `${user} now has task ${task} in request ${request}. Write to the task, not to the request.`
+                                : `${user} was added to request ${request}.`,
                             result
                         })
                     }
@@ -1354,7 +1380,7 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to add user to transport');
+            throw wrapAdtError(error, `Failed to add ${user} to transport ${request}`);
         }
     }
 
@@ -1456,7 +1482,7 @@ export class TransportHandlers extends BaseHandler {
         let given: string;
         try {
             row = buildE071Row({ pgmid: args?.pgmid, object: args?.object, objName: args?.objName });
-            given = transportNumber(args?.transport);
+            given = transportNumber(requestArgument(args));
         } catch (error: any) {
             if (error instanceof TransportRegistrationError) {
                 throw new McpError(ErrorCode.InvalidParams, error.message);

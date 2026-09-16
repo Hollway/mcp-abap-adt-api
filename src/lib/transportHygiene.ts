@@ -28,6 +28,19 @@
  * dictionary, both in one read for the whole request.
  */
 
+/**
+ * The request number out of whatever the caller called it.
+ *
+ * The transport tools grew two names for one thing: transportNumber in the
+ * ones wrapping the library, transport in the ones written here. Live, a call
+ * to transportReadiness with transportNumber answered '"undefined" is not a
+ * transport request number', which reads as a complaint about the value rather
+ * than about the spelling. Every transport tool takes both now.
+ */
+export function requestArgument(args: any): unknown {
+  return args?.transport ?? args?.transportNumber ?? args?.transportRequest ?? args?.number;
+}
+
 /** Request and task numbers are ten characters of the transport layer alphabet. */
 export function normalizeRequest(input: unknown): string {
   const value = String(input ?? '').trim().toUpperCase();
