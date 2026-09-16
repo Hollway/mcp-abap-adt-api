@@ -186,7 +186,8 @@ const check = (label, condition, detail) => {
                       'compareRevisions', 'impactOf', 'abapPath', 'callsFrom', 'abapGraph', 'addMethod', 'deleteMethod', 'addAttribute',
                       'getFunctionModule', 'listFunctionGroup', 'createFunctionModule',
                       'runSnippet', 'callFunction', 'callMethod',
-                      'tableFields', 'tableIndexes', 'tableKeys']) {
+                      'tableFields', 'tableIndexes', 'tableKeys',
+                      'backgroundJobs', 'spoolRequests', 'applicationLog']) {
     check(`tool ${name} is exposed`, byName.has(name));
   }
   check('read-only tools are annotated as such',
@@ -1698,6 +1699,55 @@ const check = (label, condition, detail) => {
   check('transportAddUser asks who is to be added, and says they get a task',
     halfAddUser.isError === true && /task/.test(JSON.stringify(halfAddUser.payload)),
     halfAddUser.payload);
+
+  // ---------------------------------------------------------------------
+  // What an operator reads, out of the tables the transactions read: SM37,
+  // SP01, SLG1. No ADT endpoint serves any of them, and the data preview
+  // executes nothing - so these work where nothing may run.
+  // ---------------------------------------------------------------------
+
+  const jobs = await call('backgroundJobs', { maxResults: 5 });
+  check('backgroundJobs answers the jobs with their status in words',
+    jobs.payload.status === 'success'
+    && Array.isArray(jobs.payload.jobs)
+    && jobs.payload.jobs.every(job => !!job.name && !!job.statusMeaning),
+    jobs.payload.jobs && jobs.payload.jobs.slice(0, 2));
+  check('and the statement it ran fits what the data preview accepts',
+    typeof jobs.payload.query === 'string' && jobs.payload.query.length <= 255,
+    jobs.payload.query && jobs.payload.query.length);
+
+  const badStatus = await call('backgroundJobs', { status: 'kaput' });
+  check('backgroundJobs refuses a status the table has no letter for',
+    badStatus.isError === true && /is not a job status/.test(JSON.stringify(badStatus.payload)),
+    badStatus.payload);
+
+  const injected = await call('backgroundJobs', { jobName: "X' OR '1'='1" });
+  check('a filter value that would carry syntax into the statement is refused',
+    injected.isError === true && /letters, digits/.test(JSON.stringify(injected.payload)),
+    injected.payload);
+
+  const spool = await call('spoolRequests', { maxResults: 3 });
+  check('spoolRequests answers the requests, with the creation time named as the UTC it is',
+    spool.payload.status === 'success'
+    && Array.isArray(spool.payload.requests)
+    && spool.payload.requests.every(row => !!row.id && row.created === undefined),
+    spool.payload.requests && spool.payload.requests.slice(0, 2));
+
+  const logs = await call('applicationLog', { maxResults: 3 });
+  check('applicationLog answers the headers with the message counts the header holds',
+    logs.payload.status === 'success'
+    && Array.isArray(logs.payload.logs)
+    && logs.payload.logs.every(row => !!row.logNumber && !!row.object)
+    && (logs.payload.logs.length === 0 || logs.payload.logs.some(row => !!row.messages)),
+    logs.payload.logs && logs.payload.logs.slice(0, 2));
+  check('and says plainly that the message texts are not readable this way',
+    /BALDAT/.test(String(logs.payload.note || '')),
+    logs.payload.note);
+
+  const badDate = await call('applicationLog', { since: 'yesterday' });
+  check('applicationLog refuses a date that is not one',
+    badDate.isError === true && /YYYYMMDD/.test(JSON.stringify(badDate.payload)),
+    badDate.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);

@@ -11,6 +11,7 @@ import { ADTClient, session_types } from "abap-adt-api";
 import path from 'path';
 import { AuthHandlers } from './handlers/AuthHandlers.js';
 import { TransportHandlers } from './handlers/TransportHandlers.js';
+import { OperationsHandlers } from './handlers/OperationsHandlers.js';
 import { ObjectHandlers } from './handlers/ObjectHandlers.js';
 import { ClassHandlers } from './handlers/ClassHandlers.js';
 import { CodeAnalysisHandlers } from './handlers/CodeAnalysisHandlers.js';
@@ -188,6 +189,7 @@ export class AbapAdtServer extends Server {
     private snippetHandlers: SnippetHandlers;
     private callHandlers: CallHandlers;
     private tableHandlers: TableHandlers;
+    private operationsHandlers: OperationsHandlers;
 
   /**
    * @param client the session to serve this request, when one is supplied.
@@ -272,6 +274,7 @@ export class AbapAdtServer extends Server {
     this.snippetHandlers = new SnippetHandlers(this.adtClient);
     this.callHandlers = new CallHandlers(this.adtClient);
     this.tableHandlers = new TableHandlers(this.adtClient);
+    this.operationsHandlers = new OperationsHandlers(this.adtClient);
 
 
         // Setup tool handlers
@@ -564,6 +567,11 @@ export class AbapAdtServer extends Server {
             case 'runQuery':
                 result = await this.queryHandlers.handle(toolName, args);
                 break;
+            case 'backgroundJobs':
+            case 'spoolRequests':
+            case 'applicationLog':
+                result = await this.operationsHandlers.handle(toolName, args);
+                break;
             case 'feeds':
             case 'dumps':
                 result = await this.feedHandlers.handle(toolName, args);
@@ -706,6 +714,7 @@ export class AbapAdtServer extends Server {
       { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.callHandlers.getTools() },
       { group: 'ddic', tools: this.tableHandlers.getTools() },
+      { group: 'operations', tools: this.operationsHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
   }
