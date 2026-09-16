@@ -6,6 +6,7 @@ import { AtcProposal } from 'abap-adt-api';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { objectUrlFor } from '../lib/packageWalk';
 import { describeAdtError } from '../lib/adtError';
+import { requireShape } from '../lib/argShape';
 import { isVariantNameSafe, variantQuery, variantNames, judgeVariant } from '../lib/atcVariants';
 import { documentText } from '../lib/htmlText';
 import { filterUsers } from '../lib/userList';
@@ -465,10 +466,31 @@ export class AtcHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Ask for a finding to be exempted.
+     *
+     * The library destructures the proposal down two levels - finding, and
+     * restriction.rangeOfFindings - so anything that is not the object
+     * atcExemptProposal answered with came back as "Cannot read properties of
+     * undefined (reading 'rangeOfFindings')", which reads as a backend fault.
+     */
     async handleAtcRequestExemption(args: { proposal: AtcProposal }): Promise<any> {
+        const proposal: any = this.parseObjectArg(args.proposal, 'proposal');
+        requireShape(proposal, {
+            parameter: 'proposal',
+            fields: ['finding', 'restriction'],
+            producedBy: 'atcExemptProposal'
+        });
+        if (!proposal.restriction?.rangeOfFindings) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'The proposal has no restriction.rangeOfFindings, which is what the exemption request is built from. ' +
+                'Pass the proposal atcExemptProposal answered with, unchanged.'
+            );
+        }
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.atcRequestExemption(this.parseObjectArg(args.proposal, 'proposal'));
+            const result = await this.adtclient.atcRequestExemption(proposal);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -552,10 +574,22 @@ export class AtcHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Put a finding on somebody's desk. Same collection as atcContactUri, and
+     * the same 404 on a system that does not run the approval workflow.
+     */
     async handleAtcChangeContact(args: { itemUri: string, userId: string }): Promise<any> {
+        const itemUri = String(args?.itemUri || '').trim();
+        const userId = String(args?.userId || '').trim();
+        if (!itemUri || !userId) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Pass itemUri - the item atcContactUri answered with - and userId, the user to make responsible.'
+            );
+        }
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.atcChangeContact(args.itemUri, args.userId);
+            const result = await this.adtclient.atcChangeContact(itemUri, userId);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -570,7 +604,12 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to change ATC contact');
+            throw wrapAdtError(
+                error,
+                describeAdtError(error).status === 404
+                    ? 'ATC contacts are not served by this system: /sap/bc/adt/atc/items answers 404, which is what a system without the exemption approval workflow answers for every item'
+                    : `Failed to make ${userId} the ATC contact for ${itemUri}`
+            );
         }
     }
 
