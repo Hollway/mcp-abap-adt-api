@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 183 tools, read-only guardrails and 1,097 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 186 tools, read-only guardrails and 1,176 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -70,17 +70,17 @@ The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `M
 
 ### The tool list is context
 
-Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **176,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
+Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **180,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
 
 | Profile | Tools | Tool list | What it serves |
 | --- | --- | --- | --- |
-| *(none)* | 183 | 176k | Everything. |
+| *(none)* | 186 | 180k | Everything. |
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
 | `ddic` | 40 | 49k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
-| `atc` | 23 | 16k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
+| `atc` | 23 | 17k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
 | `graph` | 27 | 33k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
-| `read` | 79 | 98k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
-| `dev` | 135 | 147k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+| `read` | 82 | 102k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
+| `dev` | 138 | 150k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
 `healthcheck` also says which build answered - the version, when it was
 compiled and when the process started - because several servers share one build
