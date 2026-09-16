@@ -5,13 +5,14 @@ import { lockRegistry } from '../lib/lockRegistry';
 import { sourceCache } from '../lib/sourceCache';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
+import { takeLock } from '../lib/lockCycle';
 
 export class ObjectDeletionHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'deleteObject',
-        description: 'Delete an object. It needs an edit lock (this server passes the handle it holds, so lock the object first) and, outside $TMP, a transport request. Deleting does not release the lock - the backend leaves it, pointing at an object that no longer exists - so this releases it and forgets it, and drops the cached source with it. Not undoable from here: the object is gone and only a transport of the deletion travels on.',
+        description: 'Delete an object. It takes the edit lock itself when this server is not already holding one, and outside $TMP it needs a transport request. Deleting does not release the lock - the backend leaves it, pointing at an object that no longer exists - so this releases it and forgets it, and drops the cached source with it. Not undoable from here: the object is gone and only a transport of the deletion travels on.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -21,7 +22,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
             },
             lockHandle: { 
               type: 'string',
-              description: 'Lock handle for the object; omit to use the one this server recorded for it (see listLocks)'
+              description: 'Lock handle for the object; omit to use the one this server recorded for it (see listLocks), or to have the lock taken here'
             },
             transport: { 
               type: 'string',
@@ -48,13 +49,24 @@ export class ObjectDeletionHandlers extends BaseHandler {
     // the handle again when the server is holding it is friction, and the
     // backend's answer to a missing handle - "user is already processing this
     // object" - reads like somebody else has it open.
-    const held = lockRegistry.forUrl(args?.objectUrl);
-    const lockHandle = args?.lockHandle || held?.lockHandle;
+    const objectUrl = String(args?.objectUrl || '').trim();
+    if (!objectUrl) {
+      throw new McpError(ErrorCode.InvalidParams, 'Pass objectUrl - the ADT URL of the object to delete.');
+    }
+    const held = lockRegistry.forUrl(objectUrl);
+    let lockHandle = args?.lockHandle || held?.lockHandle;
+    // Nothing held, nothing passed: take the lock rather than refuse. Demanding
+    // a separate lock call first was friction with no safety in it - the caller
+    // has already asked for the object to be deleted - and it made the obvious
+    // cleanup after a createAndWrite fail, because that call releases its lock
+    // when it is done.
     if (!lockHandle) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `No lockHandle given and none recorded for ${args?.objectUrl}. Call lock on that URL first.`
-      );
+      try {
+        const taken = await takeLock(this.adtclient, objectUrl, 'MODIFY', (t, ok) => this.trackRequest(t, ok));
+        lockHandle = taken.lockHandle;
+      } catch (error: any) {
+        throw wrapAdtError(error, `Could not lock ${objectUrl} for deletion`);
+      }
     }
 
     const startTime = performance.now();
@@ -62,7 +74,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
       // dropSession/logout reset the client to stateless; deletion requires a stateful session
       this.adtclient.stateful = session_types.stateful;
       const result = await this.adtclient.deleteObject(
-        args.objectUrl,
+        objectUrl,
         lockHandle,
         args.transport
       );
@@ -73,16 +85,16 @@ export class ObjectDeletionHandlers extends BaseHandler {
       let lockReleased = false;
       let lockError: string | undefined;
       try {
-        await this.adtclient.unLock(args.objectUrl, lockHandle);
+        await this.adtclient.unLock(objectUrl, lockHandle);
         lockReleased = true;
       } catch (unlockError: any) {
         lockError = describeAdtError(unlockError).error;
       }
-      lockRegistry.forget(args.objectUrl);
+      lockRegistry.forget(objectUrl);
       // The source cache would otherwise still hold the text of the object -
       // and a syntax check reusing that text reports an object that no longer
       // exists as fine.
-      const sourceCacheDropped = sourceCache.forgetUnder(args.objectUrl);
+      const sourceCacheDropped = sourceCache.forgetUnder(objectUrl);
 
       this.trackRequest(startTime, true);
       return {
