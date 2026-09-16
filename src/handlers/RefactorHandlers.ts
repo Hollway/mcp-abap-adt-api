@@ -175,11 +175,10 @@ export class RefactorHandlers extends BaseHandler {
         };
 
         const startTime = performance.now();
-        // abap-adt-api prints the refactoring to stdout here, and stdout is
-        // the MCP protocol stream: an unguarded call would corrupt the
-        // conversation with the client. Send it to stderr for the duration.
-        const stdoutLog = console.log;
-        console.log = (...parts: unknown[]) => console.error(...parts);
+        // abap-adt-api prints the refactoring with a console.log here, which
+        // over stdio would land in the protocol stream. Nothing is swapped per
+        // call any more: lib/stdoutGuard takes stdout away from console for the
+        // whole process at startup, for this dependency and any other.
         try {
             const preview = await this.readClient.changePackagePreview(
                 refactoring,
@@ -205,8 +204,6 @@ export class RefactorHandlers extends BaseHandler {
         } catch (error: any) {
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, `Failed to preview moving ${name} to ${newPackage}`);
-        } finally {
-            console.log = stdoutLog;
         }
     }
 

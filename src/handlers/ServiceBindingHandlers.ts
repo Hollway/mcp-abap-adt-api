@@ -1,7 +1,7 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { requireShape } from '../lib/argShape';
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, isMissingCollection } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, ServiceBinding } from "abap-adt-api";
 
@@ -96,7 +96,15 @@ export class ServiceBindingHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to publish service binding');
+            // The publish jobs collection is absent on a system that serves no
+            // business services at all, and its 404 says nothing about the
+            // binding that was named.
+            throw wrapAdtError(
+                error,
+                isMissingCollection(error)
+                    ? 'OData publishing is not served by this system: /sap/bc/adt/businessservices/odatav2/publishjobs does not exist, which is not the same as this binding being unknown'
+                    : `Failed to publish the service binding ${args?.name || ''}`.trim()
+            );
         }
     }
 
@@ -118,7 +126,12 @@ export class ServiceBindingHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to unpublish service binding');
+            throw wrapAdtError(
+                error,
+                isMissingCollection(error)
+                    ? 'OData publishing is not served by this system: /sap/bc/adt/businessservices/odatav2/unpublishjobs does not exist, which is not the same as this binding being unknown'
+                    : `Failed to unpublish the service binding ${args?.name || ''}`.trim()
+            );
         }
     }
 

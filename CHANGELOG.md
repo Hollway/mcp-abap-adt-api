@@ -8,6 +8,147 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.7.0] — the reads nothing watched, the writes nothing had run, and what an operator reads
+
+The smoke run was measured against the tool list again: of 183 tools it
+reached 104, and 79 it had never called. Twenty-six of those only read —
+among them every tool repaired in 1.6.0, so those repairs had nothing
+watching them. The rest write, which a read-only smoke run cannot exercise
+at all, so they were driven by hand against a live system instead: a
+transport of my own, created and deleted; trace configuration on my own user,
+created and deleted; a throwaway class in `$TMP` for the refactorings that
+rewrite source; and the refusal paths of abapGit, the ATC exemption workflow
+and OData publishing, none of which this system runs.
+
+Six defects came out of the reading run and four out of the writing one. Then
+three new tools for what an operator looks at, which had no answer here at
+all.
+
+### The package an object is in
+
+`changePackagePreview` was refused by the backend with *"Package assignment of
+object ZCL_APP changed since the refactoring started"* — a message that sounds
+like a race and is not one. The package of an object was read as the **first**
+`DEVC` step of its workbench path, and on a nested tree that is the
+superpackage: a class in `ZAPP_BASE` under `ZAPP` came back as `ZAPP`, so the
+refactoring was built against a package the object is not in. It is read from
+the object's own step now, which names its package in `parentUri`. The same
+lookup fills in the `parentUri` an activation needs, which was getting the
+same wrong package.
+
+### The type name a caller writes by hand
+
+`atcCheck` with `objectType: 'CLAS'` answered *"atcCheck does not know the ADT
+URI of a CLAS"*. The URL map is keyed by the full ADT type — `CLAS/OC` — which
+is what a repository node carries, and not what someone naming an object
+writes. The bare transport types are completed in one place now, so every tool
+that resolves a URL from a name takes both.
+
+### A session that was never there
+
+`dropSession` failed every time it was the first call. The library sends its
+drop request without the auto-login the normal path has, and reads run on the
+stateless clone, so the stateful client had usually never logged in and the
+backend answered 401 for a session that did not exist. It drops only when
+there is something to drop, treats an unauthenticated answer as the state it
+wanted to reach, and clears its own bookkeeping either way: the lock handles
+taken in that session died with it, and the registry went on offering them to
+the next write.
+
+### The lock a deletion needs
+
+`deleteObject` refused unless a lock was already held. That is friction with
+no safety in it — the caller has just asked for the object to be deleted — and
+it broke the obvious cleanup after `createAndWrite`, which releases its lock
+when it is done: deleting the class this server had created a minute earlier
+failed with *"no lockHandle given and none recorded"*. It takes the lock
+itself now.
+
+### Findings that could not be followed
+
+An ATC finding carries the id the exemption tools take — the backend calls it
+`quickfixInfo`, `atcExemptProposal` calls it `markerId` — and the report
+dropped it, so nothing `atcCheck` answered could be fed to the exemption
+chain. It is reported when the system gives one.
+
+`atcRequestExemption` answered *"Cannot read properties of undefined (reading
+'rangeOfFindings')"*: the library destructures the proposal two levels down.
+The shape is checked first now, the way the repository and refactoring
+parameters already are.
+
+`atcContactUri`, `atcChangeContact` and both service binding publishers
+answered 404 for collections this system does not serve at all — the exemption
+approval workflow, and OData publishing. Each 404 read as a fact about the
+finding or the binding that was named. They say which of the two it is.
+
+### Two names for one transport
+
+The transport family had grown two spellings of one parameter:
+`transportNumber` in the tools wrapping the library, `transport` in the ones
+written here. A call to `transportReadiness` with the other name answered
+*'"undefined" is not a transport request number'* — a complaint about the
+value for what is a difference in spelling. Every transport tool takes both.
+
+`transportAddUser` answers with three `tm:` fields whose number is the **new
+task**, not the request that was passed: adding a user to a request answered
+with a task number, and the next call then found two open tasks to choose
+between with nothing having said a second one had appeared. The answer says so
+now.
+
+### stdout belongs to the protocol
+
+`abap-adt-api` prints its change-package refactoring with a plain
+`console.log`, and the workaround was a swap of `console.log` around that one
+call. Over stdio, stdout carries the protocol, and any other dependency
+printing anywhere would corrupt it the same way. Everything `console` prints
+goes to stderr for the whole process now.
+
+### What an operator reads: `backgroundJobs`, `spoolRequests`, `applicationLog`
+
+SM37, SP01 and SLG1 have no ADT endpoint. Their tables do, and the data
+preview reads a table without executing anything — so these three work on a
+system where nothing may run, and need no developer key. `backgroundJobs`
+answers the jobs with their status in words and, with `withSteps`, the program
+and variant of each step and the spool request it produced; `spoolRequests`
+answers the requests, their owner, device and whether they are complete;
+`applicationLog` answers the log headers with the message counts each one
+holds.
+
+Three things the live run settled, all of them in the answers rather than in
+the code:
+
+- a job start time arrives as six digits and its date as an ISO string at UTC
+  midnight, so both are read as what they are rather than through `String()`;
+- `TSP01` records the spool stamp in **UTC** while a job time is local — on a
+  system three hours ahead, the spool a job had just produced read three hours
+  older than the job, so the field is called `createdUtc` rather than converted
+  with a guess at the time zone;
+- the message **text** of an application log cannot be read this way at all:
+  `BALDAT` holds it as a compressed cluster rather than as rows. The headers
+  carry the counts and say where the text is not.
+
+Filters are checked before they reach the statement, both ways round: a name
+that is not a name is refused, and so is a SELECT that would exceed the 255
+characters the data preview accepts.
+
+### What the smoke run now watches
+
+Twenty-five checks for the reads it had never called, four for the refusals of
+the writing tools — the ones that never leave the process — and eight for the
+three new tools. 271 checks before, 311 now; 1,097 tests before, 1,176 now.
+
+`transportInfo` is checked either way round on purpose: a standard SAP class
+answers it with the backend's own refusal, because recording a change to an
+SAP object needs a modification licence, and that is the tool working while an
+empty success would not be.
+
+### Left undone, deliberately
+
+`transportRelease` can only be verified by releasing a real request into the
+landscape, which is irreversible; it stays unverified rather than tested on
+something that cannot be taken back. The debugger — thirteen tools — needs a
+session sitting on a breakpoint, which is a person at a keyboard, not a script.
+
 ## [1.6.0] — the tools nobody had ever called, and the questions before a release
 
 Ninety-three of the 180 tools had never been reached by a smoke run. Forty-six

@@ -195,7 +195,7 @@ describe('the text pool fallback', () => {
             type: 'text', text: JSON.stringify({
               status: registered ? 'success' : 'error',
               registered,
-              task: 'EUDK900124',
+              task: 'DEVK900124',
               hint: transport.hint || (registered ? 'in the task.' : 'The object is locked in another request.')
             })
           }]
@@ -204,7 +204,7 @@ describe('the text pool fallback', () => {
       registrationState: async () => ({
         row: {},
         local: transport.local === true,
-        devclass: transport.local === true ? '$TMP' : 'ZMM',
+        devclass: transport.local === true ? '$TMP' : 'ZAPP',
         openRequests: transport.openRequests || []
       })
     };
@@ -261,10 +261,10 @@ describe('the text pool fallback', () => {
   // object into the request itself or the texts never leave this system.
   it('registers the object in the request it was given', async () => {
     const { handlers, registrations } = fallbackHarness('READ~#~0~#~0\nINSERT~#~0~#~1');
-    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'DEVK900123' }));
 
     expect(registrations).toEqual([{
-      pgmid: 'R3TR', object: 'PROG', objName: PROGRAM, transport: 'EUDK900123'
+      pgmid: 'R3TR', object: 'PROG', objName: PROGRAM, transport: 'DEVK900123'
     }]);
     expect(result.status).toBe('success');
     expect(result.registered).toBe(true);
@@ -275,14 +275,14 @@ describe('the text pool fallback', () => {
   // refused registration is an error to report, not one to hide.
   it('reports a refused registration without pretending the texts are unwritten', async () => {
     const { handlers } = fallbackHarness(
-      'READ~#~0~#~0\nINSERT~#~0~#~1', {}, { registered: false, hint: 'The object is locked in EUDK900999.' }
+      'READ~#~0~#~0\nINSERT~#~0~#~1', {}, { registered: false, hint: 'The object is locked in DEVK900999.' }
     );
-    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'EUDK900123' }));
+    const result = answer(await handlers.handleSetTextElements({ ...ARGS, transport: 'DEVK900123' }));
 
     expect(result.written).toBe(true);
     expect(result.registered).toBe(false);
     expect(result.status).toBe('error');
-    expect(result.notes.join(' ')).toMatch(/did not get into EUDK900123/);
+    expect(result.notes.join(' ')).toMatch(/did not get into DEVK900123/);
   });
 
   // Measured in a live task: the request held the includes of a program and not

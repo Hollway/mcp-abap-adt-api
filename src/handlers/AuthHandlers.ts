@@ -1,6 +1,8 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { wrapAdtError, isSessionFailure, describeAdtError } from '../lib/adtError';
+import { lockRegistry } from '../lib/lockRegistry';
+import { sourceCache } from '../lib/sourceCache';
 import type { ToolDefinition } from '../types/tools.js';
 
 export class AuthHandlers extends BaseHandler {
@@ -24,7 +26,7 @@ export class AuthHandlers extends BaseHandler {
       },
       {
         name: 'dropSession',
-        description: 'Clear the local session cache (releases held locks server-side; the next call logs on again).',
+        description: 'End the stateful session and forget what died with it: the locks this server recorded and the sources it cached. Releases server-side locks; the next call logs on again. With no session open it is a local cleanup and says so.',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -95,22 +97,64 @@ export class AuthHandlers extends BaseHandler {
     }
   }
 
+  /**
+   * Drop the stateful session, and forget what died with it.
+   *
+   * Two things were wrong here. The library's dropSession sends its request
+   * without the auto-login the normal path has (AdtHTTP.dropSession calls
+   * _request directly), so on a client that never logged in - the usual case,
+   * because every read runs on the stateless clone - the call came back 401
+   * and the tool reported failure for a session that did not exist.
+   *
+   * And dropping the session invalidates every lock handle taken in it, while
+   * the registry went on offering them to the next write. Whatever happens on
+   * the wire, the local bookkeeping is cleared: that is what the tool promises.
+   */
   private async handleDropSession(args: any) {
     const startTime = performance.now();
+    const locks = lockRegistry.count();
+    const sources = sourceCache.count();
+    const hadSession = this.adtclient.loggedin;
+    let dropped = false;
+    let note = 'No session was open; nothing to drop on the system.';
+
     try {
-      await this.adtclient.dropSession();
-      this.trackRequest(startTime, true);
-      return {
-        content: [
-          {
-            type: 'text', 
-            text: JSON.stringify({ status: 'success', loggedin: this.adtclient.loggedin, note: 'Session dropped; server-side locks are released and the next call logs on again.' })
-          }
-        ]
-      };
+      if (hadSession) {
+        await this.adtclient.dropSession();
+        dropped = true;
+        note = 'Session dropped; server-side locks are released and the next call logs on again.';
+      }
     } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Drop session failed');
+      // A session that cannot be dropped because it is already gone is the
+      // state this tool exists to reach - and an unauthenticated answer is
+      // exactly what a dead session gives, whatever the credentials are worth.
+      // Anything else is a real failure.
+      const status = describeAdtError(error).status;
+      if (status !== 401 && !isSessionFailure(error)) {
+        this.trackRequest(startTime, false);
+        throw wrapAdtError(error, 'Drop session failed');
+      }
+      note = 'The session was already gone on the system; local state cleared anyway.';
+    } finally {
+      lockRegistry.clear();
+      sourceCache.clear();
     }
+
+    this.trackRequest(startTime, true);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            status: 'success',
+            dropped,
+            loggedin: this.adtclient.loggedin,
+            locksForgotten: locks,
+            sourcesForgotten: sources,
+            note
+          })
+        }
+      ]
+    };
   }
 }

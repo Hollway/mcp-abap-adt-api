@@ -19,6 +19,8 @@ export interface SourceCache {
   has(url: string): boolean;
   delete(url: string): void;
   forgetUnder(objectUrl: string): number;
+  /** How many entries are held - what dropSession reports having forgotten. */
+  count(): number;
   clear(): void;
 }
 
@@ -70,6 +72,9 @@ export function createSourceCache(): SourceCache {
       }
       return dropped;
     },
+    count(): number {
+      return cache.size;
+    },
     clear(): void {
       cache.clear();
     }
@@ -83,5 +88,6 @@ export const sourceCache: SourceCache = {
   has: url => currentSession().sources.has(url),
   delete: url => currentSession().sources.delete(url),
   forgetUnder: objectUrl => currentSession().sources.forgetUnder(objectUrl),
+  count: () => currentSession().sources.count(),
   clear: () => currentSession().sources.clear()
 };

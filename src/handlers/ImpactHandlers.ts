@@ -181,7 +181,7 @@ export class ImpactHandlers extends BaseHandler {
           properties: {
             packageName: {
               type: 'string',
-              description: 'Package to graph, e.g. ZMM_UTILS.'
+              description: 'Package to graph, e.g. ZAPP_UTILS.'
             },
             maxDepth: {
               type: 'number',

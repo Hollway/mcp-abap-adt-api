@@ -35,12 +35,14 @@ export const TOOL_PRESETS: Readonly<Record<string, readonly string[]>> = {
   /** Everything that only reads: the above plus the dictionary, history and analysis. */
   read: [
     'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
-    'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement'
+    'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement',
+    'operations'
   ],
   /** Reading plus writing, activation, transports and tests - no debugger, traces, ATC, git or RAP. */
   dev: [
     'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
     'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement',
+    'operations',
     'lock', 'activation', 'registration', 'deletion', 'transport', 'unitTest',
     'prettyPrinter', 'refactor', 'rename', 'messageClass'
   ],
