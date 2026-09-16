@@ -1483,6 +1483,192 @@ const check = (label, condition, detail) => {
     || /abapGit is not installed|Failed to get external repo info/.test(JSON.stringify(externalRepo.payload)),
     externalRepo.payload);
 
+  // ---------------------------------------------------------------------
+  // The reads nothing used to call.
+  //
+  // A measurement over this script found 26 read-only tools it never touched,
+  // among them every one repaired in the session before this: repairs that
+  // nothing would notice losing again. These are their checks. All of them
+  // read, and the ones that pass a made-up argument check the refusal, which
+  // is the part that used to be a crash inside the library.
+  // ---------------------------------------------------------------------
+
+  const coreDiscovery = await call('adtCoreDiscovery');
+  check('adtCoreDiscovery lists the core collections',
+    coreDiscovery.payload.status === 'success' && Array.isArray(coreDiscovery.payload.discovery)
+    && coreDiscovery.payload.discovery.length > 0,
+    coreDiscovery.payload);
+
+  const ticket = await call('reentranceTicket');
+  check('reentranceTicket answers a ticket',
+    ticket.payload.status === 'success' && typeof ticket.payload.ticket === 'string'
+    && ticket.payload.ticket.length > 0,
+    ticket.payload.status);
+
+  const hasConfig = await call('hasTransportConfig');
+  check('hasTransportConfig answers yes or no, not undefined',
+    hasConfig.payload.status === 'success' && typeof hasConfig.payload.hasConfig === 'boolean',
+    hasConfig.payload);
+
+  const organizerConfigs = await call('transportConfigurations');
+  check('transportConfigurations answers a list',
+    organizerConfigs.payload.status === 'success' && Array.isArray(organizerConfigs.payload.configurations),
+    organizerConfigs.payload);
+  const configLink = (organizerConfigs.payload.configurations || [])
+    .map(entry => entry && (entry.link || entry.uri || entry.url))
+    .find(Boolean);
+  if (configLink) {
+    const configuration = await call('getTransportConfiguration', { url: configLink });
+    check('getTransportConfiguration reads the configuration transportConfigurations named',
+      configuration.payload.status === 'success', configuration.payload);
+  } else {
+    const noConfiguration = await call('getTransportConfiguration', {
+      url: '/sap/bc/adt/cts/transportrequests/searchconfiguration/configurations/zzz_no_such'
+    });
+    check('getTransportConfiguration says where the address comes from when the system has none',
+      noConfiguration.isError === true && /transportConfigurations/.test(JSON.stringify(noConfiguration.payload)),
+      noConfiguration.payload);
+  }
+
+  // A standard SAP class answers this with a refusal, and the refusal is the
+  // backend's own: recording a change to an SAP object needs a modification
+  // licence, and without one the system says so instead of describing the
+  // change. Either answer is the tool working; an empty success is not.
+  const transportInfo = await call('transportInfo', { objSourceUrl: CLASS_URL, operation: 'I' });
+  check(`transportInfo answers for ${CLASS_NAME} about ${CLASS_NAME}`,
+    transportInfo.isError === true
+      ? new RegExp(CLASS_NAME, 'i').test(JSON.stringify(transportInfo.payload))
+      : String((transportInfo.payload.transportInfo || {}).OBJECTNAME || '').toUpperCase() === CLASS_NAME,
+    transportInfo.payload);
+
+  const reference = await call('transportReference', {
+    pgmid: 'R3TR', obj_wbtype: 'CLAS', obj_name: CLASS_NAME
+  });
+  check('transportReference maps a transport entry back to an ADT address',
+    reference.payload.status === 'success' && typeof reference.payload.reference === 'string'
+    && reference.payload.reference.includes(CLASS_NAME.toLowerCase()),
+    reference.payload);
+
+  const traceRequests = await call('tracesListRequests', { user: process.env.SAP_USER });
+  check('tracesListRequests answers the trace request feed',
+    traceRequests.payload.status === 'success' && !!traceRequests.payload.requests,
+    traceRequests.payload);
+
+  const freeName = await call('validateNewObject', {
+    options: { objtype: 'CLAS/OC', objname: 'ZSMOKE_FREE_NAME', packagename: '$TMP', description: 'smoke' }
+  });
+  check('validateNewObject answers for a name nothing has taken',
+    freeName.payload.status === 'success', freeName.payload);
+
+  // The regression this guards: the package of an object used to be read as
+  // the OUTERMOST package of its path, so the refactoring was built against a
+  // package the object is not in, and the backend refused it with "Package
+  // assignment ... changed since the refactoring started".
+  const objectPath = await call('findObjectPath', { objectUrl: CLASS_URL.replace('/source/main', '') });
+  const innermostPackage = ((objectPath.payload && objectPath.payload.path) || [])
+    .filter(step => String(step['adtcore:type'] || '').startsWith('DEVC'))
+    .map(step => step['adtcore:name'])
+    .pop();
+  const movePreview = await call('changePackagePreview', {
+    objectUrl: CLASS_URL.replace('/source/main', ''), newPackage: '$TMP'
+  });
+  check('changePackagePreview works from the package the object is really in',
+    movePreview.isError === true
+      ? !/changed since the refactoring started/.test(JSON.stringify(movePreview.payload))
+      : String(movePreview.payload.oldPackage || '').toUpperCase() === String(innermostPackage || '').toUpperCase(),
+    { innermostPackage, answered: movePreview.payload });
+
+  const customizing = await call('atcCustomizing');
+  check('atcCustomizing names how ATC is set up here',
+    customizing.payload.status === 'success' && Array.isArray(customizing.payload.result.properties),
+    customizing.payload);
+
+  const madeUpWorklist = await call('atcWorklists', { runResultId: 'NO_SUCH_WORKLIST' });
+  check('atcWorklists says where a run result id comes from instead of repeating a 500',
+    madeUpWorklist.isError === true && /createAtcRun|atcCheck/.test(JSON.stringify(madeUpWorklist.payload)),
+    madeUpWorklist.payload);
+
+  const madeUpMarker = await call('atcExemptProposal', { markerId: 'NO_SUCH_MARKER' });
+  check('atcExemptProposal answers a made-up marker with a diagnosis, not a crash',
+    !/Cannot read propert/.test(JSON.stringify(madeUpMarker.payload)),
+    madeUpMarker.payload);
+
+  const noFinding = await call('atcContactUri', {});
+  check('atcContactUri asks for the finding rather than calling with nothing',
+    noFinding.isError === true && /Pass findingUri/.test(JSON.stringify(noFinding.payload)),
+    noFinding.payload);
+
+  const noProposal = await call('isProposalMessage', {});
+  check('isProposalMessage says what a proposal is instead of reading a field of undefined',
+    !/Cannot read propert/.test(JSON.stringify(noProposal.payload)),
+    noProposal.payload);
+
+  const noBinding = await call('bindingDetails', {});
+  check('bindingDetails names the object it needs instead of reading a field of undefined',
+    noBinding.isError === true && /binding/.test(JSON.stringify(noBinding.payload))
+    && !/Cannot read propert/.test(JSON.stringify(noBinding.payload)),
+    noBinding.payload);
+
+  const noRepo = await call('remoteRepoInfo', {});
+  check('remoteRepoInfo points at gitRepos instead of reading a field of undefined',
+    noRepo.isError === true && /gitRepos/.test(JSON.stringify(noRepo.payload)),
+    noRepo.payload);
+
+  const markerSource = await call('getObjectSource', { objectSourceUrl: CLASS_URL, startLine: 1, maxLines: 40 });
+  const markers = await call('unitTestOccurrenceMarkers', {
+    url: CLASS_URL, source: markerSource.payload.source || ''
+  });
+  check('unitTestOccurrenceMarkers answers the coverage markers, even when there are none',
+    markers.payload.status === 'success' && Array.isArray(markers.payload.markers),
+    markers.payload);
+
+  const renameNothing = await call('renamePreview', {});
+  check('renamePreview names the proposal it needs instead of reading a field of undefined',
+    renameNothing.isError === true && !/Cannot read propert/.test(JSON.stringify(renameNothing.payload)),
+    renameNothing.payload);
+
+  const renameNowhere = await call('renameEvaluate', { uri: CLASS_URL, line: 1, startColumn: 0, endColumn: 1 });
+  check('renameEvaluate answers a position that names nothing with a diagnosis',
+    renameNowhere.isError !== true
+    || /refactoring|rename|Failed to evaluate/i.test(JSON.stringify(renameNowhere.payload)),
+    renameNowhere.payload);
+
+  const extractJunk = await call('extractMethodPreview', { proposal: 'not json' });
+  check('extractMethodPreview refuses a proposal that is not one',
+    extractJunk.isError === true && !/Cannot read propert/.test(JSON.stringify(extractJunk.payload)),
+    extractJunk.payload);
+
+  const extractNothing = await call('extractMethodEvaluate', {
+    uri: CLASS_URL, range: JSON.stringify({ start: { line: 1, column: 0 }, end: { line: 1, column: 3 } })
+  });
+  check('extractMethodEvaluate answers a range that is not a statement with a diagnosis',
+    extractNothing.isError !== true
+    || /refactoring|selection|Failed to evaluate/i.test(JSON.stringify(extractNothing.payload)),
+    extractNothing.payload);
+
+  // A bare CLAS is what a caller writes by hand; it used to be refused as an
+  // unknown type by every tool that resolves a URL from a name.
+  const bareType = await call('revisions', { objectName: CLASS_NAME, objectType: 'CLAS' });
+  const fullType = await call('revisions', { objectName: CLASS_NAME, objectType: 'CLAS/OC' });
+  check('a bare object type resolves the same object as the full one',
+    bareType.isError === fullType.isError
+    && JSON.stringify(bareType.payload.objectUrl) === JSON.stringify(fullType.payload.objectUrl),
+    { bare: bareType.payload.objectUrl, full: fullType.payload.objectUrl });
+
+  const deleteNothing = await call('deleteObject', {});
+  check('deleteObject asks which object rather than guessing',
+    deleteNothing.isError === true && /Pass objectUrl/.test(JSON.stringify(deleteNothing.payload)),
+    deleteNothing.payload);
+
+  // Last of the group: it ends the stateful session, and everything after it
+  // logs on again by itself.
+  const dropped = await call('dropSession');
+  check('dropSession succeeds and says what it forgot',
+    dropped.payload.status === 'success'
+    && typeof dropped.payload.locksForgotten === 'number'
+    && typeof dropped.payload.sourcesForgotten === 'number',
+    dropped.payload);
+
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
 
