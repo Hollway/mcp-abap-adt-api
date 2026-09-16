@@ -27,10 +27,10 @@ all.
 ### The package an object is in
 
 `changePackagePreview` was refused by the backend with *"Package assignment of
-object ZCL_MM changed since the refactoring started"* — a message that sounds
+object ZCL_APP changed since the refactoring started"* — a message that sounds
 like a race and is not one. The package of an object was read as the **first**
 `DEVC` step of its workbench path, and on a nested tree that is the
-superpackage: a class in `ZMM_BASE` under `ZMM` came back as `ZMM`, so the
+superpackage: a class in `ZAPP_BASE` under `ZAPP` came back as `ZAPP`, so the
 refactoring was built against a package the object is not in. It is read from
 the object's own step now, which names its package in `parentUri`. The same
 lookup fills in the `parentUri` an activation needs, which was getting the

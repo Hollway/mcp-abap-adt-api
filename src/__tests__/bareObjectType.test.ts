@@ -28,8 +28,8 @@ describe('fullObjectType', () => {
 
 describe('sourceUrlFor with a bare type', () => {
   it('resolves CLAS the same as CLAS/OC', () => {
-    expect(sourceUrlFor('CLAS', 'ZCL_MM')).toBe(sourceUrlFor('CLAS/OC', 'ZCL_MM'));
-    expect(objectUrlFor('CLAS', 'ZCL_MM')).toBe('/sap/bc/adt/oo/classes/zcl_mm');
+    expect(sourceUrlFor('CLAS', 'ZCL_APP')).toBe(sourceUrlFor('CLAS/OC', 'ZCL_APP'));
+    expect(objectUrlFor('CLAS', 'ZCL_APP')).toBe('/sap/bc/adt/oo/classes/zcl_app');
   });
 
   it('resolves the other bare types callers write by hand', () => {

@@ -13,20 +13,20 @@ import { TraceHandlers } from '../handlers/TraceHandlers';
  */
 const FEED = `<?xml version="1.0" encoding="utf-8"?>
 <atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:trc="http://www.sap.com/adt/runtime/traces/abaptraces">
-  <atom:author><atom:name>ALFEUD11</atom:name></atom:author>
+  <atom:author><atom:name>HOST</atom:name></atom:author>
   <atom:contributor><atom:name>EUD</atom:name></atom:contributor>
   <atom:title>ABAP Traces</atom:title>
   <atom:updated>2026-09-10T11:34:29Z</atom:updated>
   <atom:entry xml:lang="RU">
     <atom:author><atom:name>TESTER</atom:name><atom:uri>http://example/TESTER</atom:uri></atom:author>
-    <atom:content type="application/vnd.sap.adt.runtime.traces.abaptraces.hitlist+xml" src="/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000007/hitlist"/>
-    <atom:id>/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000007</atom:id>
-    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000007" rel="self" type="application/atom+xml;type=entry" title="Trace file"/>
-    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000007" rel="http://www.sap.com/adt/relations/delete" type="text/plain" title="Delete"/>
+    <atom:content type="application/vnd.sap.adt.runtime.traces.abaptraces.hitlist+xml" src="/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000007/hitlist"/>
+    <atom:id>/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000007</atom:id>
+    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000007" rel="self" type="application/atom+xml;type=entry" title="Trace file"/>
+    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000007" rel="http://www.sap.com/adt/relations/delete" type="text/plain" title="Delete"/>
     <atom:published>2026-09-10T11:34:31Z</atom:published>
     <atom:updated>2026-09-10T11:34:31Z</atom:updated>
     <trc:extendedData>
-      <trc:host>alfeud11</trc:host>
+      <trc:host>host</trc:host>
       <trc:size>13</trc:size>
       <trc:runtime>8227698</trc:runtime>
       <trc:runtimeABAP>110097</trc:runtimeABAP>
@@ -43,14 +43,14 @@ const FEED = `<?xml version="1.0" encoding="utf-8"?>
   </atom:entry>
   <atom:entry xml:lang="RU">
     <atom:author><atom:name>TESTER</atom:name><atom:uri>http://example/TESTER</atom:uri></atom:author>
-    <atom:content type="application/vnd.sap.adt.runtime.traces.abaptraces.hitlist+xml" src="/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000003/hitlist"/>
-    <atom:id>/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000003</atom:id>
-    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000003" rel="self" type="application/atom+xml;type=entry" title="Trace file"/>
+    <atom:content type="application/vnd.sap.adt.runtime.traces.abaptraces.hitlist+xml" src="/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000003/hitlist"/>
+    <atom:id>/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000003</atom:id>
+    <atom:link href="/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000003" rel="self" type="application/atom+xml;type=entry" title="Trace file"/>
     <atom:published>2026-09-09T14:37:46Z</atom:published>
     <atom:title>DEFAULT</atom:title>
     <atom:updated>2026-09-09T14:37:46Z</atom:updated>
     <trc:extendedData>
-      <trc:host>alfeud11</trc:host>
+      <trc:host>host</trc:host>
       <trc:size>34</trc:size>
       <trc:runtime>5321045</trc:runtime>
       <trc:expiration>2026-10-07T14:37:46Z</trc:expiration>
@@ -89,7 +89,7 @@ describe('parseTraceFeed', () => {
 
   it('reports the fields a caller reads a trace by', () => {
     const [run] = parseTraceFeed(FEED).runs;
-    expect(run.id).toBe('/sap/bc/adt/runtime/traces/abaptraces/alfeud11_eud_00%2cAT000007');
+    expect(run.id).toBe('/sap/bc/adt/runtime/traces/abaptraces/host_eud_00%2cAT000007');
     expect(run.author).toBe('TESTER');
     expect(run.extendedData).toMatchObject({
       objectName: 'ZDEV_TRACE_TEST',

@@ -27,7 +27,7 @@ import { MAX_QUERY_CHARS } from '../lib/queryLimits';
  * forgive: a SELECT over 255 characters, and a filter value that reaches the
  * statement as syntax rather than as a value.
  *
- * Measured live on EUD00: a job's start time arrives as six digits and its
+ * Measured live on ECC: a job's start time arrives as six digits and its
  * date as an ISO string at UTC midnight, while TSP01 holds the spool stamp as
  * sixteen digits in UTC - a spool produced by a job three hours ahead of UTC
  * read three hours older than the job that made it.
@@ -70,7 +70,7 @@ describe('reading the dates and times the preview sends', () => {
 
 describe('what may go into a WHERE clause', () => {
   it('takes a name, and a trailing star as the prefix it looks like', () => {
-    expect(namePattern('ZMM_NIGHTLY', 'job name')).toEqual({ sql: 'ZMM_NIGHTLY', like: false });
+    expect(namePattern('ZAPP_NIGHTLY', 'job name')).toEqual({ sql: 'ZAPP_NIGHTLY', like: false });
     expect(namePattern('z*', 'job name')).toEqual({ sql: 'Z%', like: true });
   });
 
@@ -80,8 +80,8 @@ describe('what may go into a WHERE clause', () => {
   });
 
   it('writes an equality for a name and a LIKE for a prefix', () => {
-    expect(nameCondition('jobname', 'ZMM', 'job name')).toBe("jobname = 'ZMM'");
-    expect(nameCondition('jobname', 'ZMM*', 'job name')).toBe("jobname LIKE 'ZMM%'");
+    expect(nameCondition('jobname', 'ZAPP', 'job name')).toBe("jobname = 'ZAPP'");
+    expect(nameCondition('jobname', 'ZAPP*', 'job name')).toBe("jobname LIKE 'ZAPP%'");
   });
 
   it('refuses a statement the endpoint would refuse, and says how long it is', () => {
@@ -121,13 +121,13 @@ describe('background jobs', () => {
 
   it('says what a status letter means, rather than leaving the letter alone', () => {
     const job = describeJob({
-      JOBNAME: 'ZMM_NIGHTLY', JOBCOUNT: '17065700', STATUS: 'F',
+      JOBNAME: 'ZAPP_NIGHTLY', JOBCOUNT: '17065700', STATUS: 'F',
       SDLUNAME: 'JSMITH', AUTHCKNAM: 'BATCHUSER',
       STRTDATE: '2026-09-16T00:00:00.000Z', STRTTIME: '170757',
       ENDDATE: '2026-09-16T00:00:00.000Z', ENDTIME: '170801'
     });
     expect(job).toEqual({
-      name: 'ZMM_NIGHTLY',
+      name: 'ZAPP_NIGHTLY',
       count: '17065700',
       status: 'F',
       statusMeaning: 'finished',
@@ -139,14 +139,14 @@ describe('background jobs', () => {
   });
 
   it('leaves out the times a job that never ran does not have', () => {
-    const job = describeJob({ JOBNAME: 'ZMM_LATER', JOBCOUNT: '1', STATUS: 'P' });
+    const job = describeJob({ JOBNAME: 'ZAPP_LATER', JOBCOUNT: '1', STATUS: 'P' });
     expect(job.statusMeaning).toBe('scheduled');
     expect(job).not.toHaveProperty('started');
     expect(job).not.toHaveProperty('ended');
   });
 
   it('reads the steps of one run, and names the spool one produced', () => {
-    expect(stepQuery('ZMM_NIGHTLY', '17065700')).toContain("jobcount = '17065700'");
+    expect(stepQuery('ZAPP_NIGHTLY', '17065700')).toContain("jobcount = '17065700'");
     expect(describeStep({ STEPCOUNT: 1, PROGNAME: 'RSPROCESS', VARIANT: '&0000000002772', AUTHCKNAM: 'BATCHUSER', LISTIDENT: '10810' }))
       .toEqual({ step: 1, program: 'RSPROCESS', variant: '&0000000002772', runsAs: 'BATCHUSER', spoolRequest: '10810' });
   });

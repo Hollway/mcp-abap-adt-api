@@ -11,7 +11,7 @@ import { requestArgument } from '../lib/transportHygiene';
  * value rather than about the spelling.
  *
  * And adding a user to a request answers with three tm: fields whose number is
- * the NEW task, not the request: EUDK9A3P84 plus a user answered EUDK9A3P86,
+ * the NEW task, not the request: DEVK9A3P84 plus a user answered DEVK9A3P86,
  * and the next call then found two open tasks to choose between with nothing
  * having said that a second one had appeared.
  */

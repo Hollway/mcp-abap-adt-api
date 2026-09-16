@@ -128,9 +128,9 @@ export function splitInactive(
  * findObjectPath answers with the whole chain from the top of the package tree
  * down to the object, and the object's own metadata does not carry its package.
  * The chain is where it has to be read - but it is the step CLOSEST to the
- * object, not the first one: ZCL_MM comes back as ZMM, ZMM_BASE, ZCL_MM, and
- * taking the first DEVC named the superpackage ZMM. The object really sits in
- * ZMM_BASE, so a package move was built against a package the object is not in
+ * object, not the first one: ZCL_APP comes back as ZAPP, ZAPP_BASE, ZCL_APP, and
+ * taking the first DEVC named the superpackage ZAPP. The object really sits in
+ * ZAPP_BASE, so a package move was built against a package the object is not in
  * and the backend refused the preview with "Package assignment of object
  * changed since the refactoring started", and an activation that needed a
  * parentUri was given the wrong one.

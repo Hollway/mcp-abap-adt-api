@@ -137,8 +137,8 @@ describe('extractCalls', () => {
     // type of that class - found live on a notifier class that built its
     // return table this way.
     const found = extractCalls([
-      '  DATA(lt_return) = VALUE zcl_mm_return=>tt_return( ).',
-      '  DATA(lv_one) = zcl_mm_return=>build( ).'
+      '  DATA(lt_return) = VALUE zcl_app_return=>tt_return( ).',
+      '  DATA(lv_one) = zcl_app_return=>build( ).'
     ].join('\n'));
     expect(found.calls.map(call => `${call.kind}/${call.member}`)).toEqual([
       'reference/TT_RETURN',
@@ -259,8 +259,8 @@ describe('types named in declarations', () => {
   });
 
   it('keeps a type owned by a class a reference to that class, not a type of its own', () => {
-    const found = extractCalls('DATA lt_return TYPE zcl_mm_return=>tt_return.');
-    expect(found.calls.map(call => `${call.kind}/${call.target}`)).toEqual(['reference/ZCL_MM_RETURN']);
+    const found = extractCalls('DATA lt_return TYPE zcl_app_return=>tt_return.');
+    expect(found.calls.map(call => `${call.kind}/${call.target}`)).toEqual(['reference/ZCL_APP_RETURN']);
   });
 
   it('counts a type as its own kind, so a table read and a table typed are told apart', () => {

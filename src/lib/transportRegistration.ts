@@ -156,7 +156,7 @@ export function transportNumber(value: unknown): string {
   const number = clean(value);
   if (!TRANSPORT_NUMBER.test(number)) {
     throw new TransportRegistrationError(
-      `'${value}' is not a transport number - they read like EUDK900123.`
+      `'${value}' is not a transport number - they read like DEVK900123.`
     );
   }
   return number;

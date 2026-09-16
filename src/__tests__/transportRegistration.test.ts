@@ -73,15 +73,15 @@ describe('isNoiseMessage', () => {
   // reading it as a failure is the mistake.
   it('knows the message a successful call leaves behind', () => {
     expect(isNoiseMessage('SCTS_CTO_CUST_SYNC/003')).toBe(true);
-    expect(isNoiseMessage('Object EUDK900123 locked')).toBe(false);
+    expect(isNoiseMessage('Object DEVK900123 locked')).toBe(false);
   });
 });
 
 describe('the queries', () => {
   it('read the request, its tasks, the registration and the package', () => {
-    expect(headerSql('eudk900123')).toContain("trkorr = 'EUDK900123'");
-    expect(tasksSql('EUDK900123')).toContain("strkorr = 'EUDK900123'");
-    expect(registeredSql('EUDK900124', row)).toContain("obj_name = 'ZR_APP_FOO'");
+    expect(headerSql('devk900123')).toContain("trkorr = 'DEVK900123'");
+    expect(tasksSql('DEVK900123')).toContain("strkorr = 'DEVK900123'");
+    expect(registeredSql('DEVK900124', row)).toContain("obj_name = 'ZR_APP_FOO'");
     expect(packageSql(row)).toContain('FROM tadir');
     // An object lives in one open request at a time, and which one is the
     // answer OB_LOCKED_BY_OTHER does not give.
@@ -89,9 +89,9 @@ describe('the queries', () => {
   });
 
   it('refuse a number that is not one', () => {
-    expect(() => transportNumber("EUDK900123' OR '1'='1")).toThrow(TransportRegistrationError);
+    expect(() => transportNumber("DEVK900123' OR '1'='1")).toThrow(TransportRegistrationError);
     expect(() => transportNumber('nonsense')).toThrow(TransportRegistrationError);
-    expect(transportNumber('eudk900101')).toBe('EUDK900101');
+    expect(transportNumber('devk900101')).toBe('DEVK900101');
   });
 });
 
@@ -99,48 +99,48 @@ describe('isLocalPackage', () => {
   it('counts every $ package as local, not just $TMP', () => {
     expect(isLocalPackage('$TMP')).toBe(true);
     expect(isLocalPackage('$MCP')).toBe(true);
-    expect(isLocalPackage('ZMM')).toBe(false);
+    expect(isLocalPackage('ZAPP')).toBe(false);
     expect(isLocalPackage(undefined)).toBe(false);
   });
 });
 
 describe('chooseTask', () => {
-  const request = { TRKORR: 'EUDK900100', STRKORR: '', TRSTATUS: 'D', TRFUNCTION: 'K' };
-  const mine = { TRKORR: 'EUDK900101', STRKORR: 'EUDK900100', TRSTATUS: 'D', AS4USER: 'TESTER' };
-  const theirs = { TRKORR: 'EUDK900102', STRKORR: 'EUDK900100', TRSTATUS: 'D', AS4USER: 'OTHER' };
+  const request = { TRKORR: 'DEVK900100', STRKORR: '', TRSTATUS: 'D', TRFUNCTION: 'K' };
+  const mine = { TRKORR: 'DEVK900101', STRKORR: 'DEVK900100', TRSTATUS: 'D', AS4USER: 'TESTER' };
+  const theirs = { TRKORR: 'DEVK900102', STRKORR: 'DEVK900100', TRSTATUS: 'D', AS4USER: 'OTHER' };
 
   it('resolves a request to the caller\'s own open task', () => {
-    expect(chooseTask('EUDK900100', request, [mine, theirs], 'TESTER'))
-      .toEqual({ task: 'EUDK900101', request: 'EUDK900100', resolvedFrom: 'request' });
+    expect(chooseTask('DEVK900100', request, [mine, theirs], 'TESTER'))
+      .toEqual({ task: 'DEVK900101', request: 'DEVK900100', resolvedFrom: 'request' });
   });
 
   it('uses a task as it stands', () => {
-    expect(chooseTask('EUDK900101', mine, [], 'TESTER'))
-      .toEqual({ task: 'EUDK900101', request: 'EUDK900100', resolvedFrom: 'task' });
+    expect(chooseTask('DEVK900101', mine, [], 'TESTER'))
+      .toEqual({ task: 'DEVK900101', request: 'DEVK900100', resolvedFrom: 'task' });
   });
 
   it('refuses somebody else\'s task and points at the request instead', () => {
-    expect(() => chooseTask('EUDK900102', theirs, [], 'TESTER'))
-      .toThrow(/task of OTHER.*EUDK900100/);
+    expect(() => chooseTask('DEVK900102', theirs, [], 'TESTER'))
+      .toThrow(/task of OTHER.*DEVK900100/);
   });
 
   it('names the open tasks when none of them is the caller\'s', () => {
-    expect(() => chooseTask('EUDK900100', request, [theirs], 'TESTER'))
-      .toThrow(/no open task of TESTER.*EUDK900102 \(OTHER\)/);
+    expect(() => chooseTask('DEVK900100', request, [theirs], 'TESTER'))
+      .toThrow(/no open task of TESTER.*DEVK900102 \(OTHER\)/);
   });
 
   // Guessing between two tasks of one user puts the object in the one the
   // caller is not looking at.
   it('refuses to choose between two of the caller\'s own tasks', () => {
-    const second = { ...mine, TRKORR: 'EUDK900103' };
-    expect(() => chooseTask('EUDK900100', request, [mine, second], 'TESTER'))
-      .toThrow(/EUDK900101, EUDK900103/);
+    const second = { ...mine, TRKORR: 'DEVK900103' };
+    expect(() => chooseTask('DEVK900100', request, [mine, second], 'TESTER'))
+      .toThrow(/DEVK900101, DEVK900103/);
   });
 
   it('refuses a released request and a number that is not there', () => {
-    expect(() => chooseTask('EUDK900100', { ...request, TRSTATUS: 'R' }, [], 'TESTER'))
+    expect(() => chooseTask('DEVK900100', { ...request, TRSTATUS: 'R' }, [], 'TESTER'))
       .toThrow(/released/);
-    expect(() => chooseTask('EUDK900100', undefined, [], 'TESTER'))
+    expect(() => chooseTask('DEVK900100', undefined, [], 'TESTER'))
       .toThrow(/does not exist/);
   });
 });

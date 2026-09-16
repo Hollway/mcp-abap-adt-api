@@ -37,7 +37,7 @@ export class OperationsHandlers extends BaseHandler {
           properties: {
             jobName: {
               type: 'string',
-              description: 'Job name, e.g. ZMM_NIGHTLY. A trailing * makes it a prefix.'
+              description: 'Job name, e.g. ZAPP_NIGHTLY. A trailing * makes it a prefix.'
             },
             user: {
               type: 'string',

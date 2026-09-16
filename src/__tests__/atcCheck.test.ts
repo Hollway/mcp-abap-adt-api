@@ -44,7 +44,7 @@ describe('atcCheck says when the run excluded what it was asked about', () => {
  *
  * The exemption tools take a markerId, which the backend spells quickfixInfo -
  * and the report dropped it, so nothing atcCheck answered could be fed to
- * atcExemptProposal. Measured live: a finding on ZCL_MM carries findingUri and
+ * atcExemptProposal. Measured live: a finding on ZCL_APP carries findingUri and
  * documentationUri; on a system without the approval workflow quickfixInfo is
  * absent, which is why it is reported only when it is there.
  */

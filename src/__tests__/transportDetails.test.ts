@@ -94,8 +94,8 @@ describe('transportDetails', () => {
     const { handlers } = handler({
       userTransports: async (user: string) => { asked = user; return LIST as any; }
     });
-    await handlers.handleTransportDetails({ transportNumber: 'DEVK9A3OOT', owner: 'pprudnikov' });
-    expect(asked).toBe('PPRUDNIKOV');
+    await handlers.handleTransportDetails({ transportNumber: 'DEVK9A3OOT', owner: 'jsmith' });
+    expect(asked).toBe('JSMITH');
   });
 
   it('leaves out the object list and the tasks when told to', async () => {
