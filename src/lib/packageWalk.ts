@@ -43,8 +43,35 @@ const SOURCE_LOCATIONS: Record<string, (name: string) => string> = {
  * no collection for them at all, so a URL for one would only ever 404.
  */
 
+/**
+ * What a bare transport-style type means as an ADT type.
+ *
+ * The map above is keyed by the full ADT type, subtype and all, because that is
+ * what a repository node carries. A caller naming an object by hand writes
+ * CLAS, not CLAS/OC - and every tool that resolved a URL through here refused
+ * that with "does not know the ADT URI of a CLAS", which is a refusal of the
+ * spelling, not of the object. TABL has two subtypes sharing one collection, so
+ * either answer is the same URL.
+ */
+const BARE_TYPES: Record<string, string> = {
+  CLAS: 'CLAS/OC',
+  INTF: 'INTF/OI',
+  PROG: 'PROG/P',
+  FUGR: 'FUGR/F',
+  DDLS: 'DDLS/DF',
+  TABL: 'TABL/DT',
+  DCLS: 'DCLS/DL',
+  XSLT: 'XSLT/VT'
+};
+
+/** The full ADT type, whether the bare or the complete one was given. */
+export const fullObjectType = (objectType: string): string => {
+  const given = String(objectType || '').trim().toUpperCase();
+  return BARE_TYPES[given] || given;
+};
+
 export const sourceUrlFor = (objectType: string, name: string): string | undefined => {
-  const build = SOURCE_LOCATIONS[String(objectType).trim().toUpperCase()];
+  const build = SOURCE_LOCATIONS[fullObjectType(objectType)];
   return build ? build(name) : undefined;
 };
 
