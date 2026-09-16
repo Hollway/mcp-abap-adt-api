@@ -11,6 +11,7 @@
 import { AbapAdtServer, announceTarget } from './index.js';
 import { startHttpServer } from './http.js';
 import type { HttpServerHandle } from './http.js';
+import { protectStdout } from './lib/stdoutGuard.js';
 
 type Transport = 'stdio' | 'http';
 
@@ -77,6 +78,11 @@ async function main(): Promise<void> {
     onShutdown(() => handle.close());
     return;
   }
+
+  // Under stdio the protocol owns stdout, and a dependency that prints there
+  // corrupts it - see lib/stdoutGuard. Over HTTP stdout is only a log channel,
+  // so it is left as it is.
+  protectStdout();
 
   const server = new AbapAdtServer();
   announceTarget();
