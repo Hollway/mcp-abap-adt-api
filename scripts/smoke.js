@@ -1278,6 +1278,14 @@ const check = (label, condition, detail) => {
       && readiness.payload.objects.examined + readiness.payload.objects.skipped === readiness.payload.objects.total,
       readiness.payload.objects);
 
+    // The same request under the other spelling of the parameter. The family
+    // grew two names for one thing, and the tools that took only one answered
+    // a call using the other with '"undefined" is not a request number'.
+    const aliased = await call('transportReadiness', { transportNumber: anyRequest.number });
+    check('transportReadiness takes the request under either name the family uses',
+      aliased.isError === false && aliased.payload.request === readiness.payload.request,
+      { transport: readiness.payload.request, transportNumber: aliased.payload.request });
+
     const conflicts = await call('transportConflicts', { transport: anyRequest.number, maxObjects: 5 });
     check('transportConflicts counts the objects it looked up and the requests they sit in',
       typeof conflicts.payload.summary.objects === 'number'
@@ -1668,6 +1676,28 @@ const check = (label, condition, detail) => {
     && typeof dropped.payload.locksForgotten === 'number'
     && typeof dropped.payload.sourcesForgotten === 'number',
     dropped.payload);
+
+  // The writing tools cannot be smoked - this script never writes - but their
+  // refusals can, and these three are refusals the call never leaves the
+  // process for. Each of them used to be a crash or a puzzle: an exemption
+  // proposal read two levels down inside the library, a contact call with half
+  // its arguments, a user added to a request with no user named.
+  const halfExemption = await call('atcRequestExemption', { proposal: { markerId: 'NO_SUCH' } });
+  check('atcRequestExemption names the proposal it needs instead of reading a field of undefined',
+    halfExemption.isError === true
+    && /atcExemptProposal/.test(JSON.stringify(halfExemption.payload))
+    && !/Cannot read propert/.test(JSON.stringify(halfExemption.payload)),
+    halfExemption.payload);
+
+  const halfContact = await call('atcChangeContact', { itemUri: '/sap/bc/adt/atc/items/nosuch' });
+  check('atcChangeContact asks for the user rather than calling with half the arguments',
+    halfContact.isError === true && /Pass itemUri/.test(JSON.stringify(halfContact.payload)),
+    halfContact.payload);
+
+  const halfAddUser = await call('transportAddUser', { transportNumber: 'DEVK900123' });
+  check('transportAddUser asks who is to be added, and says they get a task',
+    halfAddUser.isError === true && /task/.test(JSON.stringify(halfAddUser.payload)),
+    halfAddUser.payload);
 
   const afterReads = await call('listLocks');
   check('the read-only checks took no lock', afterReads.payload.count === 0, afterReads.payload);
