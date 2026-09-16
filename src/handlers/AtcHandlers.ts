@@ -509,10 +509,25 @@ export class AtcHandlers extends BaseHandler {
         }
     }
 
+    /**
+     * Who is on the hook for a finding.
+     *
+     * The call posts the finding reference to /sap/bc/adt/atc/items, which is
+     * part of the exemption approval workflow. A system that does not run that
+     * workflow has no such collection and answers 404 for every finding, which
+     * on its own reads as "this finding has no contact".
+     */
     async handleAtcContactUri(args: { findingUri: string }): Promise<any> {
+        const findingUri = String(args?.findingUri || '').trim();
+        if (!findingUri) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Pass findingUri - the uri of one finding, as atcCheck reports it under findingUri.'
+            );
+        }
         const startTime = performance.now();
         try {
-            const result = await this.readClient.atcContactUri(args.findingUri);
+            const result = await this.readClient.atcContactUri(findingUri);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -527,7 +542,13 @@ export class AtcHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ATC contact URI');
+            const info = describeAdtError(error);
+            throw wrapAdtError(
+                error,
+                info.status === 404
+                    ? 'No ATC contact for this finding: /sap/bc/adt/atc/items answered 404. That collection is the exemption approval workflow, so this is what a system without it answers for every finding, not a fact about this one'
+                    : `Failed to get the ATC contact for ${findingUri}`
+            );
         }
     }
 
@@ -673,6 +694,11 @@ export class AtcHandlers extends BaseHandler {
                         sourceUrl: finding.location?.uri,
                         line: finding.location?.range?.start?.line,
                         ...(finding.exemptionApproval ? { exemptionApproval: finding.exemptionApproval } : {}),
+                        // The marker id the exemption tools take. The backend
+                        // calls it quickfixInfo; atcExemptProposal calls it
+                        // markerId, and without it here the exemption chain
+                        // could not be reached from this report at all.
+                        ...(finding.quickfixInfo ? { markerId: finding.quickfixInfo } : {}),
                         // The finding's own URI is what atcContactUri and the
                         // exemption tools take. Without it here, nothing this
                         // tool answers can be fed to them.
@@ -746,7 +772,7 @@ export class AtcHandlers extends BaseHandler {
                                 ? `No findings, but the run excluded the object: the backend reported "${excluded}". Standard SAP objects are excluded from an ATC run on this system, so this is not a clean bill of health - check a custom object instead.`
                                 : `No findings at all under check variant ${variant}.`
                         }
-                        : { note: 'Priority 1 is the worst. Read the rule behind a finding with atcDocumentation and its documentationUri; findingUri is what atcContactUri and the exemption tools take.' })
+                        : { note: 'Priority 1 is the worst. Read the rule behind a finding with atcDocumentation and its documentationUri; markerId is what atcExemptProposal takes, findingUri what atcContactUri takes, and the run id under steps re-reads the whole worklist with atcWorklists.' })
                 })
             }]
         };
