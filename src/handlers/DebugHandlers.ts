@@ -117,7 +117,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSetBreakpoints',
-                description: 'Set breakpoints on lines of a source, or on a statement, for the debug session that follows. They belong to the user and survive until deleted, so they will also stop a colleague running the same code with your user. Set them BEFORE debuggerListen; the ids that come back are what deletes them again. A breakpoint the backend accepts is not a breakpoint that stops anything: whether a process actually halts depends on external debugging being available to your user on that system, and it is worth proving once with something harmless - measured on a classic ERP system, an accepted breakpoint stopped neither a background job, nor a task started with STARTING NEW TASK, nor a class run through runClass, with and without systemDebugging.',
+                description: 'Set breakpoints on lines of a source, or on a statement, for the debug session that follows. They belong to the user and survive until deleted, so they will also stop a colleague running the same code with your user. Set them BEFORE debuggerListen; the ids that come back are what deletes them again. A breakpoint the backend accepts is not a breakpoint that stops anything: whether a process actually halts depends on external debugging being available to your user on that system, and it is worth proving once with something harmless - measured on a classic ERP system, an accepted breakpoint stopped neither a background job, nor a task started with STARTING NEW TASK, nor a class run through runClass, with and without systemDebugging. A class run through runClass can go further without going all the way: the call returns its console output as if nothing happened, yet the next debuggerListen reports caughtWhileNotWaiting for that exact line - the backend logged the hit without ever holding the work process for it, and debuggerAttach against that debuggeeId then fails with a bare 500 because there is nothing left to attach to.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -201,7 +201,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerAttach',
-                description: 'Attach to the process that has stopped at a breakpoint, which is what debuggerListen reported. Only after this do the stack and the variables mean anything; the attachment holds the stopped process, so let it go (debuggerStep with terminate, or delete the listener) rather than leaving a work process frozen.',
+                description: 'Attach to the process that has stopped at a breakpoint, which is what debuggerListen reported. Only after this do the stack and the variables mean anything; the attachment holds the stopped process, so let it go (debuggerStep with terminate, or delete the listener) rather than leaving a work process frozen. A debuggeeId from a caughtWhileNotWaiting answer is not a guarantee that anything is still there to attach to: measured on a classic ERP system, a class run through runClass returned its full console output before this was ever called, and debuggerAttach against the debuggeeId it was caught under answered a bare 500 AdiFailed both times it was tried - the backend had logged the hit but had not actually held the work process open for it.',
                 inputSchema: {
                     type: 'object',
                     properties: {

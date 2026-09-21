@@ -8,6 +8,32 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.9.0] — a breakpoint that is reached but not held
+
+The 1.8.0 entry closed with the debugger unusable on this landscape: an
+accepted breakpoint stopped nothing, tried three ways. Proving that again with
+a fresh class in `$TMP` turned up a finer answer than "nothing".
+
+`runClass` on the class returned its console output in full - the run had
+gone from the breakpointed line to the end, uninterrupted, the way it would
+with no breakpoint at all. The very next `debuggerListen`, though, reported
+`caughtWhileNotWaiting`: a `debuggeeId`, the right include, the right line,
+`IS_SAME_SERVER: true`, `CAN_ADT_CROSS_SERVER: true` - every sign of a real
+stop. `debuggerAttach` against that `debuggeeId` answered a bare `500
+AdiFailed`, twice, immediately.
+
+So the backend does notice the breakpoint and does record the hit - the
+listener resource is not lying when it reports one - but for a class run
+through `runClass` it does not hold the work process open for a debugger to
+attach to. The two tool texts said "nothing ever stops" before; now they say
+what actually happens when something does: a hit that is already gone by the
+time anything can reach it. Whether a genuinely blocking trigger exists on
+this landscape (a dialog step, a work process a Basis administrator pauses by
+hand) is still open - every trigger reachable through ADT alone has now been
+tried, at the parameters that should be the most permissive: `debuggingMode`
+`user` rather than `terminal`, and the library's own default scope,
+`external`, rather than `debugger`.
+
 ## [1.8.0] — the debugger, and the session it was holding
 
 Measured against the tool list again: of the 186 tools this server exposes, 48
