@@ -130,6 +130,17 @@ export function isMissingCollection(e: unknown): boolean {
   return info.status === 404 && /does not exist/i.test(String(info.error || ''));
 }
 
+/**
+ * A hint to show instead of a bare 404, for one specific endpoint a caller
+ * already knows goes missing on some releases (unlike isMissingCollection,
+ * this does not also check the message text - some of these endpoints
+ * answer a plain 404 with no "does not exist" wording at all).
+ */
+export function hintOn404(e: unknown, hint: string): string | undefined {
+  const info = e instanceof AdtToolError ? e.info : describeAdtError(e);
+  return info.status === 404 ? hint : undefined;
+}
+
 /** Serializable payload for a failed tool call. */
 export function errorPayload(e: unknown): Record<string, unknown> {
   const info = e instanceof AdtToolError ? e.info : describeAdtError(e);

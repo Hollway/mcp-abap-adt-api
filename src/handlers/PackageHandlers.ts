@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler';
-import { wrapAdtError, describeAdtError } from '../lib/adtError';
+import { describeAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools';
 import { findInSource, ScanError } from '../lib/sourceScan';
 import {
@@ -166,29 +166,16 @@ export class PackageHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   private packageName(args: any): string {
-    const name = String(args?.packageName || '').trim().toUpperCase();
-    if (!name) {
-      throw new McpError(ErrorCode.InvalidParams, 'Which package? Pass packageName.');
-    }
-    return name;
+    return this.requireUpper(args, 'packageName', 'Which package? Pass packageName.');
   }
 
   /** One level of a package, as nodes. */
   private async nodesOf(packageName: string): Promise<PackageNode[]> {
-    const startTime = performance.now();
-    try {
+    return this.tracked(`Failed to list package ${packageName}`, async () => {
       const structure = await this.readClient.nodeContents('DEVC/K', packageName);
-      this.trackRequest(startTime, true);
       return (structure?.nodes || []) as PackageNode[];
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to list package ${packageName}`);
-    }
+    });
   }
 
   /**

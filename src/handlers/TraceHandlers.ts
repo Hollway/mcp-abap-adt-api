@@ -240,10 +240,8 @@ export class TraceHandlers extends BaseHandler {
     }
 
     async handleTracesListRequests(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get trace requests', async () => {
             const requests = await this.readClient.tracesListRequests(args.user);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -255,21 +253,16 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get trace requests');
-        }
+        });
     }
 
     async handleTracesHitList(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get trace hit list', async () => {
             const hitList = await this.readClient.tracesHitList(args.id, args.withSystemEvents);
             // One ADT call produced 1.5 MB of hit list, which the response guard
             // then threw away whole. Cap it here, where what is dropped can be
             // named and the heavy end can be asked for.
             const capped = capTraceEntries((hitList as any)?.entries ?? [], args);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -282,17 +275,12 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get trace hit list');
-        }
+        });
     }
 
     async handleTracesDbAccess(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get trace DB access', async () => {
             const dbAccess = await this.readClient.tracesDbAccess(args.id, args.withSystemEvents);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -304,15 +292,11 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get trace DB access');
-        }
+        });
     }
 
     async handleTracesStatements(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get trace statements', async () => {
             // Parsed here rather than by the library: its codec drops the whole
             // answer over a statement that carries no calling program, which
             // every entry point is - see lib/traceRead.
@@ -326,7 +310,6 @@ export class TraceHandlers extends BaseHandler {
                 qs: this.parseObjectArg<Record<string, unknown>>(args.options, 'options') || {}
             });
             const statements = parseTraceStatements(String(response.body ?? ''), args);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -338,17 +321,12 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get trace statements');
-        }
+        });
     }
 
     async handleTracesSetParameters(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to set trace parameters', async () => {
             const result = await this.adtclient.tracesSetParameters(this.parseObjectArg(args.parameters, 'parameters'));
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -360,20 +338,15 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set trace parameters');
-        }
+        });
     }
 
     async handleTracesCreateConfiguration(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to create trace configuration', async () => {
             const config = normaliseTraceConfig(
                 this.parseObjectArg<TracesCreationConfig>(args.config, 'config') as any
             );
             const result = await this.adtclient.tracesCreateConfiguration(config);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -385,17 +358,12 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create trace configuration');
-        }
+        });
     }
 
     async handleTracesDeleteConfiguration(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to delete trace configuration', async () => {
             const result = await this.adtclient.tracesDeleteConfiguration(args.id);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -407,17 +375,12 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to delete trace configuration');
-        }
+        });
     }
 
     async handleTracesDelete(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to delete trace', async () => {
             const result = await this.adtclient.tracesDelete(args.id);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -429,9 +392,6 @@ export class TraceHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to delete trace');
-        }
+        });
     }
 }

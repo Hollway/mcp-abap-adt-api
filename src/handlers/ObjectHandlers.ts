@@ -98,10 +98,8 @@ export class ObjectHandlers extends BaseHandler {
     }
 
     async handleObjectStructure(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get object structure', async () => {
             const structure = await this.readClient.objectStructure(args.objectUrl, args.version);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -114,10 +112,7 @@ export class ObjectHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get object structure');
-        }
+        });
     }
 
     async handleFindObjectPath(args: any): Promise<any> {
@@ -149,14 +144,12 @@ export class ObjectHandlers extends BaseHandler {
     }
 
     async handleSearchObject(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to search objects', async () => {
             const results = await this.readClient.searchObject(
                 args.query,
                 args.objType,
                 args.max
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -169,10 +162,7 @@ export class ObjectHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to search objects');
-        }
+        });
     }
 
     async handleObjectTypes(args: any): Promise<any> {
@@ -220,10 +210,8 @@ export class ObjectHandlers extends BaseHandler {
     }
 
     async handleReentranceTicket(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get reentrance ticket', async () => {
             const ticket = await this.readClient.reentranceTicket();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -236,9 +224,6 @@ export class ObjectHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get reentrance ticket');
-        }
+        });
     }
 }

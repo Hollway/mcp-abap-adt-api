@@ -288,10 +288,10 @@ export class GitHandlers extends BaseHandler {
     }
 
     async handleGitRepos(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(error => isMissingCollection(error)
+                ? 'abapGit is not installed on this system: the /sap/bc/adt/abapgit collection is absent, which is not the same as having no repositories'
+                : 'Failed to get git repos', async () => {
             const repos = await this.readClient.gitRepos();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -303,12 +303,7 @@ export class GitHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, isMissingCollection(error)
-                ? 'abapGit is not installed on this system: the /sap/bc/adt/abapgit collection is absent, which is not the same as having no repositories'
-                : 'Failed to get git repos');
-        }
+        });
     }
 
     async handleGitExternalRepoInfo(args: any): Promise<any> {

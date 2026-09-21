@@ -208,11 +208,9 @@ export class RefactorHandlers extends BaseHandler {
     }
 
     async handleExtractMethodEvaluate(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to evaluate extract method', async () => {
             const range = this.parseObjectArg<Range>(args.range, 'range');
             const result = await this.readClient.extractMethodEvaluate(args.uri, range);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -224,18 +222,13 @@ export class RefactorHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to evaluate extract method');
-        }
+        });
     }
 
     async handleExtractMethodPreview(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to preview extract method', async () => {
             const proposal = this.parseObjectArg<ExtractMethodProposal>(args.proposal, 'proposal');
             const result = await this.readClient.extractMethodPreview(proposal);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -247,18 +240,13 @@ export class RefactorHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to preview extract method');
-        }
+        });
     }
 
     async handleExtractMethodExecute(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to execute extract method', async () => {
             const refactoring = this.parseObjectArg<GenericRefactoring>(args.refactoring, 'refactoring');
             const result = await this.adtclient.extractMethodExecute(refactoring);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -270,9 +258,6 @@ export class RefactorHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to execute extract method');
-        }
+        });
     }
 }

@@ -557,8 +557,7 @@ export class DebugHandlers extends BaseHandler {
     }
 
     async handleDebuggerDeleteListener(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to delete debugger listener', async () => {
             // Deliberately the main client: this request has to overtake the
             // listener's own pending POST, and on the debug session it would
             // queue behind the very call it is ending.
@@ -574,7 +573,6 @@ export class DebugHandlers extends BaseHandler {
             // nothing able to let it go.
             const attached = attachedDebuggee();
             if (!attached) await closeDebugSession();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -594,15 +592,11 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to delete debugger listener');
-        }
+        });
     }
 
     async handleDebuggerSetBreakpoints(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to set breakpoints', async () => {
             const result = await this.adtclient.debuggerSetBreakpoints(
                 args.debuggingMode,
                 args.terminalId,
@@ -615,7 +609,6 @@ export class DebugHandlers extends BaseHandler {
                 args.deactivated,
                 args.syncScupeUrl
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -627,15 +620,11 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set breakpoints');
-        }
+        });
     }
 
     async handleDebuggerDeleteBreakpoints(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to delete breakpoints', async () => {
             const result = await this.adtclient.debuggerDeleteBreakpoints(
                 this.parseObjectArg<DebugBreakpoint>(args.breakpoint, 'breakpoint'),
                 args.debuggingMode,
@@ -644,7 +633,6 @@ export class DebugHandlers extends BaseHandler {
                 args.requestUser,
                 args.scope
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -656,15 +644,11 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to delete breakpoints');
-        }
+        });
     }
 
     async handleDebuggerAttach(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to attach debugger', async () => {
             const result = await debugClient(this.adtclient).debuggerAttach(
                 args.debuggingMode,
                 args.debuggeeId,
@@ -672,7 +656,6 @@ export class DebugHandlers extends BaseHandler {
                 args.dynproDebugging
             );
             setAttached(String(args.debuggeeId));
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -684,10 +667,7 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to attach debugger');
-        }
+        });
     }
 
     async handleDebuggerSaveSettings(args: any): Promise<any> {
@@ -721,10 +701,8 @@ export class DebugHandlers extends BaseHandler {
     }
 
     async handleDebuggerStackTrace(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(debugFailure('Failed to get stack trace'), async () => {
             const result = await debugClient(this.adtclient).debuggerStackTrace(args.semanticURIs);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -736,19 +714,14 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, debugFailure('Failed to get stack trace'));
-        }
+        });
     }
 
     async handleDebuggerVariables(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(debugFailure('Failed to get variables'), async () => {
             const result = await debugClient(this.adtclient).debuggerVariables(
                 this.parseObjectArg<string[]>(args.parents, 'parents')
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -760,19 +733,14 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, debugFailure('Failed to get variables'));
-        }
+        });
     }
 
     async handleDebuggerChildVariables(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(debugFailure('Failed to get child variables'), async () => {
             const result = await debugClient(this.adtclient).debuggerChildVariables(
                 args.parent === undefined ? undefined : this.parseObjectArg<string[]>(args.parent, 'parent')
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -784,10 +752,7 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, debugFailure('Failed to get child variables'));
-        }
+        });
     }
 
     async handleDebuggerStep(args: any): Promise<any> {
@@ -871,10 +836,8 @@ export class DebugHandlers extends BaseHandler {
     }
 
     async handleDebuggerSetVariableValue(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(debugFailure('Failed to set variable value'), async () => {
             const result = await debugClient(this.adtclient).debuggerSetVariableValue(args.variableName, args.value);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -886,9 +849,6 @@ export class DebugHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, debugFailure('Failed to set variable value'));
-        }
+        });
     }
 }

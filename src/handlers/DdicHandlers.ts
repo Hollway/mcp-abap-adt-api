@@ -93,10 +93,10 @@ export class DdicHandlers extends BaseHandler {
     }
 
     async handleAnnotationDefinitions(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(error => isMissingCollection(error)
+                ? 'This system does not serve the CDS annotation definitions: the /sap/bc/adt/ddic/cds/annotation/definitions collection is absent, as it is on a classic ERP release'
+                : 'Failed to get annotation definitions', async () => {
             const result = await this.readClient.annotationDefinitions();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -108,12 +108,7 @@ export class DdicHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, isMissingCollection(error)
-                ? 'This system does not serve the CDS annotation definitions: the /sap/bc/adt/ddic/cds/annotation/definitions collection is absent, as it is on a classic ERP release'
-                : 'Failed to get annotation definitions');
-        }
+        });
     }
 
     async handleDdicElement(args: any): Promise<any> {

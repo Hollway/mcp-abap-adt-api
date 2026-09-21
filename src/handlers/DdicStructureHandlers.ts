@@ -133,15 +133,8 @@ export class DdicStructureHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   async handleGetStructureSource(args: any): Promise<any> {
-    const name = String(args?.name || '').trim().toUpperCase();
-    if (!name) {
-      throw new McpError(ErrorCode.InvalidParams, 'Which table or structure? Pass name.');
-    }
+    const name = this.requireUpper(args, 'name', 'Which table or structure? Pass name.');
     const url = structureSourceUrl(name);
     const startTime = performance.now();
     try {

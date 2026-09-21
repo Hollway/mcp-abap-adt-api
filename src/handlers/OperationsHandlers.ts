@@ -140,10 +140,6 @@ export class OperationsHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   private limit(args: any, fallback = 50): number {
     const asked = Number(args?.maxResults);
     return Number.isFinite(asked) && asked > 0 ? Math.trunc(asked) : fallback;
@@ -201,7 +197,6 @@ export class OperationsHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, 'Failed to read the background jobs');
     }
   }
@@ -230,7 +225,6 @@ export class OperationsHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, 'Failed to read the spool requests');
     }
   }
@@ -274,7 +268,6 @@ export class OperationsHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, 'Failed to read the application log');
     }
   }

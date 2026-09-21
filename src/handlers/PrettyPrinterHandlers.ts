@@ -1,6 +1,5 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient } from "abap-adt-api";
 
@@ -64,10 +63,8 @@ export class PrettyPrinterHandlers extends BaseHandler {
     }
 
     async handlePrettyPrinterSetting(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get pretty printer settings', async () => {
             const settings = await this.readClient.prettyPrinterSetting();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -79,17 +76,12 @@ export class PrettyPrinterHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get pretty printer settings');
-        }
+        });
     }
 
     async handleSetPrettyPrinterSetting(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to set pretty printer settings', async () => {
             const result = await this.adtclient.setPrettyPrinterSetting(args.indent, args.style);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -101,17 +93,12 @@ export class PrettyPrinterHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set pretty printer settings');
-        }
+        });
     }
 
     async handlePrettyPrinter(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to format ABAP code', async () => {
             const source = await this.readClient.prettyPrinter(args.source);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -123,9 +110,6 @@ export class PrettyPrinterHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to format ABAP code');
-        }
+        });
     }
 }

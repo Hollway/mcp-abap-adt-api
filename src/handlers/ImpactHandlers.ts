@@ -277,7 +277,7 @@ export class ImpactHandlers extends BaseHandler {
 
   private resolveTarget(args: any): { objectUrl: string; label: string; objectType: string; name: string } {
     const name = String(args?.objectName || '').trim();
-    const objectType = String(args?.objectType || 'CLAS/OC').trim().toUpperCase();
+    const objectType = this.objectTypeArg(args);
     if (name) {
       const url = objectUrlFor(objectType, name);
       if (!url) {
@@ -301,7 +301,7 @@ export class ImpactHandlers extends BaseHandler {
   /** Same idea as resolveTarget, for abapPath's two named ends (fromX / toX). */
   private resolveEnd(args: any, prefix: 'from' | 'to'): { objectUrl: string; label: string; objectType: string; name: string } {
     const name = String(args?.[`${prefix}Name`] || '').trim();
-    const objectType = String(args?.[`${prefix}Type`] || 'CLAS/OC').trim().toUpperCase();
+    const objectType = this.objectTypeArg(args, `${prefix}Type`);
     if (name) {
       const url = objectUrlFor(objectType, name);
       if (!url) {
@@ -515,7 +515,6 @@ export class ImpactHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to work out what depends on ${label}`);
     }
   }
@@ -523,7 +522,7 @@ export class ImpactHandlers extends BaseHandler {
   /** Where the text of the object to scan lives, and what to call it in the answer. */
   private resolveSource(args: any): { sourceUrl: string; label: string; objectType: string; name: string } {
     const name = String(args?.objectName || '').trim();
-    const objectType = String(args?.objectType || 'CLAS/OC').trim().toUpperCase();
+    const objectType = this.objectTypeArg(args);
     if (name) {
       const url = sourceUrlFor(objectType, name);
       if (!url) {
@@ -711,7 +710,6 @@ export class ImpactHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to work out what ${label} calls`);
     }
   }
@@ -790,10 +788,7 @@ export class ImpactHandlers extends BaseHandler {
    * so what the graph can and cannot see is exactly what that tool can.
    */
   async handleAbapGraph(args: any): Promise<any> {
-    const packageName = String(args?.packageName || '').trim().toUpperCase();
-    if (!packageName) {
-      throw new McpError(ErrorCode.InvalidParams, 'Which package? Pass packageName.');
-    }
+    const packageName = this.requireUpper(args, 'packageName', 'Which package? Pass packageName.');
     const kinds = this.wantedKinds(args);
     const onlyCustom = args?.onlyCustom !== false;
     const followIncludes = args?.followIncludes === true;
@@ -961,7 +956,6 @@ export class ImpactHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to graph package ${packageName}`);
     }
   }
@@ -1072,7 +1066,6 @@ export class ImpactHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to find a path from ${fromEnd.label} to ${toEnd.label}`);
     }
   }

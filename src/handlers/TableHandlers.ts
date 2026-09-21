@@ -1,6 +1,5 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import {
   ddicName,
@@ -120,10 +119,6 @@ export class TableHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-  }
-
   private name(args: any): string {
     const raw = String(args?.name || '').trim();
     if (!raw) throw new McpError(ErrorCode.InvalidParams, 'Pass name - the table to read.');
@@ -136,15 +131,10 @@ export class TableHandlers extends BaseHandler {
 
   /** Run one SELECT and hand back its rows. */
   private async rows(sql: string, label: string, rowNumber = 1000): Promise<Row[]> {
-    const startTime = performance.now();
-    try {
+    return this.tracked(`Failed to read ${label}`, async () => {
       const result: any = await this.readClient.runQuery(sql, rowNumber);
-      this.trackRequest(startTime, true);
       return Array.isArray(result?.values) ? result.values as Row[] : [];
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, `Failed to read ${label}`);
-    }
+    });
   }
 
   /**

@@ -250,10 +250,8 @@ export class DiscoveryHandlers extends BaseHandler {
     }
 
     async handleLoadTypes(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to load types', async () => {
             const types = await this.readClient.loadTypes();
-            this.trackRequest(startTime, true);
             return this.json({
                 status: 'success',
                 ...pageLoadTypes(types as any, {
@@ -263,17 +261,12 @@ export class DiscoveryHandlers extends BaseHandler {
                     offset: args?.offset
                 })
             });
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to load types');
-        }
+        });
     }
 
     async handleAdtDiscovery(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to perform ADT discovery', async () => {
             const discovery = await this.readClient.adtDiscovery();
-            this.trackRequest(startTime, true);
             return this.json({
                 status: 'success',
                 ...pageDiscovery(discovery as any, {
@@ -283,29 +276,19 @@ export class DiscoveryHandlers extends BaseHandler {
                     offset: args?.offset
                 })
             });
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to perform ADT discovery');
-        }
+        });
     }
 
     async handleAdtCoreDiscovery(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to perform ADT core discovery', async () => {
             const discovery = await this.readClient.adtCoreDiscovery();
-            this.trackRequest(startTime, true);
             return this.json({ status: 'success', discovery });
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to perform ADT core discovery');
-        }
+        });
     }
 
     async handleAdtCompatibilityGraph(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get ADT compatibility graph', async () => {
             const graph = await this.readClient.adtCompatibiliyGraph();
-            this.trackRequest(startTime, true);
             return this.json({
                 status: 'success',
                 ...pageCompatibilityGraph(graph as any, {
@@ -315,9 +298,6 @@ export class DiscoveryHandlers extends BaseHandler {
                     offset: args?.offset
                 })
             });
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ADT compatibility graph');
-        }
+        });
     }
 }

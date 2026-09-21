@@ -273,10 +273,8 @@ export class AtcHandlers extends BaseHandler {
     }
 
     async handleAtcCustomizing(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get ATC customizing', async () => {
             const result = await this.readClient.atcCustomizing();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -288,10 +286,7 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ATC customizing');
-        }
+        });
     }
 
     /**
@@ -350,10 +345,8 @@ export class AtcHandlers extends BaseHandler {
     }
 
     async handleCreateAtcRun(args: { variant: string, mainUrl: string, maxResults?: number }): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to create ATC run', async () => {
             const result = await this.adtclient.createAtcRun(args.variant, args.mainUrl, args.maxResults);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -365,17 +358,14 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create ATC run');
-        }
+        });
     }
 
     async handleAtcWorklists(args: { runResultId: string, timestamp?: number, usedObjectSet?: string, includeExempted?: boolean }): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(error => describeAdtError(error).status === 500
+                ? `The ATC worklist ${args?.runResultId} could not be read. A run result id comes from createAtcRun or from the run step of atcCheck - a worklist id, or an id from another system, is answered with this same 500`
+                : 'Failed to get ATC worklists', async () => {
             const result = await this.readClient.atcWorklists(args.runResultId, args.timestamp || 0, args.usedObjectSet || "", args.includeExempted);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -387,19 +377,12 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, describeAdtError(error).status === 500
-                ? `The ATC worklist ${args?.runResultId} could not be read. A run result id comes from createAtcRun or from the run step of atcCheck - a worklist id, or an id from another system, is answered with this same 500`
-                : 'Failed to get ATC worklists');
-        }
+        });
     }
 
     async handleAtcUsers(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get ATC users', async () => {
             const result = filterUsers(await this.readClient.atcUsers(), args);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -411,19 +394,14 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get ATC users');
-        }
+        });
     }
 
     async handleAtcDocumentation(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to read the ATC documentation', async () => {
             // The library hands back the whole HTTP response here, not a
             // parsed document - only the body is of any use to a caller.
             const response: any = await this.readClient.atcDocumentation(args.docUri);
-            this.trackRequest(startTime, true);
             return {
                 content: [{
                     type: 'text',
@@ -436,17 +414,14 @@ export class AtcHandlers extends BaseHandler {
                     })
                 }]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to read the ATC documentation');
-        }
+        });
     }
 
     async handleAtcExemptProposal(args: { markerId: string }): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(error => describeAdtError(error).status === 500
+                ? `No exemption proposal for marker ${args?.markerId}. The marker id comes from a finding of atcCheck - an invented one is answered with this same 500`
+                : 'Failed to get ATC exempt proposal', async () => {
             const result = await this.readClient.atcExemptProposal(args.markerId);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -458,12 +433,7 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, describeAdtError(error).status === 500
-                ? `No exemption proposal for marker ${args?.markerId}. The marker id comes from a finding of atcCheck - an invented one is answered with this same 500`
-                : 'Failed to get ATC exempt proposal');
-        }
+        });
     }
 
     /**
@@ -488,10 +458,8 @@ export class AtcHandlers extends BaseHandler {
                 'Pass the proposal atcExemptProposal answered with, unchanged.'
             );
         }
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to request ATC exemption', async () => {
             const result = await this.adtclient.atcRequestExemption(proposal);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -503,17 +471,12 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to request ATC exemption');
-        }
+        });
     }
 
     async handleIsProposalMessage(args: { proposal: AtcProposal }): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to check if proposal message', async () => {
             const result = await this.readClient.isProposalMessage(this.parseObjectArg(args.proposal, 'proposal'));
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -525,10 +488,7 @@ export class AtcHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to check if proposal message');
-        }
+        });
     }
 
     /**
@@ -836,7 +796,7 @@ export class AtcHandlers extends BaseHandler {
                 'What should be checked? Pass objectName (with objectType), packageName, or objectUrl.'
             );
         }
-        const objectType = String(args?.objectType || 'CLAS/OC').trim().toUpperCase();
+        const objectType = this.objectTypeArg(args);
         const uri = objectUrlFor(objectType, name);
         if (!uri) {
             throw new McpError(

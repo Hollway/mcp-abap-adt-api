@@ -523,10 +523,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
         // ever hold the same value.
         if (!mainUrl) mainUrl = args.url;
 
-        const startTime = performance.now();
-        try {
+        return this.tracked('Syntax check failed', async () => {
             const result = await this.readClient.syntaxCheck(args.url, mainUrl, code, args?.mainProgram, args?.version);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -548,10 +546,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Syntax check failed');
-        }
+        });
     }
 
     async handleCodeCompletion(args: any): Promise<any> {
@@ -672,8 +667,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     }
 
     async handleUsageReferences(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Usage references failed', async () => {
             const rows = await this.readClient.usageReferences(
                 args.url,
                 args.line,
@@ -684,7 +678,6 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 maxResults: args.maxResults,
                 onlyWithSnippets: args.onlyWithSnippets
             });
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -702,10 +695,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Usage references failed');
-        }
+        });
     }
 
     /**
@@ -815,8 +805,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             offset = found.column;
         }
 
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to read the type hierarchy', async () => {
             const nodes = await this.readClient.typeHierarchy(
                 url,
                 body,
@@ -824,7 +813,6 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 offset,
                 args?.superTypes === true
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [{
                     type: 'text',
@@ -837,10 +825,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     })
                 }]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to read the type hierarchy');
-        }
+        });
     }
 
     /**
@@ -930,8 +915,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
      * so this tool reported an empty result on every system it ever ran on.
      */
     async handleSyntaxCheckTypes(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Syntax check types failed', async () => {
             const checkTypes = await this.readClient.syntaxCheckTypes();
             const result: Record<string, string[]> = {};
             if (checkTypes instanceof Map) {
@@ -941,7 +925,6 @@ export class CodeAnalysisHandlers extends BaseHandler {
             } else if (checkTypes && typeof checkTypes === 'object') {
                 Object.assign(result, checkTypes);
             }
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -954,10 +937,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Syntax check types failed');
-        }
+        });
     }
 
     async handleCodeCompletionFull(args: any): Promise<any> {
@@ -996,10 +976,8 @@ export class CodeAnalysisHandlers extends BaseHandler {
     }
 
     async handleRunClass(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Run class failed', async () => {
             const result = await this.adtclient.runClass(args.className);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1011,10 +989,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Run class failed');
-        }
+        });
     }
 
     async handleCodeCompletionElement(args: any): Promise<any> {
@@ -1042,8 +1017,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
     }
 
     async handleUsageReferenceSnippets(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Usage reference snippets failed', async () => {
             const passed = this.parseObjectArg(args.references, 'references');
             const usable = snippetableReferences(passed);
             if (usable.length === 0) {
@@ -1056,7 +1030,6 @@ export class CodeAnalysisHandlers extends BaseHandler {
                 );
             }
             const result = await this.readClient.usageReferenceSnippets(usable);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1070,10 +1043,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Usage reference snippets failed');
-        }
+        });
     }
 
     async handleFixProposals(args: any): Promise<any> {

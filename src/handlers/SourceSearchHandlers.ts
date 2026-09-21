@@ -222,8 +222,7 @@ export class SourceSearchHandlers extends BaseHandler {
   }
 
   async handleSourceOutline(args: any): Promise<any> {
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to outline the source', async () => {
       const { sources, unreadable } = await this.collectSources(args);
       const kinds = args?.kinds
         ? this.parseObjectArg<string[]>(args.kinds, 'kinds').map(k => String(k).toUpperCase())
@@ -241,7 +240,6 @@ export class SourceSearchHandlers extends BaseHandler {
       });
 
       const count = results.reduce((sum, r) => sum + r.entries.length, 0);
-      this.trackRequest(startTime, true);
       return this.answer({
         status: 'success',
         entries: count,
@@ -251,18 +249,7 @@ export class SourceSearchHandlers extends BaseHandler {
           ? 'Nothing recognised. The source may be an include holding only data declarations, or the kinds filter excluded everything.'
           : 'Line numbers refer to the version read; use them with getObjectSource startLine/maxLines or patchObjectSource.'
       });
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to outline the source');
-    }
+    });
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify(payload)
-      }]
-    };
-  }
 }

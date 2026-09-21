@@ -83,15 +83,13 @@ export class RenameHandlers extends BaseHandler {
     }
 
     async handleRenameEvaluate(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to evaluate rename', async () => {
             const result = await this.readClient.renameEvaluate(
                 args.uri,
                 args.line,
                 args.startColumn,
                 args.endColumn
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -103,10 +101,7 @@ export class RenameHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to evaluate rename');
-        }
+        });
     }
 
     async handleRenamePreview(args: any): Promise<any> {
@@ -140,10 +135,8 @@ export class RenameHandlers extends BaseHandler {
     }
 
     async handleRenameExecute(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to execute rename', async () => {
             const result = await this.adtclient.renameExecute(args.refactoring);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -155,9 +148,6 @@ export class RenameHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to execute rename');
-        }
+        });
     }
 }

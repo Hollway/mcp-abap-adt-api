@@ -8,7 +8,7 @@ import { lockRegistry } from '../lib/lockRegistry';
 import { activateAndVerify } from '../lib/activation';
 import { releaseLock, takeLock } from '../lib/lockCycle';
 import { readValidation } from '../lib/newObjectValidation';
-import { describeAdtError } from '../lib/adtError';
+import { describeAdtError, hintOn404 } from '../lib/adtError';
 import {
   dataElementUrl,
   domainUrl,
@@ -36,13 +36,10 @@ const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
  * served normally on the same system, which makes a bare 404 on a domain look
  * like a typo in the name.
  */
-const domainEndpointHint = (error: unknown): string | undefined => {
-  const info = describeAdtError(error);
-  if (info.status !== 404) return undefined;
-  return 'This release does not serve DDIC domains over ADT: /sap/bc/adt/ddic/domains answers 404 for every name, ' +
+const domainEndpointHint = (error: unknown): string | undefined =>
+  hintOn404(error, 'This release does not serve DDIC domains over ADT: /sap/bc/adt/ddic/domains answers 404 for every name, ' +
     'including its validation resource, and a domain search returns only a SAPGUI URI. ' +
-    'Data elements are served normally on the same system. Maintain the domain in SE11.';
-};
+    'Data elements are served normally on the same system. Maintain the domain in SE11.');
 
 /**
  * The contents of DDIC domains and data elements.
@@ -324,15 +321,6 @@ export class DdicPropertyHandlers extends BaseHandler {
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown DDIC property tool: ${toolName}`);
     }
-  }
-
-  protected answer(payload: Record<string, unknown>) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify(payload)
-      }]
-    };
   }
 
   /** The object URL, from whichever of name or URL the caller passed. */

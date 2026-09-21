@@ -69,8 +69,7 @@ export class ObjectDeletionHandlers extends BaseHandler {
       }
     }
 
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to delete object', async () => {
       // dropSession/logout reset the client to stateless; deletion requires a stateful session
       this.adtclient.stateful = session_types.stateful;
       const result = await this.adtclient.deleteObject(
@@ -95,8 +94,6 @@ export class ObjectDeletionHandlers extends BaseHandler {
       // and a syntax check reusing that text reports an object that no longer
       // exists as fine.
       const sourceCacheDropped = sourceCache.forgetUnder(objectUrl);
-
-      this.trackRequest(startTime, true);
       return {
         content: [
           {
@@ -113,9 +110,6 @@ export class ObjectDeletionHandlers extends BaseHandler {
           }
         ]
       };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to delete object');
-    }
+    });
   }
 }

@@ -73,10 +73,8 @@ export class FeedHandlers extends BaseHandler {
     }
 
     async handleFeeds(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get feeds', async () => {
             const feeds = await this.readClient.feeds();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -88,10 +86,7 @@ export class FeedHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get feeds');
-        }
+        });
     }
 
     async handleDumps(args: any): Promise<any> {

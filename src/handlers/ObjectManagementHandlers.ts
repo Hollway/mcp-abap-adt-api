@@ -133,8 +133,7 @@ export class ObjectManagementHandlers extends BaseHandler {
    * proof, so this tool insists on it.
    */
   private async handleActivateSafe(args: any): Promise<any> {
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to activate object safely', async () => {
       const outcome = await activateAndVerify(this.adtclient, {
         objectName: args?.objectName,
         objectUrl: args?.objectUrl,
@@ -144,24 +143,11 @@ export class ObjectManagementHandlers extends BaseHandler {
           : undefined,
         preauditRequested: args?.preauditRequested
       });
-      this.trackRequest(startTime, true);
       return this.answer({
         status: outcome.success ? 'success' : 'error',
         ...outcome
       });
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to activate object safely');
-    }
-  }
-
-  private answer(payload: Record<string, unknown>) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify(payload)
-      }]
-    };
+    });
   }
 
   async handleActivateObjects(args: any): Promise<any> {
@@ -202,9 +188,6 @@ export class ObjectManagementHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) {
-        throw error;
-      }
       throw wrapAdtError(error, 'Failed to activate objects');
     }
   }
@@ -289,9 +272,6 @@ export class ObjectManagementHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) {
-        throw error;
-      }
       throw wrapAdtError(error, 'Failed to activate object');
     }
   }
@@ -329,9 +309,6 @@ export class ObjectManagementHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) {
-        throw error;
-      }
       throw wrapAdtError(error, 'Failed to get inactive objects');
     }
   }

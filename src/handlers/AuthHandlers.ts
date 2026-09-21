@@ -79,10 +79,8 @@ export class AuthHandlers extends BaseHandler {
   }
 
   private async handleLogout(args: any) {
-    const startTime = performance.now();
-    try {
+    return this.tracked('Logout failed', async () => {
       await this.adtclient.logout();
-      this.trackRequest(startTime, true);
       return {
         content: [
           {
@@ -91,10 +89,7 @@ export class AuthHandlers extends BaseHandler {
           }
         ]
       };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Logout failed');
-    }
+    });
   }
 
   /**

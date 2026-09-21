@@ -1,6 +1,5 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { classIncludes } from 'abap-adt-api';
 import { objectUrlFor, sourceUrlFor } from '../lib/packageWalk';
@@ -148,7 +147,7 @@ export class RevisionHandlers extends BaseHandler {
     /** Object URL from a friendly name, or the one that was passed. */
     private resolveObject(args: any): { objectUrl: string; label: string; objectType: string } {
         const name = String(args?.objectName || '').trim();
-        const objectType = String(args?.objectType || 'CLAS/OC').trim().toUpperCase();
+        const objectType = this.objectTypeArg(args);
         if (name) {
             const url = objectUrlFor(objectType, name);
             if (!url) {
@@ -253,8 +252,7 @@ export class RevisionHandlers extends BaseHandler {
     }
 
     async handleRevisions(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get revisions', async () => {
             const { label, include, rows } = await this.readRevisions(args);
             const author = String(args?.author || '').trim().toUpperCase();
             const transport = String(args?.transport || '').trim().toUpperCase();
@@ -269,8 +267,6 @@ export class RevisionHandlers extends BaseHandler {
 
             const limit = Number(args?.limit) === 0 ? 0 : Math.max(1, Number(args?.limit) || 20);
             const returned = limit > 0 ? filtered.slice(0, limit) : filtered;
-
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -292,10 +288,7 @@ export class RevisionHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get revisions');
-        }
+        });
     }
 
     /**
@@ -351,8 +344,7 @@ export class RevisionHandlers extends BaseHandler {
     }
 
     async handleCompareRevisions(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to compare revisions', async () => {
             const { label, objectUrl, objectType, include, rows } = await this.readRevisions(args);
             const sourceUrl = this.sourceUrlOf(args, objectUrl, objectType, include);
 
@@ -385,8 +377,6 @@ export class RevisionHandlers extends BaseHandler {
             const copyNote = defaulted && stats.identical && rows.length > 2
                 ? 'The two newest versions have the same text - a transport release leaves a copy version behind. Name an older side, or call revisions to see which requests really changed the object.'
                 : undefined;
-
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -416,9 +406,6 @@ export class RevisionHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to compare revisions');
-        }
+        });
     }
 }

@@ -205,8 +205,7 @@ export class UnitTestHandlers extends BaseHandler {
     }
 
     async handleUnitTestRun(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to run unit test', async () => {
             const result = await this.adtclient.unitTestRun(
                 args.url,
                 this.parseObjectArg<UnitTestRunFlags>(args.flags, 'flags')
@@ -214,7 +213,6 @@ export class UnitTestHandlers extends BaseHandler {
             const diagnosis = Array.isArray(result) && result.length === 0
                 ? await this.diagnoseEmptyRun(args.url)
                 : {};
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -227,10 +225,7 @@ export class UnitTestHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to run unit test');
-        }
+        });
     }
 
     /**
@@ -404,10 +399,8 @@ export class UnitTestHandlers extends BaseHandler {
     }
 
     async handleUnitTestOccurrenceMarkers(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get unit test markers', async () => {
             const markers = await this.readClient.unitTestOccurrenceMarkers(args.url, args.source);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -419,10 +412,7 @@ export class UnitTestHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get unit test markers');
-        }
+        });
     }
 
     async handleCreateTestInclude(args: any): Promise<any> {
@@ -438,11 +428,9 @@ export class UnitTestHandlers extends BaseHandler {
             );
         }
 
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to create test include', async () => {
             this.adtclient.stateful = session_types.stateful;
             const result = await this.adtclient.createTestInclude(args.clas, lockHandle, args.transport);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -455,9 +443,6 @@ export class UnitTestHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create test include');
-        }
+        });
     }
 }
