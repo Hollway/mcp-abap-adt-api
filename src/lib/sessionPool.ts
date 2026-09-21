@@ -144,6 +144,23 @@ export class PoolFullError extends Error {
   }
 }
 
+/**
+ * Thrown when the session this key would reuse was just retired by a tool
+ * (logout) but the request that did it has not finished releasing it yet.
+ *
+ * Deleting the pool entry here rather than waiting would orphan it: the
+ * retiring request closes it itself once its own finally block runs, and
+ * that close only finds its own session in the map if nothing has replaced
+ * it in the meantime. The caller is asked to retry rather than served a
+ * session torn out from under the request that is still using it.
+ */
+export class SessionClosingError extends Error {
+  constructor(public readonly user: string) {
+    super(`The previous SAP session for ${user} is still closing; try again shortly.`);
+    this.name = 'SessionClosingError';
+  }
+}
+
 export interface PoolOptions {
   /** Builds and logs in a client. Injected so the pool is testable offline. */
   createClient(credentials: BasicCredentials): Promise<ADTClient>;
@@ -246,7 +263,13 @@ export class SessionPool {
    * the session can never be closed again.
    */
   async acquire(key: string, credentials: BasicCredentials): Promise<PooledSession> {
-    await this.sweep();
+    // A session under this exact key may be idle past its own TTL - close it
+    // now rather than hand a caller a session the backend may already have
+    // dropped. This only ever touches the one session this call is about;
+    // evicting whatever else is idle is deferred to the capacity check below,
+    // so a caller reusing their own session never pays for closing someone
+    // else's.
+    await this.evictIfStale(key);
 
     const existing = this.sessions.get(key);
     if (existing) {
@@ -257,11 +280,15 @@ export class SessionPool {
         this.log(`[pool] ${existing.user}: password changed, reopening the session`);
         await this.closeSession(existing, 'credentialsChanged');
       } else if (existing.retired) {
-        // Spent, but still held by the request that spent it: wait for that
-        // one rather than serving a client that can only fail.
+        // Spent, but still held by the request that spent it: refuse rather
+        // than serve a client that can only fail, or delete an entry the
+        // owning request still needs to find when its own finally runs.
+        if (existing.inFlight > 0) {
+          throw new SessionClosingError(existing.user);
+        }
         this.log(`[pool] ${existing.user}: previous session was ended by a tool, opening a new one`);
+        // closeSession() removes itself from the map; nothing left to delete.
         await this.closeIfRetired(existing);
-        this.sessions.delete(key);
       } else {
         return this.take(existing);
       }
@@ -272,7 +299,12 @@ export class SessionPool {
 
     const limit = this.options.maxSessions();
     if (this.sessions.size >= limit) {
-      throw new PoolFullError(this.describe(), limit);
+      // No room under this key's own account - now it is worth paying for a
+      // full sweep, to close whatever else is idle before refusing outright.
+      await this.sweep();
+      if (this.sessions.size >= limit) {
+        throw new PoolFullError(this.describe(), limit);
+      }
     }
 
     const creation = this.open(key, credentials);
@@ -400,27 +432,44 @@ export class SessionPool {
   }
 
   /**
-   * Close whatever has been idle too long.
+   * Why a session would be swept, or undefined if it is still within its TTL.
    *
    * Two limits, because the two cases are not alike: a session with no locks
    * costs only itself, while closing one that holds locks takes those locks
    * away from someone who may still want them.
    */
-  async sweep(): Promise<ClosedSession[]> {
-    const now = this.now();
-    const idleTtl = this.options.idleTtlMs();
-    const lockedTtl = this.options.lockedIdleTtlMs();
-    const closed: ClosedSession[] = [];
+  private staleReason(session: PooledSession): CloseReason | undefined {
+    if (session.inFlight > 0) return undefined;
+    const locked = session.state.locks.count() > 0;
+    // A locked session is judged by its own idle time, not by when its owner
+    // was last seen: reads keep the user busy on the clone while the session
+    // holding the locks is what SAP is counting down.
+    const idleFor = locked ? this.now() - session.lastStatefulUse : this.now() - session.lastUsed;
+    const ttl = locked ? this.options.lockedIdleTtlMs() : this.options.idleTtlMs();
+    return idleFor >= ttl ? (locked ? 'idleWithLocks' : 'idle') : undefined;
+  }
 
+  /**
+   * Close the session under this key if it is idle past its own TTL.
+   *
+   * Scoped to one key rather than the whole pool: acquire() calls this on
+   * every request, and a caller reusing their own session must not pay to
+   * discover that some other user's session is also stale - that is what the
+   * periodic sweep and the capacity-triggered one below are for.
+   */
+  private async evictIfStale(key: string): Promise<void> {
+    const session = this.sessions.get(key);
+    if (!session) return;
+    const reason = this.staleReason(session);
+    if (reason) await this.closeSession(session, reason);
+  }
+
+  /** Close whatever has been idle too long. */
+  async sweep(): Promise<ClosedSession[]> {
+    const closed: ClosedSession[] = [];
     for (const session of [...this.sessions.values()]) {
-      if (session.inFlight > 0) continue;
-      const locked = session.state.locks.count() > 0;
-      // A locked session is judged by its own idle time, not by when its
-      // owner was last seen: reads keep the user busy on the clone while the
-      // session holding the locks is what SAP is counting down.
-      const idleFor = locked ? now - session.lastStatefulUse : now - session.lastUsed;
-      if (idleFor < (locked ? lockedTtl : idleTtl)) continue;
-      closed.push(await this.closeSession(session, locked ? 'idleWithLocks' : 'idle'));
+      const reason = this.staleReason(session);
+      if (reason) closed.push(await this.closeSession(session, reason));
     }
     return closed;
   }

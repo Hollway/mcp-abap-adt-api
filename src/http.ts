@@ -21,7 +21,7 @@ import { parseBasicAuth } from './lib/auth';
 import type { BasicCredentials } from './lib/auth';
 import { sapTarget, keyFor, openSession } from './lib/adtTarget';
 import type { SapTarget } from './lib/adtTarget';
-import { SessionPool, PoolFullError } from './lib/sessionPool';
+import { SessionPool, PoolFullError, SessionClosingError } from './lib/sessionPool';
 import type { PooledSession } from './lib/sessionPool';
 import { isMutatingTool } from './lib/toolClasses';
 import { describeAdtError } from './lib/adtError';
@@ -428,6 +428,11 @@ export async function startHttpServer(pool?: SessionPool): Promise<HttpServerHan
         holders: error.sessions.map(s => `${s.user}:${s.locks}`)
       });
       rpcError(res, 503, RPC.busy, error.message, { 'retry-after': '30' }, { sessions: error.sessions });
+      return;
+    }
+    if (error instanceof SessionClosingError) {
+      log.warn('refused: the previous session for this user is still closing', { user: error.user });
+      rpcError(res, 503, RPC.busy, error.message, { 'retry-after': '1' });
       return;
     }
     const info = describeAdtError(error);

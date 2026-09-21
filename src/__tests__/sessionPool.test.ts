@@ -1,4 +1,4 @@
-import { SessionPool, PoolFullError } from '../lib/sessionPool';
+import { SessionPool, PoolFullError, SessionClosingError } from '../lib/sessionPool';
 import type { PoolOptions, PooledSession } from '../lib/sessionPool';
 import { adtException } from 'abap-adt-api';
 import type { ADTClient } from 'abap-adt-api';
@@ -152,6 +152,35 @@ describe('SessionPool.acquire', () => {
     expect(h.clients[0].logout).toHaveBeenCalled();
     expect(h.pool.size()).toBe(1);
   });
+
+  /**
+   * The race this guards: a tool call retires its own session (logout) but
+   * has not reached its finally block yet, and a second request for the same
+   * user arrives in between. Serving it a torn-down entry - or replacing the
+   * one the first request still owns - would orphan the first session: its
+   * own closeIfRetired(), called later from its own finally, only closes it
+   * if the pool still holds that exact object under that key.
+   */
+  it('refuses rather than tear down a retired session another request still owns', async () => {
+    const h = harness();
+    const session = await acquire(h.pool, 'JSMITH'); // inFlight 1, not yet released
+    h.pool.retire(session, 'requested');
+
+    await expect(acquire(h.pool, 'JSMITH')).rejects.toBeInstanceOf(SessionClosingError);
+    expect(h.pool.size()).toBe(1);
+    expect(h.clients[0].logout).not.toHaveBeenCalled();
+
+    // The owning request finishes: release, then close it itself - exactly
+    // the sequence its own finally block runs.
+    h.pool.release(session);
+    await h.pool.closeIfRetired(session);
+    expect(h.pool.size()).toBe(0);
+    expect(h.clients[0].logout).toHaveBeenCalled();
+
+    const fresh = await acquire(h.pool, 'JSMITH');
+    expect(fresh).not.toBe(session);
+    expect(h.pool.size()).toBe(1);
+  });
 });
 
 describe('SessionPool capacity', () => {
@@ -192,6 +221,42 @@ describe('SessionPool capacity', () => {
     const second = await acquire(h.pool, 'TWO');
 
     expect(second.user).toBe('TWO');
+    expect(h.clients[0].logout).toHaveBeenCalled();
+  });
+});
+
+describe('SessionPool.acquire and staleness', () => {
+  /**
+   * The cost this guards against: acquire() used to sweep the whole pool on
+   * every call, so a request reusing its own session paid to log off a
+   * completely unrelated idle one. With room in the pool, that eviction
+   * should wait for the periodic sweep (or a caller actually needing the
+   * capacity) rather than happening inline here.
+   */
+  it('does not evict an unrelated idle session just because there is room to spare', async () => {
+    const h = harness({ maxSessions: () => 3 });
+    const stale = await acquire(h.pool, 'ONE');
+    h.pool.release(stale);
+    h.advance(900_001);
+
+    const mine = await acquire(h.pool, 'TWO');
+    h.pool.release(mine);
+    await acquire(h.pool, 'TWO');
+
+    expect(h.pool.size()).toBe(2);
+    expect(h.clients[0].logout).not.toHaveBeenCalled();
+  });
+
+  it('still evicts a session under the same key once it is stale, even with room to spare', async () => {
+    const h = harness({ maxSessions: () => 3 });
+    const first = await acquire(h.pool, 'ONE');
+    first.state.locks.remember('/zcl_thing', 'HANDLE');
+    h.pool.release(first);
+    h.advance(3_600_001);
+
+    const second = await acquire(h.pool, 'ONE');
+
+    expect(second).not.toBe(first);
     expect(h.clients[0].logout).toHaveBeenCalled();
   });
 });
