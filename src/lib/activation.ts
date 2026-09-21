@@ -86,9 +86,21 @@ export function selectInactive(
 
   const name = objectName?.toUpperCase();
   const url = objectUrl?.toLowerCase();
+  // A bare startsWith would also match an unrelated object whose name or URI
+  // merely begins with the same characters (ZAPP_STATUS vs ZAPP_STATUS_DETAIL) -
+  // sweeping someone else's inactive object into this activation. A real
+  // fragment match continues with the "  <METHOD>" / "/..." or "#..." the
+  // docstring above describes, not with more of the same identifier.
+  const startsWithBoundary = (value: string, prefix: string, boundary: string): boolean =>
+    value === prefix || value.startsWith(prefix + boundary);
   return elements.filter(e => {
-    const byName = name ? (e['adtcore:name'] || '').toUpperCase().startsWith(name) : false;
-    const byUrl = url ? (e['adtcore:uri'] || '').toLowerCase().startsWith(url) : false;
+    const byName = name
+      ? startsWithBoundary((e['adtcore:name'] || '').toUpperCase(), name, '  ')
+      : false;
+    const uri = (e['adtcore:uri'] || '').toLowerCase();
+    const byUrl = url
+      ? startsWithBoundary(uri, url, '/') || startsWithBoundary(uri, url, '#')
+      : false;
     return byName || byUrl;
   });
 }

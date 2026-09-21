@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError, describeAdtError } from '../lib/adtError';
+import { describeAdtError } from '../lib/adtError';
 import { lockRegistry } from '../lib/lockRegistry';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
@@ -130,14 +130,12 @@ export class ObjectLockHandlers extends BaseHandler {
   }
 
   async handleLock(args: any): Promise<any> {
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to lock object', async () => {
       // dropSession/logout reset the client to stateless; locks require a stateful session
       this.adtclient.stateful = session_types.stateful;
       const lockResult = await this.adtclient.lock(args.objectUrl, args.accessMode);
       // Remember it so it can be listed and released later - see lib/lockRegistry.
       lockRegistry.remember(args.objectUrl, lockResult.LOCK_HANDLE, args.accessMode);
-      this.trackRequest(startTime, true);
       return {
         content: [
           {
@@ -151,10 +149,7 @@ export class ObjectLockHandlers extends BaseHandler {
           }
         ]
       };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to lock object');
-    }
+    });
   }
 
   async handleUnlock(args: any): Promise<any> {
@@ -167,13 +162,15 @@ export class ObjectLockHandlers extends BaseHandler {
       );
     }
 
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to unlock object', async () => {
       // dropSession/logout reset the client to stateless; locks require a stateful session
       this.adtclient.stateful = session_types.stateful;
       await this.adtclient.unLock(args.objectUrl, lockHandle);
-      lockRegistry.forget(args.objectUrl);
-      this.trackRequest(startTime, true);
+      // held.objectUrl is the URL the lock is actually keyed under - a
+      // covering/parent URL when args.objectUrl only matched it by prefix
+      // (see lockRegistry.forUrl). Forgetting args.objectUrl verbatim would
+      // miss the registry entry and leave a dead handle behind.
+      lockRegistry.forget(held?.objectUrl ?? args.objectUrl);
       return {
         content: [
           {
@@ -186,9 +183,6 @@ export class ObjectLockHandlers extends BaseHandler {
           }
         ]
       };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to unlock object');
-    }
+    });
   }
 }

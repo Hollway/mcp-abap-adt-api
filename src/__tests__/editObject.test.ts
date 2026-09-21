@@ -85,6 +85,28 @@ describe('editObject', () => {
     expect(lockRegistry.count()).toBe(0);
   });
 
+  /**
+   * objectUrlOf only normalises the oo/classes|interfaces .../includes/...
+   * shape; anything else that nests under a locked parent URL relies on
+   * lockRegistry.forUrl's prefix match instead - exactly what patchSource and
+   * setObjectSource already use. An exact-only lookup here would miss a lock
+   * recorded on the parent and try to lock the (already-locked) object again.
+   */
+  it('reuses a lock recorded under a covering URL, not just an exact match', async () => {
+    const groupUrl = '/sap/bc/adt/functions/groups/zfg';
+    const fmSourceUrl = `${groupUrl}/fmodules/zfm/source/main`;
+    lockRegistry.remember(groupUrl, 'EARLIER');
+    const { handlers, calls } = handler({
+      getObjectSource: async () => SOURCE,
+      inactiveObjects: async () => []
+    });
+
+    const result = answer(await handlers.handleEditObject({ objectSourceUrl: fmSourceUrl, edits }));
+
+    expect(calls).not.toContain('lock');
+    expect(result.steps[0]).toMatchObject({ step: 'lock', lockHandle: 'EARLIER', taken: false });
+  });
+
   it('stops at the write and releases the lock it took', async () => {
     const { handlers, calls } = handler({
       setObjectSource: async () => { throw new Error('object is in another transport'); }

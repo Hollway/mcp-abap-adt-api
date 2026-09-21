@@ -390,17 +390,30 @@ export class ObjectSourceHandlers extends BaseHandler {
    * invisible and blocks the next attempt.
    */
   async handleEditObject(args: any): Promise<any> {
+    return this.answer(await this.editObjectCore(args));
+  }
+
+  /**
+   * The lock-patch-unlock-activate sequence, as a payload rather than a tool
+   * answer. Not part of the tool surface - called directly by class-member
+   * edits, which need the outcome without round-tripping it through JSON.
+   */
+  async editObjectCore(args: any): Promise<Record<string, unknown>> {
     const objectUrl = this.objectUrlOf(args.objectSourceUrl);
     const steps: Record<string, unknown>[] = [];
 
     if (args?.dryRun === true) {
       const patch = await this.patchSource({ ...args, dryRun: true });
-      return this.answer({ status: 'success', dryRun: true, objectUrl, patch });
+      return { status: 'success', dryRun: true, objectUrl, patch };
     }
 
     // A lock this process already holds is reused rather than doubled, and
-    // released at the end either way: the activation needs it gone.
-    const held = lockRegistry.get(objectUrl);
+    // released at the end either way: the activation needs it gone. forUrl,
+    // not get: patchSource and setObjectSource below already recognise a
+    // lock recorded under a covering URL (see lockRegistry.forUrl) - an
+    // exact-only lookup here would miss it and attempt to lock the object a
+    // second time.
+    const held = lockRegistry.forUrl(objectUrl);
     let lockHandle = held?.lockHandle;
     if (!lockHandle) {
       const startTime = performance.now();
@@ -432,25 +445,25 @@ export class ObjectSourceHandlers extends BaseHandler {
     steps.push({ step: 'unlock', ...unlock });
 
     if (args?.activate === false) {
-      return this.answer({
+      return {
         status: 'success',
         objectUrl,
         activated: false,
         steps,
         hint: 'Written to the inactive version and not activated, so the system still runs the old code.'
-      });
+      };
     }
 
     if (!unlock.released) {
       // Activating with the lock still held fails with "user is already
       // processing this object" - say that instead of producing it.
-      return this.answer({
+      return {
         status: 'error',
         objectUrl,
         activated: false,
         steps,
         hint: 'The lock could not be released, and activation would fail while it is held. Release it (unlockAll) and activate with activateSafe.'
-      });
+      };
     }
 
     const startTime = performance.now();
@@ -461,7 +474,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       });
       this.trackRequest(startTime, true);
       steps.push({ step: 'activate', ...outcome });
-      return this.answer({
+      return {
         status: outcome.success ? 'success' : 'error',
         objectUrl,
         activated: outcome.success,
@@ -469,17 +482,17 @@ export class ObjectSourceHandlers extends BaseHandler {
         hint: outcome.success
           ? 'Active. Read it back with getObjectSource version="active" if you want the proof in hand.'
           : 'The source is written but not active, so the system still runs the old code. Fix it and activate again - nothing was rolled back.'
-      });
+      };
     } catch (error: any) {
       this.trackRequest(startTime, false);
       steps.push({ step: 'activate', error: describeAdtError(error).error });
-      return this.answer({
+      return {
         status: 'error',
         objectUrl,
         activated: false,
         steps,
         hint: 'The source is written but not active. Nothing was rolled back; correct it and run activateSafe.'
-      });
+      };
     }
   }
 
@@ -493,15 +506,6 @@ export class ObjectSourceHandlers extends BaseHandler {
       lockHandle,
       (start, ok) => this.trackRequest(start, ok)
     );
-  }
-
-  private answer(payload: Record<string, unknown>) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify(payload)
-      }]
-    };
   }
 
   async handleSetObjectSource(args: any): Promise<any> {
@@ -518,8 +522,7 @@ export class ObjectSourceHandlers extends BaseHandler {
       );
     }
 
-    const startTime = performance.now();
-    try {
+    return this.tracked('Failed to set object source', async () => {
       // dropSession/logout reset the client to stateless; writing source requires a stateful session
       this.adtclient.stateful = session_types.stateful;
       await this.adtclient.setObjectSource(
@@ -531,7 +534,6 @@ export class ObjectSourceHandlers extends BaseHandler {
       // Cache the just-written source so a follow-up syntaxCheckCode can reuse it
       // without the caller re-sending it (issue #2).
       sourceCache.set(args.objectSourceUrl, args.source);
-      this.trackRequest(startTime, true);
       return {
         content: [
           {
@@ -543,9 +545,6 @@ export class ObjectSourceHandlers extends BaseHandler {
           }
         ]
       };
-    } catch (error: any) {
-      this.trackRequest(startTime, false);
-      throw wrapAdtError(error, 'Failed to set object source');
-    }
+    });
   }
 }

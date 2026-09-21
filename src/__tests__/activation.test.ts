@@ -64,6 +64,25 @@ describe('activateByName', () => {
     expect(result.hint).toMatch(/other object\(s\) are still inactive/);
   });
 
+  /**
+   * The bug a bare startsWith would reintroduce: ZCL_TEST is a real prefix of
+   * ZCL_TEST_HELPER, but they are two different objects. Sweeping the second
+   * one into "mine" would silently activate someone else's unrelated,
+   * possibly half-finished object and hide it from the othersInactive
+   * warning meant to surface exactly that.
+   */
+  it('does not treat an unrelated object with the same name prefix as its own', async () => {
+    const handlers = handler({ inactiveObjects: async () => [inactiveRow('ZCL_TEST_HELPER')] });
+    const result = answer(await handlers.handleActivateByName({ objectName: NAME, objectUrl: URL }));
+    expect(result).toMatchObject({
+      success: true,
+      verified: true,
+      stillInactive: [],
+      othersInactive: [{ name: 'ZCL_TEST_HELPER', type: 'CLAS/OC' }],
+      othersInactiveCount: 1
+    });
+  });
+
   it('does not read as a finished program when only one of its includes was activated', async () => {
     // activateByName with mainInclude activates exactly one include per call,
     // and the check is narrowed to the name it was given - so the other four
