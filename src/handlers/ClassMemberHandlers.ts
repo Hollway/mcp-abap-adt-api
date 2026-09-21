@@ -195,25 +195,14 @@ export class ClassMemberHandlers extends BaseHandler {
     edits: unknown[],
     member: Record<string, unknown>
   ): Promise<any> {
-    const result = await this.editor.handleEditObject({
+    const payload = await this.editor.editObjectCore({
       objectSourceUrl: sourceUrl,
       edits,
       transport: args?.transport,
       activate: args?.activate,
       dryRun: args?.dryRun === true
     });
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(result.content[0].text);
-    } catch {
-      return result;
-    }
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ ...payload, member }, null, 2)
-      }]
-    };
+    return this.answer({ ...payload, member });
   }
 
   private planned<T>(plan: () => T): T {

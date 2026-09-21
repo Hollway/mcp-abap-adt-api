@@ -278,10 +278,6 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   /**
    * Create an object and write its source, as one operation.
    *
@@ -296,6 +292,16 @@ export class ObjectRegistrationHandlers extends BaseHandler {
    * half-finished work unasked is worse than telling them about it.
    */
   async handleCreateAndWrite(args: any): Promise<any> {
+    return this.answer(await this.createAndWriteCore(args));
+  }
+
+  /**
+   * The create-lock-write-activate sequence, as a payload rather than a tool
+   * answer. Not part of the tool surface - called directly by sibling
+   * handlers that build on it (a snippet, a generated function module), so
+   * they get the plain object instead of round-tripping it through JSON.
+   */
+  async createAndWriteCore(args: any): Promise<Record<string, unknown>> {
     const objtype = String(args?.objtype || '').trim().toUpperCase();
     const name = String(args?.name || '').trim().toUpperCase();
     const packageName = String(args?.packageName || '').trim().toUpperCase();
@@ -375,18 +381,18 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       ...(verdict.silent ? { note: 'The backend answered without a verdict. Taken as no objection.' } : {})
     });
     if (verdict.objection) {
-      return this.answer({
+      return {
         status: 'error',
         created: false,
         objectUrl,
         name,
         steps,
         hint: `The system refused the name: ${verdict.objection} Nothing was created.`
-      });
+      };
     }
 
     if (args?.dryRun === true) {
-      return this.answer({
+      return {
         status: 'success',
         dryRun: true,
         created: false,
@@ -397,7 +403,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         packageName,
         steps,
         note: 'The name is free. Nothing was created; drop dryRun to run the sequence.'
-      });
+      };
     }
 
     const createStart = performance.now();
@@ -445,7 +451,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       lockHandle = lock.lockHandle;
     } catch (error: any) {
       steps.push({ step: 'lock', error: describeAdtError(error).error });
-      return this.answer({
+      return {
         status: 'error',
         created: true,
         written: false,
@@ -454,7 +460,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         name,
         steps,
         hint: 'The object exists but is empty, and it could not be locked. Lock it and write the source with setObjectSource, or remove it with deleteObject.'
-      });
+      };
     }
     steps.push({ step: 'lock', lockHandle });
 
@@ -475,7 +481,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         (start, ok) => this.trackRequest(start, ok)
       );
       steps.push({ step: 'unlock', ...released });
-      return this.answer({
+      return {
         status: 'error',
         created: true,
         written: false,
@@ -484,7 +490,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         name,
         steps,
         hint: 'The object exists but is empty. Correct the source and write it with setObjectSource, or remove the object with deleteObject.'
-      });
+      };
     }
 
     const unlock = await releaseLock(
@@ -496,7 +502,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
     steps.push({ step: 'unlock', ...unlock });
 
     if (args?.activate === false) {
-      return this.answer({
+      return {
         status: 'success',
         created: true,
         written: true,
@@ -506,10 +512,10 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         name,
         steps,
         hint: 'Written to the inactive version and not activated, so nothing runs it yet.'
-      });
+      };
     }
     if (!unlock.released) {
-      return this.answer({
+      return {
         status: 'error',
         created: true,
         written: true,
@@ -519,7 +525,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         name,
         steps,
         hint: 'The lock could not be released, and activation fails while it is held. Release it (unlockAll) and run activateSafe.'
-      });
+      };
     }
 
     const activateStart = performance.now();
@@ -531,7 +537,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       });
       this.trackRequest(activateStart, true);
       steps.push({ step: 'activate', ...outcome });
-      return this.answer({
+      return {
         status: outcome.success ? 'success' : 'error',
         created: true,
         written: true,
@@ -543,11 +549,11 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         hint: outcome.success
           ? 'Active. Read it back with getObjectSource version="active" for the proof.'
           : 'Written but not active, so the system does not run it. The activation messages are in the activate step; correct the source and run activateSafe.'
-      });
+      };
     } catch (error: any) {
       this.trackRequest(activateStart, false);
       steps.push({ step: 'activate', error: describeAdtError(error).error });
-      return this.answer({
+      return {
         status: 'error',
         created: true,
         written: true,
@@ -557,7 +563,7 @@ export class ObjectRegistrationHandlers extends BaseHandler {
         name,
         steps,
         hint: 'Written but not active. Nothing was rolled back; run activateSafe once the source is right.'
-      });
+      };
     }
   }
 
@@ -644,9 +650,6 @@ export class ObjectRegistrationHandlers extends BaseHandler {
       };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) {
-        throw error;
-      }
       throw wrapAdtError(error, 'Failed to create object');
     }
   }

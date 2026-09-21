@@ -45,15 +45,35 @@ for (const file of handlerFiles) {
     starts.push({ method: m[1], at: m.index });
   }
 
+  // A handle* method that only delegates to a same-file *Core method (the
+  // shape internal callers use to skip the JSON round-trip, e.g.
+  // handleRunQuery calling runQueryCore) has to have that method's body
+  // folded in, or the routing checks below would be looking at an empty
+  // shell instead of the read/write calls it actually makes. Narrowed to
+  // *Core specifically, not every private helper a handler calls - most of
+  // those are used from several handle* methods with different routing
+  // rules, and folding them all in would blur the exact per-tool distinction
+  // these checks exist to make.
+  const coreBodyOf = new Map<string, string>();
+  starts.forEach((start, i) => {
+    if (!start.method.endsWith('Core')) return;
+    const end = i + 1 < starts.length ? starts[i + 1].at : source.length;
+    coreBodyOf.set(start.method, source.slice(start.at, end));
+  });
+
   starts.forEach((start, i) => {
     if (!start.method.startsWith('handle') || start.method === 'handle') return;
     const end = i + 1 < starts.length ? starts[i + 1].at : source.length;
     const bare = start.method.replace(/^handle/, '');
+    let body = source.slice(start.at, end);
+    for (const delegate of body.matchAll(/this\.([A-Za-z0-9_]+Core)\(/g)) {
+      body += coreBodyOf.get(delegate[1]) ?? '';
+    }
     blocks.push({
       file,
       method: start.method,
       tool: bare.charAt(0).toLowerCase() + bare.slice(1),
-      body: source.slice(start.at, end)
+      body
     });
   });
 }

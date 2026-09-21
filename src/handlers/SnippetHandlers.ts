@@ -84,10 +84,6 @@ export class SnippetHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-  }
-
   /**
    * The creation, as one line rather than as its whole nested report.
    *
@@ -188,6 +184,16 @@ export class SnippetHandlers extends BaseHandler {
   }
 
   async handleRunSnippet(args: any): Promise<any> {
+    return this.answer(await this.runSnippetCore(args));
+  }
+
+  /**
+   * The run, as a payload rather than a tool answer. Not part of the tool
+   * surface - called directly by sibling handlers (a call built from a
+   * signature, text elements probed with a throwaway snippet) so they get
+   * the plain object instead of round-tripping it through JSON.
+   */
+  async runSnippetCore(args: any): Promise<Record<string, unknown>> {
     const code = this.parseObjectArg<string[]>(args?.code, 'code');
     const declarations = this.parseObjectArg<string[]>(args?.declarations, 'declarations');
     const lines = Array.isArray(code) ? code : typeof code === 'string' ? [code] : [];
@@ -207,7 +213,7 @@ export class SnippetHandlers extends BaseHandler {
     }
 
     if (args?.dryRun === true) {
-      return this.answer({ status: 'success', dryRun: true, className, packageName, source });
+      return { status: 'success', dryRun: true, className, packageName, source };
     }
 
     const objectUrl = `/sap/bc/adt/oo/classes/${encodeURIComponent(className.toLowerCase())}`;
@@ -215,7 +221,7 @@ export class SnippetHandlers extends BaseHandler {
 
     // Create, write and activate in one call: that handler carries the whole
     // lock cycle and the activation check.
-    const result = await this.registration.handleCreateAndWrite({
+    const created = await this.registration.createAndWriteCore({
       objtype: 'CLAS/OC',
       name: className,
       description: `MCP snippet ${className}`,
@@ -223,7 +229,6 @@ export class SnippetHandlers extends BaseHandler {
       source,
       transport: args?.transport
     });
-    const created = JSON.parse(result.content[0].text);
     steps.push(this.summariseCreate(created));
 
     if (created.activated !== true) {
@@ -232,7 +237,7 @@ export class SnippetHandlers extends BaseHandler {
       const cleanup = created.created === true && args?.keepClass !== true
         ? await this.removeClass(objectUrl)
         : undefined;
-      return this.answer({
+      return {
         status: 'error',
         className,
         packageName,
@@ -240,7 +245,7 @@ export class SnippetHandlers extends BaseHandler {
         steps: [...steps, ...(cleanup ? [cleanup] : [])],
         source,
         hint: 'The class was created but not activated, so nothing ran. The activation messages above name the line; correct the snippet and try again.'
-      });
+      };
     }
 
     const startTime = performance.now();
@@ -265,7 +270,7 @@ export class SnippetHandlers extends BaseHandler {
     const cleanup = args?.keepClass === true ? undefined : await this.removeClass(objectUrl);
     if (cleanup) steps.push(cleanup);
 
-    return this.answer({
+    return {
       status: runError ? 'error' : 'success',
       className,
       packageName,
@@ -287,6 +292,6 @@ export class SnippetHandlers extends BaseHandler {
         }
         : {}),
       steps
-    });
+    };
   }
 }

@@ -554,14 +554,12 @@ export class TransportHandlers extends BaseHandler {
     }
 
     async handleTransportInfo(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get transport info', async () => {
             const transportInfo = await this.readClient.transportInfo(
                 args.objSourceUrl,
                 args.devClass,
                 args.operation
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -573,10 +571,7 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get transport info');
-        }
+        });
     }
 
     /**
@@ -716,15 +711,13 @@ export class TransportHandlers extends BaseHandler {
     }
 
     async handleCreateTransport(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to create transport', async () => {
             const transportResult = await this.adtclient.createTransport(
                 args.objSourceUrl,
                 args.REQUEST_TEXT,
                 args.DEVCLASS,
                 args.transportLayer
             );
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -737,17 +730,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create transport');
-        }
+        });
     }
 
     async handleHasTransportConfig(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to check transport config', async () => {
             const hasConfig = await this.readClient.hasTransportConfig();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -759,17 +747,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to check transport config');
-        }
+        });
     }
 
     async handleTransportConfigurations(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get transport configurations', async () => {
             const configurations = await this.readClient.transportConfigurations();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -781,17 +764,14 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get transport configurations');
-        }
+        });
     }
 
     async handleGetTransportConfiguration(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked(error => describeAdtError(error).status === 404
+                ? `No transport organizer configuration at ${args?.url}: this takes the link of one transportConfigurations answered with, and a system with no configurations has none to take`
+                : 'Failed to get transport configuration', async () => {
             const configuration = await this.readClient.getTransportConfiguration(args.url);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -803,19 +783,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, describeAdtError(error).status === 404
-                ? `No transport organizer configuration at ${args?.url}: this takes the link of one transportConfigurations answered with, and a system with no configurations has none to take`
-                : 'Failed to get transport configuration');
-        }
+        });
     }
 
     async handleSetTransportsConfig(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to set transports config', async () => {
             const result = await this.adtclient.setTransportsConfig(args.uri, args.etag, this.parseObjectArg(args.config, 'config'));
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -827,17 +800,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set transports config');
-        }
+        });
     }
 
     async handleCreateTransportsConfig(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to create transports config', async () => {
             const result = await this.adtclient.createTransportsConfig();
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -849,10 +817,7 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to create transports config');
-        }
+        });
     }
 
     /**
@@ -1076,7 +1041,6 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            if (error instanceof McpError) throw error;
             throw wrapAdtError(error, `Failed to read the transport history of ${objectName}`);
         }
     }
@@ -1127,7 +1091,6 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            if (error instanceof McpError) throw error;
             throw wrapAdtError(error, `Failed to look for conflicts on ${number}`);
         }
     }
@@ -1207,7 +1170,6 @@ export class TransportHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            if (error instanceof McpError) throw error;
             throw wrapAdtError(error, `Failed to check whether ${number} is ready for release`);
         }
     }
@@ -1272,10 +1234,8 @@ export class TransportHandlers extends BaseHandler {
     }
 
     async handleTransportDelete(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to delete transport', async () => {
             const result = await this.adtclient.transportDelete(requestArgument(args) as string);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1287,17 +1247,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to delete transport');
-        }
+        });
     }
 
     async handleTransportRelease(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to release transport', async () => {
             const result = await this.adtclient.transportRelease(requestArgument(args) as string, args.ignoreLocks, args.IgnoreATC);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1309,17 +1264,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to release transport');
-        }
+        });
     }
 
     async handleTransportSetOwner(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to set transport owner', async () => {
             const result = await this.adtclient.transportSetOwner(requestArgument(args) as string, args.targetuser);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1331,10 +1281,7 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set transport owner');
-        }
+        });
     }
 
     /**
@@ -1385,10 +1332,8 @@ export class TransportHandlers extends BaseHandler {
     }
 
     async handleSystemUsers(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get system users', async () => {
             const result = filterUsers(await this.readClient.systemUsers(), args);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1400,17 +1345,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get system users');
-        }
+        });
     }
 
     async handleTransportReference(args: any): Promise<any> {
-        const startTime = performance.now();
-        try {
+        return this.tracked('Failed to get transport reference', async () => {
             const reference = await this.readClient.transportReference(args.pgmid, args.obj_wbtype, args.obj_name, args.tr_number);
-            this.trackRequest(startTime, true);
             return {
                 content: [
                     {
@@ -1422,16 +1362,12 @@ export class TransportHandlers extends BaseHandler {
                     }
                 ]
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get transport reference');
-        }
+        });
     }
 
     /** Rows of a SELECT, through the tool that already runs them. */
     private async queryRows(sqlQuery: string, rowNumber = 50): Promise<Record<string, string>[]> {
-        const result = await this.queries.handleRunQuery({ sqlQuery, rowNumber });
-        const payload = JSON.parse(result.content[0].text);
+        const payload: any = await this.queries.runQueryCore({ sqlQuery, rowNumber });
         const values = payload?.result?.values;
         return Array.isArray(values) ? values : [];
     }
@@ -1478,6 +1414,16 @@ export class TransportHandlers extends BaseHandler {
     }
 
     async handleRegisterInTransport(args: any): Promise<any> {
+        return this.answer(await this.registerInTransportCore(args));
+    }
+
+    /**
+     * The registration, as a payload rather than a tool answer. Not part of
+     * the tool surface - called directly by text elements' write, which
+     * needs to know whether it was registered without round-tripping the
+     * answer through JSON.
+     */
+    async registerInTransportCore(args: any): Promise<Record<string, unknown>> {
         let row: E071Row;
         let given: string;
         try {
@@ -1512,7 +1458,7 @@ export class TransportHandlers extends BaseHandler {
         }
         steps.push({ step: 'resolveTask', task: choice.task, resolvedFrom: choice.resolvedFrom, ...(choice.request ? { request: choice.request } : {}) });
 
-        const called = await this.calls.handleCallFunction({
+        const call: any = await this.calls.callFunctionCore({
             name: 'TR_APPEND_TO_COMM_OBJS_KEYS',
             values: {
                 WI_TRKORR: choice.task,
@@ -1524,7 +1470,6 @@ export class TransportHandlers extends BaseHandler {
             // which would undo exactly the thing this tool is for.
             commit: !simulate
         });
-        const call = JSON.parse(called.content[0].text);
         const exception = String(call?.exceptionRaised || '').toUpperCase();
         steps.push({
             step: 'call',
@@ -1538,38 +1483,30 @@ export class TransportHandlers extends BaseHandler {
         if (failed) {
             const holders = exception === 'OB_LOCKED_BY_OTHER' ? await this.holders(row) : [];
             return {
-                content: [{
-                    type: 'text', text: JSON.stringify({
-                        status: 'error',
-                        registered: false,
-                        ...(simulate ? { simulated: true } : {}),
-                        transport: choice.request || choice.task,
-                        task: choice.task,
-                        row,
-                        steps,
-                        ...(holders.length ? { heldBy: holders } : {}),
-                        hint: exception
-                            ? diagnose(exception)
-                            : 'The module did not run; nothing was registered.'
-                    })
-                }]
+                status: 'error',
+                registered: false,
+                ...(simulate ? { simulated: true } : {}),
+                transport: choice.request || choice.task,
+                task: choice.task,
+                row,
+                steps,
+                ...(holders.length ? { heldBy: holders } : {}),
+                hint: exception
+                    ? diagnose(exception)
+                    : 'The module did not run; nothing was registered.'
             };
         }
 
         if (simulate) {
             return {
-                content: [{
-                    type: 'text', text: JSON.stringify({
-                        status: 'success',
-                        registered: false,
-                        simulated: true,
-                        transport: choice.request || choice.task,
-                        task: choice.task,
-                        row,
-                        steps,
-                        hint: `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} would be accepted into ${choice.task}. Nothing was written.`
-                    })
-                }]
+                status: 'success',
+                registered: false,
+                simulated: true,
+                transport: choice.request || choice.task,
+                task: choice.task,
+                row,
+                steps,
+                hint: `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} would be accepted into ${choice.task}. Nothing was written.`
             };
         }
 
@@ -1580,21 +1517,17 @@ export class TransportHandlers extends BaseHandler {
         steps.push({ step: 'verify', foundInE071: written.length });
 
         return {
-            content: [{
-                type: 'text', text: JSON.stringify({
-                    status: written.length ? 'success' : 'error',
-                    registered: written.length > 0,
-                    transport: choice.request || choice.task,
-                    task: choice.task,
-                    row,
-                    steps,
-                    hint: written.length
-                        ? `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} is in task ${choice.task}` +
-                          (choice.request ? ` of request ${choice.request}.` : '.')
-                        : 'The module reported success but E071 has no such row, so nothing travels. ' +
-                          'Check the request in SE09 before relying on this.'
-                })
-            }]
+            status: written.length ? 'success' : 'error',
+            registered: written.length > 0,
+            transport: choice.request || choice.task,
+            task: choice.task,
+            row,
+            steps,
+            hint: written.length
+                ? `${row.PGMID} ${row.OBJECT} ${row.OBJ_NAME} is in task ${choice.task}` +
+                  (choice.request ? ` of request ${choice.request}.` : '.')
+                : 'The module reported success but E071 has no such row, so nothing travels. ' +
+                  'Check the request in SE09 before relying on this.'
         };
     }
 }

@@ -178,27 +178,23 @@ describe('the text pool fallback', () => {
       ...over
     });
     (handlers as any).snippets = {
-      handleRunSnippet: async ({ code }: { code: string[] }) => {
+      runSnippetCore: async ({ code }: { code: string[] }) => {
         ran.push(code);
-        return { content: [{ type: 'text', text: JSON.stringify({ status: 'success', ran: true, output }) }] };
+        return { status: 'success', ran: true, output };
       }
     };
     // The transport side is a handler of its own, with a function module and
     // two queries behind it; what belongs here is what this handler does with
     // its answer.
     (handlers as any).transports = {
-      handleRegisterInTransport: async (args: any) => {
+      registerInTransportCore: async (args: any) => {
         registrations.push(args);
         const registered = transport.registered !== false;
         return {
-          content: [{
-            type: 'text', text: JSON.stringify({
-              status: registered ? 'success' : 'error',
-              registered,
-              task: 'DEVK900124',
-              hint: transport.hint || (registered ? 'in the task.' : 'The object is locked in another request.')
-            })
-          }]
+          status: registered ? 'success' : 'error',
+          registered,
+          task: 'DEVK900124',
+          hint: transport.hint || (registered ? 'in the task.' : 'The object is locked in another request.')
         };
       },
       registrationState: async () => ({

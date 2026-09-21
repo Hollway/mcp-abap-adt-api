@@ -79,15 +79,14 @@ const handler = (over: { output?: string; run?: any; source?: string } = {}) => 
   };
   const handlers = new CallHandlers(client as any);
   (handlers as any).snippets = {
-    handleRunSnippet: async (args: any) => {
+    runSnippetCore: async (args: any) => {
       ran.push(args);
-      const answer = over.run ?? {
+      return over.run ?? {
         status: 'success',
         ran: true,
         output: over.output ?? okPayload,
         steps: [{ step: 'create', activated: true }, { step: 'run', ran: true }]
       };
-      return { content: [{ type: 'text', text: JSON.stringify(answer) }] };
     }
   };
   return { handlers, ran };

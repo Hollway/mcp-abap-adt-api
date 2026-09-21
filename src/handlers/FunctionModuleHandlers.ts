@@ -155,10 +155,6 @@ export class FunctionModuleHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-  }
-
   private lower = (name: string): string => encodeURIComponent(String(name).trim().toLowerCase());
 
   private moduleUrl(functionGroup: string, name: string): string {
@@ -210,6 +206,15 @@ export class FunctionModuleHandlers extends BaseHandler {
   }
 
   async handleGetFunctionModule(args: any): Promise<any> {
+    return this.answer(await this.getFunctionModuleCore(args));
+  }
+
+  /**
+   * The read, as a payload rather than a tool answer. Not part of the tool
+   * surface - called directly by callFunction, which already knows the
+   * module's name and just needs its signature.
+   */
+  async getFunctionModuleCore(args: any): Promise<Record<string, unknown>> {
     const name = String(args?.name || '').trim().toUpperCase();
     if (!name) throw new McpError(ErrorCode.InvalidParams, 'Pass name - the function module to read.');
 
@@ -241,7 +246,7 @@ export class FunctionModuleHandlers extends BaseHandler {
       }
 
       this.trackRequest(startTime, true);
-      return this.answer({
+      return {
         status: 'success',
         name,
         functionGroup,
@@ -259,10 +264,9 @@ export class FunctionModuleHandlers extends BaseHandler {
             bodyHasMore: (Number(args?.startLine) || 1) - 1 + body.length < parsed.bodyLines
           }
           : {})
-      });
+      };
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       if (error instanceof FunctionModuleError) {
         throw new McpError(ErrorCode.InvalidParams, error.message);
       }
@@ -320,7 +324,6 @@ export class FunctionModuleHandlers extends BaseHandler {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      if (error instanceof McpError) throw error;
       throw wrapAdtError(error, `Failed to list function group ${functionGroup}`);
     }
   }
@@ -377,7 +380,7 @@ export class FunctionModuleHandlers extends BaseHandler {
       );
     }
 
-    const result = await this.registration.handleCreateAndWrite({
+    const payload = await this.registration.createAndWriteCore({
       objtype: 'FUGR/FF',
       name,
       description,
@@ -387,13 +390,6 @@ export class FunctionModuleHandlers extends BaseHandler {
       source,
       transport: args?.transport
     });
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(result.content[0].text);
-    } catch {
-      return result;
-    }
     return this.answer({ ...payload, functionGroup, package: packageName });
   }
 }

@@ -232,7 +232,15 @@ export class QueryHandlers extends BaseHandler {
     }
 
     async handleRunQuery(args: any): Promise<any> {
-        const startTime = performance.now();
+        return this.answer(await this.runQueryCore(args));
+    }
+
+    /**
+     * The query, as a payload rather than a tool answer. Not part of the
+     * tool surface - called directly by the transport-registration read,
+     * which needs the rows without round-tripping them through JSON.
+     */
+    async runQueryCore(args: any): Promise<Record<string, unknown>> {
         // The endpoint refuses a statement longer than 255 characters, and says
         // so as "Maximum number of characters in a row exceeds 255" - which
         // sounds like a row of the result, not like the query. Measured: 250
@@ -246,28 +254,17 @@ export class QueryHandlers extends BaseHandler {
                 'Shorten it - drop the field list to what you read, alias the tables, or split a long IN list into several calls - or use tableContents for one table.'
             );
         }
-        try {
+        return this.tracked('Failed to run query', async () => {
             const result = await this.readClient.runQuery(
                 args.sqlQuery,
                 this.fetchCount(args),
                 args.decode
             );
             const shaped = this.shape(result, args);
-            this.trackRequest(startTime, true);
             return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            ...shaped
-                        })
-                    }
-                ]
+                status: 'success',
+                ...shaped
             };
-        } catch (error: any) {
-            this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to run query');
-        }
+        });
     }
 }

@@ -56,3 +56,27 @@ describe('sourceCache.forgetUnder', () => {
     expect(sourceCache.get(`${CLASS}/source/main`)).toBeUndefined();
   });
 });
+
+describe('sourceCache capacity', () => {
+  /**
+   * A session left open for hours reads and writes source without ever being
+   * told to forget any of it - nothing else bounds the cache, so it has to
+   * bound itself or a long-lived session leaks memory one read at a time.
+   */
+  it('drops the least recently used entry once it is full, not an arbitrary one', () => {
+    for (let i = 0; i < 100; i++) {
+      sourceCache.set(`/sap/bc/adt/oo/classes/z${i}/source/main`, `text ${i}`);
+    }
+    expect(sourceCache.count()).toBe(100);
+
+    // Touching the oldest entry moves it to the front of the eviction order,
+    // so the one right after it is what actually goes next.
+    sourceCache.get('/sap/bc/adt/oo/classes/z0/source/main');
+    sourceCache.set('/sap/bc/adt/oo/classes/znew/source/main', 'new text');
+
+    expect(sourceCache.count()).toBe(100);
+    expect(sourceCache.has('/sap/bc/adt/oo/classes/z0/source/main')).toBe(true);
+    expect(sourceCache.has('/sap/bc/adt/oo/classes/z1/source/main')).toBe(false);
+    expect(sourceCache.has('/sap/bc/adt/oo/classes/znew/source/main')).toBe(true);
+  });
+});

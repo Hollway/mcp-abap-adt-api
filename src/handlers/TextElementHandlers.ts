@@ -7,7 +7,7 @@ import type { ToolDefinition } from '../types/tools';
 import { session_types, textElementsUrl } from 'abap-adt-api';
 import type { ADTClient, TextElement, TextElementCategory } from 'abap-adt-api';
 import { lockRegistry } from '../lib/lockRegistry';
-import { describeAdtError } from '../lib/adtError';
+import { describeAdtError, hintOn404 } from '../lib/adtError';
 import { takeLock, releaseLock } from '../lib/lockCycle';
 import { activateAndVerify } from '../lib/activation';
 import { isReadOnly, readOnlyAllowances } from '../lib/serverConfig';
@@ -33,13 +33,10 @@ import {
  * link. A bare 404 there reads like a wrong object name, which is the wrong
  * thing to go and check.
  */
-const missingEndpointHint = (error: unknown): string | undefined => {
-  const info = describeAdtError(error);
-  if (info.status !== 404) return undefined;
-  return 'This release does not serve text elements over ADT: /sap/bc/adt/textelements is not there at all, ' +
+const missingEndpointHint = (error: unknown): string | undefined =>
+  hintOn404(error, 'This release does not serve text elements over ADT: /sap/bc/adt/textelements is not there at all, ' +
     'and ADT itself offers them only through the SAPGUI bridge (transaction SE38 -> Goto -> Text elements). ' +
-    'Nothing is wrong with the object name.';
-};
+    'Nothing is wrong with the object name.');
 
 const CATEGORIES: TextElementCategory[] = ['symbols', 'selections', 'headings'];
 
@@ -207,10 +204,6 @@ export class TextElementHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   private category(args: any): TextElementCategory {
     const given = String(args?.category || 'symbols');
     if (!CATEGORIES.includes(given as TextElementCategory)) {
@@ -314,8 +307,7 @@ export class TextElementHandlers extends BaseHandler {
 
   /** Run a generated snippet and hand back what it printed. */
   private async runPoolSnippet(code: string[]): Promise<{ output: string; answer: any }> {
-    const result = await this.snippets.handleRunSnippet({ code });
-    const answer = JSON.parse(result.content[0].text);
+    const answer = await this.snippets.runSnippetCore({ code });
     return { output: String(answer?.output ?? ''), answer };
   }
 
@@ -587,12 +579,12 @@ export class TextElementHandlers extends BaseHandler {
       const target = transportObjectFor(objectType, objectName);
       try {
         if (transport) {
-          const outcome = JSON.parse((await this.transports.handleRegisterInTransport({
+          const outcome: any = await this.transports.registerInTransportCore({
             pgmid: 'R3TR',
             object: target.object,
             objName: target.objName,
             transport
-          })).content[0].text);
+          });
           registered = outcome?.registered === true;
           steps.push({ step: 'registerInTransport', ...outcome });
           if (!registered) {

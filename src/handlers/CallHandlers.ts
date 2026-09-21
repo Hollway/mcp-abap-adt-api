@@ -141,10 +141,6 @@ export class CallHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-  }
-
   /** The values as an object, however the client passed them. */
   private values(args: any): Record<string, unknown> {
     const raw = args?.values;
@@ -184,21 +180,24 @@ export class CallHandlers extends BaseHandler {
   }
 
   /**
-   * Run the generated snippet and read its payload back.
+   * Run the generated snippet and interpret its payload.
    *
    * runSnippet already carries the whole cycle - create, activate, run,
    * delete, and the dump summary when the run died - so what is left here is
-   * turning its console output back into values.
+   * turning its console output back into values. Returns a payload rather
+   * than a tool answer - not part of the tool surface, called directly by
+   * transports' task-registration write, which needs the exception a
+   * function raised without round-tripping it through JSON.
    */
-  private async execute(
+  async executeCore(
     generated: GeneratedCall,
     args: any,
     called: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     const className = String(args?.snippetClass || '').trim().toUpperCase() || snippetClassName('ZMCP_CALL');
 
     if (args?.dryRun === true) {
-      return this.answer({
+      return {
         status: 'success',
         dryRun: true,
         ...called,
@@ -211,22 +210,21 @@ export class CallHandlers extends BaseHandler {
           code: generated.code,
           declarations: generated.declarations
         })
-      });
+      };
     }
 
-    const result = await this.snippets.handleRunSnippet({
+    const run: any = await this.snippets.runSnippetCore({
       code: generated.code,
       declarations: generated.declarations,
       className,
       keepClass: args?.keepClass === true
     });
-    const run = JSON.parse(result.content[0].text);
 
     if (run.ran !== true) {
       // The common failure is a value that does not fit the parameter it was
       // written into, and the activation messages name the line - so the
       // generated source goes with them.
-      return this.answer({
+      return {
         status: 'error',
         ...called,
         ran: false,
@@ -241,12 +239,12 @@ export class CallHandlers extends BaseHandler {
         hint: (run.steps || []).some((step: any) => step?.activationMessages)
           ? 'The generated call did not compile. The activation messages name the line: usually a value written into a parameter it does not fit, or a component name the structure does not have.'
           : 'The call did not run to the end. What it managed to do was rolled back only if it got that far.'
-      });
+      };
     }
 
     const xml = decodeResultPayload(String(run.output || ''));
     if (!xml) {
-      return this.answer({
+      return {
         status: 'error',
         ...called,
         ran: true,
@@ -254,7 +252,7 @@ export class CallHandlers extends BaseHandler {
         output: run.output,
         steps: run.steps,
         hint: 'The call ran but printed no result payload. Anything the called code wrote to the console itself is in output above.'
-      });
+      };
     }
 
     let outcome;
@@ -262,20 +260,20 @@ export class CallHandlers extends BaseHandler {
       outcome = interpretCall(parseAsXmlValues(xml), generated);
     } catch (error: any) {
       if (error instanceof AsXmlError) {
-        return this.answer({
+        return {
           status: 'error',
           ...called,
           ran: true,
           output: run.output,
           error: error.message,
           hint: 'The result payload arrived damaged. Raise maxRows only if it was cut short; otherwise the console formatted it in a way this cannot read.'
-        });
+        };
       }
       throw error;
     }
 
     const failed = outcome.subrc !== 0 || !!outcome.exceptionClass;
-    return this.answer({
+    return {
       status: failed ? 'error' : 'success',
       ...called,
       ran: true,
@@ -298,21 +296,30 @@ export class CallHandlers extends BaseHandler {
       ...(generated.rolledBack
         ? {}
         : { commitHint: 'This call was committed: what it changed stands.' })
-    });
+    };
   }
 
   async handleCallFunction(args: any): Promise<any> {
+    return this.answer(await this.callFunctionCore(args));
+  }
+
+  /**
+   * The call, as a payload rather than a tool answer. Not part of the tool
+   * surface - called directly by transports' task-registration write, which
+   * needs the exception a function raised without round-tripping it through
+   * JSON.
+   */
+  async callFunctionCore(args: any): Promise<Record<string, unknown>> {
     const name = String(args?.name || '').trim().toUpperCase();
     if (!name) throw new McpError(ErrorCode.InvalidParams, 'Pass name - the function module to call.');
     const values = this.values(args);
 
     // The signature comes from the tool that already knows how to find a
     // module without being told its group.
-    const read = await this.functions.handleGetFunctionModule({
+    const module: any = await this.functions.getFunctionModuleCore({
       name,
       ...(args?.functionGroup ? { functionGroup: args.functionGroup } : {})
     });
-    const module = JSON.parse(read.content[0].text);
 
     const generated = this.generate(() => buildFunctionCall(
       { ...module.signature, name },
@@ -320,7 +327,7 @@ export class CallHandlers extends BaseHandler {
       { rollback: args?.commit !== true, maxRows: args?.maxRows }
     ));
 
-    return this.execute(generated, args, {
+    return this.executeCore(generated, args, {
       called: name,
       functionGroup: module.functionGroup
     });
@@ -376,10 +383,10 @@ export class CallHandlers extends BaseHandler {
       { rollback: args?.commit !== true, maxRows: args?.maxRows }
     ));
 
-    return this.execute(generated, args, {
+    return this.answer(await this.executeCore(generated, args, {
       called: `${className}=>${methodName}`,
       ...(signature.visibility ? { visibility: signature.visibility } : {}),
       ...(signature.raising.length ? { raising: signature.raising } : {})
-    });
+    }));
   }
 }

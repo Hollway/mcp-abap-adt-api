@@ -202,10 +202,6 @@ export class MessageClassHandlers extends BaseHandler {
     }
   }
 
-  private answer(payload: Record<string, unknown>) {
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-  }
-
   private className(args: any): string {
     const name = String(args?.className || args?.name || '').trim().toUpperCase();
     if (!name) {
@@ -314,6 +310,15 @@ export class MessageClassHandlers extends BaseHandler {
   }
 
   async handleSetMessages(args: any): Promise<any> {
+    return this.answer(await this.setMessagesCore(args));
+  }
+
+  /**
+   * The write, as a payload rather than a tool answer, so activateSafe-style
+   * internal callers get the plain object instead of round-tripping it
+   * through JSON like an external caller would.
+   */
+  private async setMessagesCore(args: any): Promise<Record<string, unknown>> {
     const name = this.className(args);
     const incoming = this.parseObjectArg<any[]>(args?.messages, 'messages');
     if (!Array.isArray(incoming) || !incoming.length) {
@@ -355,13 +360,13 @@ export class MessageClassHandlers extends BaseHandler {
       takenHere = lock.taken;
     } catch (error: any) {
       steps.push({ step: 'lock', error: describeAdtError(error).error });
-      return this.answer({
+      return {
         status: 'error',
         className: name,
         written: false,
         steps,
         hint: 'Nothing was written: the class could not be locked. Somebody else may be editing it in SE91.'
-      });
+      };
     }
     steps.push({ step: 'lock', lockHandle, reused: !takenHere });
 
@@ -393,13 +398,13 @@ export class MessageClassHandlers extends BaseHandler {
       if (takenHere) {
         steps.push({ step: 'unlock', ...(await this.release(url, lockHandle)) });
       }
-      return this.answer({
+      return {
         status: 'error',
         className: name,
         written: false,
         steps,
         hint: 'Nothing was written. The backend rejects the whole document over one bad message, so no message of this call landed.'
-      });
+      };
     }
 
     // Read back before releasing the lock: the proof belongs to the same
@@ -412,7 +417,7 @@ export class MessageClassHandlers extends BaseHandler {
     }
 
     const truncated = prepared.filter(m => m.truncatedFrom);
-    return this.answer({
+    return {
       status: missing.length ? 'error' : 'success',
       className: name,
       written: !missing.length,
@@ -430,7 +435,7 @@ export class MessageClassHandlers extends BaseHandler {
       hint: missing.length
         ? `The class came back without ${missing.join(', ')}. Nothing was rolled back - read the class with getMessages and check what is there.`
         : 'In T100 and usable now: no activation is involved. A message cannot be removed again through ADT - that needs SE91.'
-    });
+    };
   }
 
   async handleCreateMessageClass(args: any): Promise<any> {
@@ -528,13 +533,12 @@ export class MessageClassHandlers extends BaseHandler {
       });
     }
 
-    const written = await this.handleSetMessages({
+    const outcome = await this.setMessagesCore({
       className: name,
       messages,
       transport: args?.transport
     });
-    const outcome = JSON.parse(written.content[0].text);
-    steps.push(...(outcome.steps || []));
+    steps.push(...((outcome.steps as Record<string, unknown>[]) || []));
 
     return this.answer({
       status: outcome.status,

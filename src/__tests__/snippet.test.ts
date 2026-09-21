@@ -139,9 +139,9 @@ const handlers = (over: Record<string, unknown> = {}, created: Record<string, un
   // The creation chain is proven by its own tests; here what matters is the
   // sequence around it, so it answers with a fixed result.
   (handler as any).registration = {
-    handleCreateAndWrite: async (args: any) => {
+    createAndWriteCore: async (args: any) => {
       calls.push({ createAndWrite: args.name, packageName: args.packageName, source: args.source });
-      return { content: [{ type: 'text', text: JSON.stringify(created) }] };
+      return created;
     }
   };
   return { handler, calls, client };

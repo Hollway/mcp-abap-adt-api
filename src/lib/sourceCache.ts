@@ -33,17 +33,41 @@ export interface SourceCache {
 export const sourceCacheKey = (url: string, version?: string): string =>
   version && version !== 'inactive' ? `${url}?version=${version}` : url;
 
+/**
+ * Entries held per session before the least recently used one is dropped.
+ *
+ * A session left open for hours reads and writes source without ever being
+ * told to forget any of it, so nothing else bounds this. The cap is sized for
+ * what one edit actually touches at a time - a class, the few things it
+ * calls, maybe a handful more read along the way - not for holding a whole
+ * package in memory.
+ */
+const MAX_ENTRIES = 100;
+
 export function createSourceCache(): SourceCache {
+  // Map preserves insertion order, which doubles as recency order once every
+  // touch re-inserts the key: oldest-unused is always whatever iterates first.
   const cache = new Map<string, string>();
+
+  const touch = (url: string, source: string): void => {
+    cache.delete(url);
+    cache.set(url, source);
+    if (cache.size > MAX_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+  };
 
   return {
     set(url: string, source: string): void {
       if (typeof url === 'string' && url.length > 0 && typeof source === 'string') {
-        cache.set(url, source);
+        touch(url, source);
       }
     },
     get(url: string): string | undefined {
-      return cache.get(url);
+      const source = cache.get(url);
+      if (source !== undefined) touch(url, source);
+      return source;
     },
     has(url: string): boolean {
       return cache.has(url);
