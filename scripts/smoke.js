@@ -896,6 +896,12 @@ const check = (label, condition, detail) => {
     listeners.payload.status === 'success' &&
     ['none', 'conflict'].includes(listeners.payload.listener),
     listeners.payload);
+  // The listener the backend reports is what it sees from outside; the debug
+  // session is what this server is holding, and the two are not the same
+  // question - a listener waiting here has a SAP session of its own.
+  check('and says whether this server is holding a debug session',
+    typeof listeners.payload.debugSession === 'string',
+    listeners.payload.debugSession);
 
   const someUsers = await call('systemUsers', { filter: process.env.SAP_USER, limit: 5 });
   check('systemUsers finds one user without listing the system',
@@ -1699,6 +1705,28 @@ const check = (label, condition, detail) => {
   check('transportAddUser asks who is to be added, and says they get a task',
     halfAddUser.isError === true && /task/.test(JSON.stringify(halfAddUser.payload)),
     halfAddUser.payload);
+
+  // The debugger is the same case: nothing here starts a listener or attaches
+  // to anything, but three of its refusals never reach the backend. Each was a
+  // live finding - a frame number the tool could not express, a step to a line
+  // with no line, and settings that were read off a string and silently became
+  // the defaults.
+  const badFrame = await call('debuggerGoToStack', { urlOrPosition: 'top' });
+  check('debuggerGoToStack names both forms of a frame instead of a bare "Invalid stack URL"',
+    badFrame.isError === true
+    && /frame number nor a stack URI/.test(JSON.stringify(badFrame.payload)),
+    badFrame.payload);
+
+  const stepNowhere = await call('debuggerStep', { steptype: 'stepRunToLine' });
+  check('debuggerStep asks for the line a run-to-line step runs to',
+    stepNowhere.isError === true && /needs url/.test(JSON.stringify(stepNowhere.payload)),
+    stepNowhere.payload);
+
+  const settingsText = await call('debuggerSaveSettings', { settings: 'systemDebugging' });
+  check('debuggerSaveSettings refuses text where the six flags belong',
+    settingsText.isError === true && /not valid JSON/.test(JSON.stringify(settingsText.payload)),
+    settingsText.payload);
+
 
   // ---------------------------------------------------------------------
   // What an operator reads, out of the tables the transactions read: SM37,

@@ -28,8 +28,9 @@ export abstract class BaseHandler {
    * X-sap-adt-sessiontype: stateless ends the stateful session and releases
    * every lock with it.
    *
-   * The debugger keeps using the stateful client: its reads only mean anything
-   * inside the attached session.
+   * The debugger uses neither: it opens a stateful session of its own, so
+   * that a listener waiting for a breakpoint does not hold this one. See
+   * lib/debugSession.
    */
   protected get readClient(): ADTClient {
     try {

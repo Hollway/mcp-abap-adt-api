@@ -1,8 +1,22 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
-import { wrapAdtError } from '../lib/adtError';
+import { describeAdtError, wrapAdtError } from '../lib/adtError';
 import type { ToolDefinition } from '../types/tools.js';
 import { DebuggingMode, DebuggerScope, DebugBreakpoint, DebugSettings } from 'abap-adt-api';
+import {
+    attachedDebuggee,
+    clearAttached,
+    clearListen,
+    closeDebugSession,
+    debugClient,
+    debugFailure,
+    hasDebugClient,
+    listenKey,
+    pendingListen,
+    rememberListen,
+    setAttached,
+    waitForListen
+} from '../lib/debugSession';
 
 export class DebugHandlers extends BaseHandler {
     getTools(): ToolDefinition[] {
@@ -39,7 +53,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerListen',
-                description: 'Start listening for a breakpoint and WAIT until something hits one - the call does not return until a process stops, or the wait times out. That is the shape of the whole debugger here: set breakpoints, start listening, then run the program from somewhere else (SAPGUI, a job, a service call), and this returns when it stops. Nothing in this server can trigger the program for you, so a listener with nothing to trigger it just waits. It occupies the session; delete the listener when you are done.',
+                description: 'Start listening for a breakpoint and wait for one, for waitSeconds at a time. That is the shape of the whole debugger here: set breakpoints, start listening, then run the program from somewhere else (SAPGUI, a background job, a service call), and this answers when it stops. Nothing in this server can trigger the program for you - a listener with nothing to trigger it waits out its time and says so, and the listener stays registered, so calling again rejoins the same wait rather than starting a second one (the backend refuses a second listener for the same user anyway). The waiting happens on a debug session of its own, so locks, writes and reads carry on meanwhile. Delete the listener when you are done.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -66,6 +80,10 @@ export class DebugHandlers extends BaseHandler {
                         isNotifiedOnConflict: {
                             type: 'boolean',
                             description: 'Whether to be notified on conflict.'
+                        },
+                        waitSeconds: {
+                            type: 'number',
+                            description: 'How long to wait for a breakpoint before answering, in seconds. Default 60, maximum 900. Waiting longer does not make the listener last longer, and what is in front of the system may cut the connection first: measured on one landscape, a reverse proxy answered 504 after about three and a half minutes and the listener died with it.'
                         }
                     },
                     required: ['debuggingMode', 'terminalId', 'ideId', 'user']
@@ -99,7 +117,7 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSetBreakpoints',
-                description: 'Set breakpoints on lines of a source, or on a statement, for the debug session that follows. They belong to the user and survive until deleted, so they will also stop a colleague running the same code with your user. Set them BEFORE debuggerListen; the ids that come back are what deletes them again.',
+                description: 'Set breakpoints on lines of a source, or on a statement, for the debug session that follows. They belong to the user and survive until deleted, so they will also stop a colleague running the same code with your user. Set them BEFORE debuggerListen; the ids that come back are what deletes them again. A breakpoint the backend accepts is not a breakpoint that stops anything: whether a process actually halts depends on external debugging being available to your user on that system, and it is worth proving once with something harmless - measured on a classic ERP system, an accepted breakpoint stopped neither a background job, nor a task started with STARTING NEW TASK, nor a class run through runClass, with and without systemDebugging.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -209,13 +227,21 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerSaveSettings',
-                description: 'Change how the debugger behaves for this user: system debugging, update debugging, how much of a table it reads. They are user settings and stay until changed back.',
+                description: 'Change how the debugger behaves for this user: system debugging, update debugging, whether an exception raises an exception object. They are user settings and stay until changed back. Every flag left out keeps the backend default, which is off for all of them except showDataAging - the answer reports what was actually sent. The backend takes them for a debug session; without one it answers a bare 500.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         settings: {
-                            type: 'string',
-                            description: 'The debugger settings.'
+                            type: 'object',
+                            description: 'The debugger settings: systemDebugging, createExceptionObject, backgroundRFC, sharedObjectDebugging, showDataAging, updateDebugging - all booleans. A JSON string of the same object is accepted.',
+                            properties: {
+                                systemDebugging: { type: 'boolean', description: 'Stop in SAP system code as well.' },
+                                createExceptionObject: { type: 'boolean', description: 'Create an exception object when one is raised.' },
+                                backgroundRFC: { type: 'boolean', description: 'Debug background RFC calls.' },
+                                sharedObjectDebugging: { type: 'boolean', description: 'Debug shared objects.' },
+                                showDataAging: { type: 'boolean', description: 'Show the data aging column. The backend default is on.' },
+                                updateDebugging: { type: 'boolean', description: 'Debug the update task.' }
+                            }
                         }
                     },
                     required: ['settings']
@@ -281,13 +307,13 @@ export class DebugHandlers extends BaseHandler {
             },
             {
                 name: 'debuggerGoToStack',
-                description: 'Move the debugger view to another frame of the stack, so that debuggerVariables shows what is visible THERE. It changes the view, not the position of the program - the process still stands where it stopped.',
+                description: 'Move the debugger view to another frame of the stack, so that debuggerVariables shows what is visible THERE. It changes the view, not the position of the program - the process still stands where it stopped. Two forms, because the backend has two: the frame number (1, 2, 3 ... - what a stack from an older system gives you, and the only form such a system takes) or the full stackUri of the frame that a newer one reports.',
                 inputSchema: {
                     type: 'object',
                     properties: {
                         urlOrPosition: {
                             type: 'string',
-                            description: 'The URL or position of the stack entry.'
+                            description: 'The frame number as it stands in the stack ("2"), or the full stack URI /sap/bc/adt/debugger/stack/type/<type>/position/<n>.'
                         }
                     },
                     required: ['urlOrPosition']
@@ -375,6 +401,10 @@ export class DebugHandlers extends BaseHandler {
                             user: args.user,
                             checkConflict,
                             listener: result ? 'conflict' : 'none',
+                            // What the backend reports is what it sees from
+                            // outside; this is what this server is holding.
+                            debugSession: hasDebugClient() ? 'open here' : 'none here',
+                            ...this.listenerHere(args),
                             ...(result
                                 ? { result }
                                 : { note: 'No debug listener for this user and terminal. A breakpoint would not be caught: start one with debuggerListen.' })
@@ -388,44 +418,135 @@ export class DebugHandlers extends BaseHandler {
         }
     }
 
+    /** What this server is holding for the listener the caller is asking about. */
+    private listenerHere(args: any): Record<string, unknown> {
+        const listen = pendingListen(listenKey(args));
+        if (!listen) return {};
+        if (!listen.settled) {
+            return { waitingHere: true, note2: 'A listener started here is still waiting. Call debuggerListen to rejoin that wait.' };
+        }
+        if (listen.error) {
+            return { listenerEndedHere: true, note2: 'The listener started here ended with an error. Call debuggerListen to see it and start again.' };
+        }
+        return {
+            caughtWhileNotWaiting: true,
+            note2: 'A listener started here caught a process while nothing was waiting for it. Call debuggerListen to collect it - it is stopped until somebody attaches or terminates it.'
+        };
+    }
+
     async handleDebuggerListen(args: any): Promise<any> {
         const startTime = performance.now();
-        try {
-            const result = await this.adtclient.debuggerListen(
+        const seconds = this.waitSeconds(args.waitSeconds);
+        const key = listenKey(args);
+        // A listener already waiting is rejoined rather than started again:
+        // the backend refuses a second one for the same user, and the first
+        // is the one that will answer.
+        const existing = pendingListen(key);
+        // It may have answered while nothing was waiting for it: a process is
+        // then standing stopped, and this call is what comes to collect it.
+        const answeredEarlier = existing?.settled === true;
+        const pending = existing ?? rememberListen(
+            key,
+            debugClient(this.adtclient).debuggerListen(
                 args.debuggingMode,
                 args.terminalId,
                 args.ideId,
                 args.user,
                 args.checkConflict,
                 args.isNotifiedOnConflict
-            );
+            )
+        );
+        try {
+            const outcome = await waitForListen<any>(pending, seconds);
             this.trackRequest(startTime, true);
+            if (!outcome.stopped) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                status: 'waiting',
+                                listener: 'registered',
+                                waitedSeconds: seconds,
+                                listeningSince: new Date(pending.startedAt).toISOString(),
+                                rejoined: existing !== undefined,
+                                note: 'Nothing stopped at a breakpoint yet. The listener is still registered and still waiting on its own session: call debuggerListen again to keep waiting, run the program that should stop, or call debuggerDeleteListener to give up. Nothing in this server can trigger the program for you.'
+                            })
+                        }
+                    ]
+                };
+            }
+            clearListen();
+            const debuggeeId = outcome.value?.DEBUGGEE_ID || outcome.value?.debuggeeId;
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
-                            result
+                            stopped: true,
+                            stoppedAt: new Date().toISOString(),
+                            ...(answeredEarlier
+                                ? { caughtWhileNotWaiting: true, note: 'It stopped while no call was waiting for it, so it has been standing there since. Attach or terminate it rather than leaving the work process held.' }
+                                : {}),
+                            ...(debuggeeId
+                                ? { debuggeeId, next: 'debuggerAttach with this debuggeeId, then debuggerStackTrace and debuggerVariables.' }
+                                : {}),
+                            result: outcome.value
                         })
                     }
                 ]
             };
         } catch (error: any) {
+            clearListen();
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to start debugger listener');
+            throw wrapAdtError(error, this.listenFailure(error, pending.startedAt));
         }
+    }
+
+    /**
+     * Why a listener ended without catching anything.
+     *
+     * Measured on a classic ERP system behind a reverse proxy: the listening
+     * POST is cut with 504 after about three and a half minutes, whatever the
+     * library's own timeout says (it sends 360000000 ms - one hundred hours).
+     * The listener goes with the connection, so the next call starts a new
+     * one rather than rejoining a listener that no longer exists.
+     */
+    private listenFailure(error: unknown, startedAt: number): string {
+        const status = describeAdtError(error).status;
+        if (status === 504 || status === 502 || status === 408) {
+            const waited = Math.round((Date.now() - startedAt) / 1000);
+            return `The listener's connection was cut after ${waited}s (HTTP ${status} from whatever sits in front of the system, not from SAP) - the listener is gone with it, start another one if the program has still to run`;
+        }
+        return 'Failed to start debugger listener';
+    }
+
+    /** The bound on one wait: a minute by default, a quarter of an hour at most. */
+    private waitSeconds(requested: unknown): number {
+        const asked = Number(requested);
+        if (!Number.isFinite(asked) || asked <= 0) return 60;
+        return Math.max(1, Math.min(Math.round(asked), 900));
     }
 
     async handleDebuggerDeleteListener(args: any): Promise<any> {
         const startTime = performance.now();
         try {
+            // Deliberately the main client: this request has to overtake the
+            // listener's own pending POST, and on the debug session it would
+            // queue behind the very call it is ending.
             const result = await this.adtclient.debuggerDeleteListener(
                 args.debuggingMode,
                 args.terminalId,
                 args.ideId,
                 args.user
             );
+            clearListen();
+            // A debuggee still stopped needs the session that holds it, so it
+            // is kept: closing it here would leave a frozen work process with
+            // nothing able to let it go.
+            const attached = attachedDebuggee();
+            if (!attached) await closeDebugSession();
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -433,6 +554,14 @@ export class DebugHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            listener: 'deleted',
+                            debugSession: attached ? 'kept' : 'closed',
+                            ...(attached
+                                ? {
+                                    attachedDebuggee: attached,
+                                    note: 'A debuggee is still attached and still stopped. Let it go with debuggerStep steptype "terminateDebuggee", which also closes the debug session.'
+                                }
+                                : {}),
                             result
                         })
                     }
@@ -481,7 +610,7 @@ export class DebugHandlers extends BaseHandler {
         const startTime = performance.now();
         try {
             const result = await this.adtclient.debuggerDeleteBreakpoints(
-                args.breakpoint,
+                this.parseObjectArg<DebugBreakpoint>(args.breakpoint, 'breakpoint'),
                 args.debuggingMode,
                 args.terminalId,
                 args.ideId,
@@ -509,12 +638,13 @@ export class DebugHandlers extends BaseHandler {
     async handleDebuggerAttach(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.debuggerAttach(
+            const result = await debugClient(this.adtclient).debuggerAttach(
                 args.debuggingMode,
                 args.debuggeeId,
                 args.user,
                 args.dynproDebugging
             );
+            setAttached(String(args.debuggeeId));
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -535,8 +665,15 @@ export class DebugHandlers extends BaseHandler {
 
     async handleDebuggerSaveSettings(args: any): Promise<any> {
         const startTime = performance.now();
+        // The library destructures the six flags out of whatever it is given.
+        // A string has none of them, so every setting fell back to its default
+        // and two calls with different JSON sent the same body.
+        const settings = this.parseObjectArg<Partial<DebugSettings>>(args.settings, 'settings');
+        if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+            throw new McpError(ErrorCode.InvalidParams, "Parameter 'settings' must be an object of debugger flags, e.g. {\"systemDebugging\":true}");
+        }
         try {
-            const result = await this.adtclient.debuggerSaveSettings(args.settings);
+            const result = await debugClient(this.adtclient).debuggerSaveSettings(settings);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -544,6 +681,7 @@ export class DebugHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            sent: settings,
                             result
                         })
                     }
@@ -551,14 +689,14 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to save debugger settings');
+            throw wrapAdtError(error, debugFailure('Failed to save debugger settings'));
         }
     }
 
     async handleDebuggerStackTrace(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.debuggerStackTrace(args.semanticURIs);
+            const result = await debugClient(this.adtclient).debuggerStackTrace(args.semanticURIs);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -573,14 +711,16 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get stack trace');
+            throw wrapAdtError(error, debugFailure('Failed to get stack trace'));
         }
     }
 
     async handleDebuggerVariables(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.debuggerVariables(args.parents);
+            const result = await debugClient(this.adtclient).debuggerVariables(
+                this.parseObjectArg<string[]>(args.parents, 'parents')
+            );
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -595,14 +735,16 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get variables');
+            throw wrapAdtError(error, debugFailure('Failed to get variables'));
         }
     }
 
     async handleDebuggerChildVariables(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.debuggerChildVariables(args.parent);
+            const result = await debugClient(this.adtclient).debuggerChildVariables(
+                args.parent === undefined ? undefined : this.parseObjectArg<string[]>(args.parent, 'parent')
+            );
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -617,14 +759,29 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to get child variables');
+            throw wrapAdtError(error, debugFailure('Failed to get child variables'));
         }
     }
 
     async handleDebuggerStep(args: any): Promise<any> {
         const startTime = performance.now();
+        const steptype = String(args.steptype || '');
+        // Two of the step types are a destination, not a direction, and the
+        // backend answers a bare 500 when the destination is missing.
+        if ((steptype === 'stepRunToLine' || steptype === 'stepJumpToLine') && !args.url) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `Step type '${steptype}' needs url - the line to go to, as the stack trace reports it (.../source/main#start=<line>).`
+            );
+        }
         try {
-            const result = await this.adtclient.debuggerStep(args.steptype, args.url);
+            const result = await debugClient(this.adtclient).debuggerStep(steptype as any, args.url);
+            // Terminating ends the debugged program, so nothing is attached
+            // any more and the session that held it has nothing left to hold.
+            if (steptype === 'terminateDebuggee') {
+                clearAttached();
+                await closeDebugSession();
+            }
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -632,6 +789,9 @@ export class DebugHandlers extends BaseHandler {
                         type: 'text',
                         text: JSON.stringify({
                             status: 'success',
+                            ...(steptype === 'terminateDebuggee'
+                                ? { debuggee: 'terminated', debugSession: 'closed' }
+                                : {}),
                             result
                         })
                     }
@@ -639,14 +799,20 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to perform debug step');
+            throw wrapAdtError(error, debugFailure('Failed to perform debug step'));
         }
     }
 
     async handleDebuggerGoToStack(args: any): Promise<any> {
         const startTime = performance.now();
+        // The library picks the endpoint by the type it is handed: a string is
+        // a stack URI and is checked against a pattern, a number goes to the
+        // older setStackPosition. The schema only had a string, so a caller
+        // naming frame 2 was refused with "Invalid stack URL: 2" and the
+        // older systems - which report no stackUri at all - had no way in.
+        const frame = this.stackTarget(args.urlOrPosition);
         try {
-            const result = await this.adtclient.debuggerGoToStack(args.urlOrPosition);
+            const result = await debugClient(this.adtclient).debuggerGoToStack(frame);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -661,14 +827,26 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to go to stack position');
+            throw wrapAdtError(error, debugFailure('Failed to go to stack position'));
         }
+    }
+
+    /** A frame number, or the stack URI of a frame - and nothing else. */
+    private stackTarget(value: unknown): string | number {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        const text = String(value ?? '').trim();
+        if (/^\d+$/.test(text)) return Number(text);
+        if (/^\/sap\/bc\/adt\/debugger\/stack\/type\/\w+\/position\/\d+$/.test(text)) return text;
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            `urlOrPosition '${text}' is neither a frame number nor a stack URI. Pass the frame's number as the stack trace lists it ("2"), or its full stackUri /sap/bc/adt/debugger/stack/type/<type>/position/<n>.`
+        );
     }
 
     async handleDebuggerSetVariableValue(args: any): Promise<any> {
         const startTime = performance.now();
         try {
-            const result = await this.adtclient.debuggerSetVariableValue(args.variableName, args.value);
+            const result = await debugClient(this.adtclient).debuggerSetVariableValue(args.variableName, args.value);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -683,7 +861,7 @@ export class DebugHandlers extends BaseHandler {
             };
         } catch (error: any) {
             this.trackRequest(startTime, false);
-            throw wrapAdtError(error, 'Failed to set variable value');
+            throw wrapAdtError(error, debugFailure('Failed to set variable value'));
         }
     }
 }

@@ -96,9 +96,45 @@ describe('client routing', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps the debugger on the stateful client, reads included', () => {
+  /**
+   * The debugger has a session of its own - a listener waiting for a
+   * breakpoint would otherwise hold the session the locks are on - and the
+   * stateless clone is no more use to it than before: its reads only mean
+   * anything inside the attached session.
+   */
+  it('keeps the debugger off the stateless clone', () => {
     const debugSource = fs.readFileSync(path.join(handlerDir, 'DebugHandlers.ts'), 'utf8');
     expect(debugSource).not.toContain('this.readClient');
+  });
+
+  it('runs the debug session on the debug client', () => {
+    const inDebugSession = [
+      'handleDebuggerListen',
+      'handleDebuggerAttach',
+      'handleDebuggerStackTrace',
+      'handleDebuggerVariables',
+      'handleDebuggerChildVariables',
+      'handleDebuggerStep',
+      'handleDebuggerGoToStack',
+      'handleDebuggerSetVariableValue'
+    ];
+    for (const method of inDebugSession) {
+      const block = blocks.find(b => b.method === method);
+      expect(block).toBeDefined();
+      expect(block!.body).toContain('debugClient(this.adtclient)');
+    }
+  });
+
+  /**
+   * Deleting a listener has to overtake the listener's own pending POST. On
+   * the debug session it would queue behind the very call it ends, and the
+   * server would wait for the breakpoint it just gave up on.
+   */
+  it('deletes a listener from outside the debug session', () => {
+    const block = blocks.find(b => b.method === 'handleDebuggerDeleteListener');
+    expect(block).toBeDefined();
+    expect(block!.body).toContain('this.adtclient.debuggerDeleteListener');
+    expect(block!.body).not.toContain('debugClient(this.adtclient).debuggerDeleteListener');
   });
 
   it('routes plain reads through the stateless clone', () => {

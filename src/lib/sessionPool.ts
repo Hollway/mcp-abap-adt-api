@@ -486,6 +486,15 @@ export class SessionPool {
     await this.logoutQuietly(session.client, `${session.user} (stateful)`);
     const clone = existingClone(session.client);
     if (clone) await this.logoutQuietly(clone, `${session.user} (stateless clone)`);
+    // A debugger costs a third session: its listener waits there so that it
+    // does not hold the one above. It is reached through the state rather
+    // than through lib/debugSession, because closing happens on a sweep, far
+    // outside the request whose session state this is.
+    const debugging = session.state.debug?.client;
+    if (debugging) {
+      session.state.debug = undefined;
+      await this.logoutQuietly(debugging, `${session.user} (debug session)`);
+    }
 
     if (summary.locks > 0 && sessionAlreadyGone) {
       this.log(

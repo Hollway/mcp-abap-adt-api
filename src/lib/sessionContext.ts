@@ -23,6 +23,7 @@ import { createSourceCache } from './sourceCache';
 import type { SourceCache } from './sourceCache';
 import { createMetrics } from './metrics';
 import type { MetricsRegistry } from './metrics';
+import type { DebugSessionState } from './debugSession';
 
 export interface SessionState {
   /** Locks held by this ADT session; the handles die with it. */
@@ -49,6 +50,14 @@ export interface SessionState {
    * session am I on" stops being a rhetorical question.
    */
   owner?: { user: string; since: string };
+  /**
+   * The debug session, when this one started a debugger.
+   *
+   * It carries a SAP session of its own, because a listener waiting for a
+   * breakpoint would otherwise hold the session the locks and writes are on.
+   * See lib/debugSession.
+   */
+  debug?: DebugSessionState;
 }
 
 export const createSessionState = (): SessionState => ({
