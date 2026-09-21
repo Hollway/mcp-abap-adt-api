@@ -88,6 +88,22 @@ harmless before relying on the debugger for real work. (The trigger had to be a
 standard function module because `createFunctionModule` cannot make one
 remote-enabled — the flag is a property, not source.)
 
+### A 404 that means "nobody is registered"
+
+Cleaning up after the run broke a smoke check that had been green for months.
+`debuggerListeners` answered **404** — `ExceptionResourceNotFound`, "Resource
+does not exist." with the resource named as a blank — and went on answering it
+on a fresh session. The service was fine: every other debugger call still
+answered its usual 500. What had changed was that the last listener
+registration for this user was now gone, and the backend refuses the listeners
+resource itself when there is none, rather than answering an empty list.
+Measured both ways within the hour: 200 while a listener was registered, 404
+from the moment it was deleted. The check had been passing on a registration
+left behind by earlier work.
+
+That 404 is read as the answer it is now: no listener, no registration, and
+what to do about it.
+
 ### The settings that were always the defaults
 
 `debuggerSaveSettings` declared `settings` as a **string** and handed it
@@ -125,8 +141,8 @@ did; they go through the same JSON parsing as the rest now.
 Four checks for the debugger refusals that never leave the process — a frame
 that is neither form, a run-to-line step with no line, settings as text — and
 the listener read that reports whether this server is holding a debug session.
-311 checks before, 315 now; 1,176 tests before, 1,196 now; 48 tools the smoke
-run never named before, 45 now.
+311 checks before, 315 now, all of them green on a live run; 1,176 tests
+before, 1,197 now; 48 tools the smoke run never named before, 45 now.
 
 ## [1.7.0] — the reads nothing watched, the writes nothing had run, and what an operator reads
 

@@ -413,6 +413,33 @@ export class DebugHandlers extends BaseHandler {
                 ]
             };
         } catch (error: any) {
+            // 404 here is an answer, not a failure: with no listener registered
+            // for this user at all, the backend refuses the resource itself -
+            // and names it as a blank ("Resource   does not exist."). Measured
+            // both ways on one system within the hour: it answered 200 while a
+            // listener was registered, and 404 from the moment the last one was
+            // deleted.
+            const info = describeAdtError(error);
+            if (info.status === 404) {
+                this.trackRequest(startTime, true);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                status: 'success',
+                                debuggingMode: args.debuggingMode,
+                                user: args.user,
+                                listener: 'none',
+                                registration: 'none',
+                                debugSession: hasDebugClient() ? 'open here' : 'none here',
+                                ...this.listenerHere(args),
+                                note: 'The backend has no debug listener registration for this user at all - it refuses the listeners resource with 404 rather than answering an empty list. Start one with debuggerListen.'
+                            })
+                        }
+                    ]
+                };
+            }
             this.trackRequest(startTime, false);
             throw wrapAdtError(error, 'Failed to get debugger listeners');
         }

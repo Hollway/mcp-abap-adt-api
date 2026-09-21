@@ -117,6 +117,30 @@ describe('debuggerListen', () => {
   });
 });
 
+describe('debuggerListeners', () => {
+  /**
+   * With no listener registered for the user at all, the backend refuses the
+   * listeners resource itself - 404, and it names the resource as a blank:
+   * "Resource   does not exist." Measured both ways within the hour on one
+   * system: 200 while a listener was registered, 404 from the moment the last
+   * one was deleted. The smoke run had been passing on a registration left
+   * behind by earlier work, and started failing the day it was cleaned up.
+   */
+  it('reads the 404 of a user with no registration as an answer', async () => {
+    const gone = () => Promise.reject({
+      typeID: Symbol.for('ADT EXCEPTION'),
+      err: 404,
+      type: 'ExceptionResourceNotFound',
+      message: 'Resource   does not exist.',
+      localizedMessage: 'Resource   does not exist.'
+    });
+    const { handlers } = handler({ debuggerListeners: true, debuggerListenersResult: gone });
+    const result = answer(await handlers.handleDebuggerListeners({ ...ARGS }));
+    expect(result).toMatchObject({ status: 'success', listener: 'none', registration: 'none' });
+    expect(result.note).toContain('debuggerListen');
+  });
+});
+
 describe('debuggerDeleteListener', () => {
   it('closes the debug session when nothing is stopped', async () => {
     const { handlers, calls } = handler({
