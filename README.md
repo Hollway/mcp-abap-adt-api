@@ -443,6 +443,26 @@ recorded statement by statement overran 400 MB.
 a conflict when no listener exists at all raises a short dump, so turn it on
 only once a listener is known to be there.
 
+The debugger runs on a SAP session of its own. `debuggerListen` answers only
+when a process stops at a breakpoint, and the library sends that request with a
+timeout of one hundred hours - on the session everything else uses, one
+listener would hold the locks and the writes behind it for as long as nobody
+hit the breakpoint. It waits on a second stateful session instead, for
+`waitSeconds` at a time (60 by default), and says what it is still waiting for;
+calling again rejoins the same listener, and an answer that arrived while
+nothing was waiting is kept for the next call rather than dropped. Deleting the
+listener goes over the main session deliberately - inside the debug session it
+would queue behind the call it is meant to end.
+
+Whether anything ever stops is a property of the system, not of this server.
+Measured on a classic ERP system: the backend accepted the breakpoints and
+answered with their ids, and then nothing halted - not a background job, not a
+task started with `STARTING NEW TASK`, not a class executed through `runClass`,
+with and without `systemDebugging`. The listening request itself was cut with
+504 after about three and a half minutes by the proxy in front of the system,
+which is what ends a listener there. Prove a stop once with something harmless
+before relying on the debugger for real work.
+
 **Transports**
 
 `userTransports` lists a user's requests, filterable by status (D

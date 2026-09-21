@@ -8,6 +8,126 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.8.0] — the debugger, and the session it was holding
+
+Measured against the tool list again: of the 186 tools this server exposes, 48
+are never named by the smoke run, and every one of them writes or changes
+state — which a read-only run cannot exercise by definition. The largest island
+inside that remainder is the debugger — fourteen
+tools, one narrow fix in its whole history, and no run from breakpoint to
+variables ever. It was driven by hand this time against a live classic ERP
+system, with a class and a report of my own in `$TMP` and three different ways
+of triggering them.
+
+The debugger turned out to be unusable here for a reason that has nothing to do
+with debugging, and then unusable for a second reason that has everything to do
+with the system.
+
+### The listener that held the whole server
+
+`debuggerListen` answers only when a process stops at a breakpoint, and
+`abap-adt-api` sends that request with a timeout of 360000000 ms — one hundred
+hours. It waited on the stateful client, which is the session the locks and
+the source writes travel on, and SAP serialises the requests of one session. So
+a listener with nothing to trigger it did not merely wait: it queued every
+writing tool behind it, for as long as nobody hit the breakpoint. Its own tool
+text told the caller to "run the program from somewhere else", and there was no
+somewhere else — a client drives this server one call at a time, measured here
+as two runs that never overlapped (one ended 09:49:57, the next started
+09:50:05).
+
+The debugger has a SAP session of its own now, opened when a debug session
+starts and closed when it ends. The listener waits there, for `waitSeconds` at
+a time (60 by default, 900 at most), and the call comes back saying the
+listener is still registered and still waiting. Calling again rejoins the same
+listener rather than starting a second one, which the backend refuses anyway.
+Proof from the live run: while a listener was waiting, the main session created
+a class, activated it, ran it and deleted it again, answering at 10:21:16.
+
+Deleting a listener deliberately does *not* go through that session: the DELETE
+has to overtake the listener's own pending POST, and inside the same session it
+would queue behind exactly the call it is meant to end.
+
+### The answer that arrived while nobody was waiting
+
+The first version of the bounded wait threw away what it did not wait for. A
+listener started at 07:20:04 answered at about 07:24, minutes after the wait
+had returned; the state treated that listener as spent and the next call
+started a new one — and had a process really been standing stopped, it would
+have stood there with nobody coming to attach to it. The answer is kept now and
+handed to the next call, which says `caughtWhileNotWaiting` and that the
+process is held until somebody attaches or terminates it.
+
+### Three and a half minutes, not a hundred hours
+
+The hundred-hour timeout never applies on this landscape. The listening POST
+was cut with **504** after about three and a half minutes by the proxy in front
+of the system, and the listener died with the connection. A bare "Request
+failed with status code 504" says nothing about that, so a gateway timeout on
+the listening call now reports how long it waited, that the answer came from
+what sits in front of the system rather than from SAP, and that another
+listener has to be started.
+
+### A breakpoint the backend accepts and nothing honours
+
+The backend accepted every breakpoint and answered with the resolved ids —
+`INCLUDE=ZMCP_DBG_WORK...CM001.LINE_NR=6` for a class of mine,
+`INCLUDE=LMRFCU05.LINE_NR=14` for a standard function module. Nothing ever
+stopped:
+
+- a background job that ran the report (10:22:02 to 10:22:05, status finished);
+- a task started with `CALL FUNCTION ... STARTING NEW TASK`, twice, the second
+  time with `systemDebugging` on;
+- the class executed directly through `runClass`.
+
+So on that system external debugging delivers no debuggee to an ADT listener,
+and `debuggerAttach` and everything downstream of it cannot be reached at all.
+Both tool texts say so now: a breakpoint the backend accepts is not a
+breakpoint that stops anything, and it is worth proving once with something
+harmless before relying on the debugger for real work. (The trigger had to be a
+standard function module because `createFunctionModule` cannot make one
+remote-enabled — the flag is a property, not source.)
+
+### The settings that were always the defaults
+
+`debuggerSaveSettings` declared `settings` as a **string** and handed it
+straight to the library, which destructures the six flags out of whatever it is
+given. A string has none of them, so every flag fell back to its default and
+two calls with different JSON sent byte-identical bodies. It takes an object
+now — the six flags are named in the schema, a JSON string is parsed — and the
+answer reports what was actually sent.
+
+### A frame number the tool could not express
+
+`debuggerGoToStack` takes a stack URI *or* a frame number, and the library
+picks the endpoint by the type: a string is checked against the URI pattern, a
+number goes to the older `setStackPosition`. The schema had only a string, so
+naming frame 1 was refused by the client with "Invalid stack URL: 1", and on a
+system that reports no stack URIs at all — this one — the tool had no usable
+form. It takes both now and refuses anything else by naming both.
+
+### What a failure says when nothing is attached
+
+Every debugger call that needs an attached session answers the same thing
+otherwise: 500 `AdiFailed`, "Обнаружена особая ситуация" — an exception was
+raised — in the system's language, whether the session is missing, the debuggee
+is gone or the release cannot do it. Measured on the stack trace, the
+variables, a step, a frame change and the settings. The one thing this server
+knows for certain is whether *it* attached anything, so that is what the
+message adds.
+
+`debuggerDeleteBreakpoints`, `debuggerVariables` and `debuggerChildVariables`
+also passed their structured arguments through unparsed, the way the settings
+did; they go through the same JSON parsing as the rest now.
+
+### What the smoke run now watches
+
+Four checks for the debugger refusals that never leave the process — a frame
+that is neither form, a run-to-line step with no line, settings as text — and
+the listener read that reports whether this server is holding a debug session.
+311 checks before, 315 now; 1,176 tests before, 1,196 now; 48 tools the smoke
+run never named before, 45 now.
+
 ## [1.7.0] — the reads nothing watched, the writes nothing had run, and what an operator reads
 
 The smoke run was measured against the tool list again: of 183 tools it
