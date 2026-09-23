@@ -9,6 +9,7 @@ import { lockRegistry } from '../lib/lockRegistry';
 import { resolveEdits, applyEdits, buildDiff, newlineOf, PatchError } from '../lib/sourcePatch';
 import { activateAndVerify } from '../lib/activation';
 import { releaseLock } from '../lib/lockCycle';
+import { assertNotTable } from '../lib/tableGuard';
 import type { SourceEdit } from '../lib/sourcePatch';
 
 const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
@@ -416,6 +417,8 @@ export class ObjectSourceHandlers extends BaseHandler {
     const held = lockRegistry.forUrl(objectUrl);
     let lockHandle = held?.lockHandle;
     if (!lockHandle) {
+      // A table is never locked, so never written - see lib/tableGuard.
+      await assertNotTable(this.adtclient, objectUrl);
       const startTime = performance.now();
       try {
         this.adtclient.stateful = session_types.stateful;

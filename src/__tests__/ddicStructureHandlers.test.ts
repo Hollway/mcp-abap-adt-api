@@ -22,6 +22,8 @@ const harness = (over: Record<string, unknown> = {}) => {
     validateNewObject: async () => { calls.push('validate'); return { success: true }; },
     createObject: async () => { calls.push('create'); },
     lock: async () => { calls.push('lock'); return { LOCK_HANDLE: 'HANDLE' }; },
+    // lib/tableGuard asks DD02L before the lock: a plain structure passes.
+    runQuery: async () => ({ values: [{ TABNAME: 'ZDEV_MCP_STRUC', AS4LOCAL: 'N', TABCLASS: 'INTTAB' }] }),
     unLock: async () => { calls.push('unlock'); },
     setObjectSource: async (url: string, source: string) => { calls.push('write'); writes.push({ url, source }); },
     syntaxCheck: async () => { calls.push('syntaxCheck'); return []; },

@@ -13,6 +13,7 @@ import { session_types } from 'abap-adt-api';
 import type { ADTClient } from 'abap-adt-api';
 import { lockRegistry } from './lockRegistry';
 import { describeAdtError } from './adtError';
+import { assertNotTable } from './tableGuard';
 
 /** Called once per backend call so a handler can keep counting them. */
 export type Track = (startTime: number, success: boolean) => void;
@@ -31,6 +32,9 @@ export async function takeLock(
 ): Promise<TakenLock> {
   const held = lockRegistry.get(objectUrl);
   if (held) return { lockHandle: held.lockHandle, taken: false };
+
+  // A table is never locked here, so never written - see lib/tableGuard.
+  await assertNotTable(client, objectUrl);
 
   const startTime = performance.now();
   try {

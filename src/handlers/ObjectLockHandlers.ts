@@ -2,6 +2,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { BaseHandler } from './BaseHandler.js';
 import { describeAdtError } from '../lib/adtError';
 import { lockRegistry } from '../lib/lockRegistry';
+import { assertNotTable } from '../lib/tableGuard';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 
@@ -9,7 +10,7 @@ export class ObjectLockHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [{
       name: 'lock',
-      description: 'Take an edit lock on an object, which every write needs. The handle it returns is what setObjectSource, patchObjectSource and deleteObject take - and it lives and dies with the ADT session, so a lost session voids it and the object has to be locked again. This server remembers the handle per object, so the write tools find it themselves and listLocks shows what is held. The lock must be RELEASED BEFORE ACTIVATING: activation refuses to run while the same session holds it. Prefer editObject, which takes and releases the lock around the change for you.',
+      description: 'Take an edit lock on an object, which every write needs. The handle it returns is what setObjectSource, patchObjectSource and deleteObject take - and it lives and dies with the ADT session, so a lost session voids it and the object has to be locked again. This server remembers the handle per object, so the write tools find it themselves and listLocks shows what is held. The lock must be RELEASED BEFORE ACTIVATING: activation refuses to run while the same session holds it. Prefer editObject, which takes and releases the lock around the change for you. A database table (or an append structure) is never locked: ADT serves it at the same ddic/structures address as a structure, but its definition is changed in SE11 only - so no tool here can write or delete one. Plain structures lock as usual.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -130,6 +131,9 @@ export class ObjectLockHandlers extends BaseHandler {
   }
 
   async handleLock(args: any): Promise<any> {
+    // Before anything is sent: a table is never locked, so never written -
+    // see lib/tableGuard.
+    await assertNotTable(this.adtclient, args?.objectUrl);
     return this.tracked('Failed to lock object', async () => {
       // dropSession/logout reset the client to stateless; locks require a stateful session
       this.adtclient.stateful = session_types.stateful;

@@ -8,6 +8,39 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.10.0] — a table is never locked
+
+A transparent table was rewritten over ADT and broken. Nothing stood in the
+way: ADT serves a table from the same `ddic/structures` collection as a
+structure, as the same DDL text, so `lock` → `patchObjectSource` → activate
+went through for a table exactly as for a structure. The only refusal the
+bridge had was on *creating* a `TABL/DT`. The DDL text does not carry what a
+table's definition really consists of - technical settings, enhancement
+category, the conversion SE14 would run - and the table was left inactive in
+the middle of an open request.
+
+Every write needs a lock first, so the refusal now sits where a lock is
+taken: the `lock` tool, `editObject`, and `lib/lockCycle` behind every
+composite write (`deleteObject`, `createAndWrite`, `createStructure`, the text
+element and DDIC property writes). Before any `ddic/structures` or
+`ddic/tables` address is locked, `lib/tableGuard` reads the object's class
+from DD02L - every version, not only the active one:
+
+- only a plain structure (`INTTAB`) is locked;
+- a transparent, pooled or cluster table and a view are refused, and so is an
+  append structure, because activating one changes the table it is appended
+  to;
+- a name DD02L does not know at all passes - it cannot be a table, and a
+  structure created a moment ago has no row yet;
+- anything that cannot be decided - an invalid name, a failed query, a row
+  without a class - is refused rather than guessed;
+- a `ddic/tables` address is refused without asking.
+
+The refusal names SE11 as the place to change a table. There is deliberately
+no switch to turn it off. Reading a table is unchanged (`getStructureSource`,
+`tableFields`). Activation and code execution (`runSnippet`, `callFunction`)
+are out of scope of this change.
+
 ## [1.9.0] — a breakpoint that is reached but not held
 
 The 1.8.0 entry closed with the debugger unusable on this landscape: an
