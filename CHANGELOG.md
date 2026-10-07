@@ -8,6 +8,39 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.11.0] — rows without the repetition
+
+`tableContents` and `runQuery` answered with the data preview result as it
+came: every column described in seven fields, every row an object that writes
+out each column name again. Measured on EKPO, fifteen rows of 307 columns were
+101,703 characters - 38,329 of them column metadata in which `keyAttribute`,
+`colType` and `isKeyFigure` were empty for every column, 63,169 rows repeating
+the 307 names fifteen times. 249 of the 307 columns were blank or zero in
+every row.
+
+Both tools now answer compact by default (`lib/compactRows`):
+
+- `result.columns` describes each column once, in the order `columnFormat`
+  gives: `[name, type, length, description]`; `keyAttribute`, `colType` and
+  `isKeyFigure` join the format only when some column carries one;
+- each row in `result.values` is an array in that column order;
+- a column blank or zero in every returned row - empty text, `0`, `0.00`,
+  `00000000`, `00:00:00`, `null` - is named in `result.emptyColumns` and left
+  out of both. With no rows nothing counts as empty. `keepEmptyColumns: true`
+  keeps them.
+
+The same EKPO answer is 11,359 characters (−89%), 28,149 with the empty
+columns kept (−72%). Nothing is lost: a dropped column is named, and its
+value is blank or zero in every row. `format: "objects"` gives the endpoint
+answer as before. The row cap, the offset window and the `rows` summary are
+unchanged.
+
+Only the tool answer is laid out: `runQueryCore`, which the transport
+registration reads call in process, still hands back rows as objects.
+
+No new tools; 1,258 tests in 74 suites (1,226 in 73), 318 smoke
+checks (316) - all green on a live run.
+
 ## [1.10.0] — a table is never locked
 
 A transparent table was rewritten over ADT and broken. Nothing stood in the

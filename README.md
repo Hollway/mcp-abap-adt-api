@@ -537,7 +537,7 @@ When working with ABAP objects, you may encounter errors related to unknown fiel
 *   **`objectStructure`:** Retrieves the structure/metadata of an ABAP object (including DDIC tables and structures) from its object URI. Use `searchObject` first to resolve the object name to a URI. For a table it answers metadata only - no fields.
 *   **`ddicElement`:** Retrieves details of a DDIC element (e.g. a data element or domain).
 *   **`ddicRepositoryAccess`:** Reads DDIC repository information for a given path.
-*   **`tableContents`:** Retrieves the *contents* (rows) of a table, not its definition. Use `runQuery` for ad-hoc `SELECT`s.
+*   **`tableContents`:** Retrieves the *contents* (rows) of a table, not its definition. Use `runQuery` for ad-hoc `SELECT`s. Both answer compact by default - columns described once, each row an array, columns blank or zero in every row named in `emptyColumns`; `format: "objects"` gives the endpoint answer as it is.
 
 ## Troubleshooting
 

@@ -1,5 +1,6 @@
 import { ADTClient } from 'abap-adt-api';
 import { MAX_QUERY_CHARS } from '../lib/queryLimits';
+import { compactResult, rowFormatOf, ROW_FORMATS } from '../lib/compactRows';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { BaseHandler } from './BaseHandler.js';
 import { wrapAdtError } from '../lib/adtError';
@@ -34,6 +35,23 @@ const upToRows = (sql: unknown): number | undefined => {
 type LimitSource = 'rowNumber' | 'upToRows' | 'default';
 
 /**
+ * How the rows come back - shared by tableContents and runQuery. Compact is
+ * the default because the object form spends most of a wide table on
+ * repeating column names and columns nothing is in; see lib/compactRows.
+ */
+const ROW_FORMAT_PROPERTIES = {
+    format: {
+        type: 'string',
+        enum: ROW_FORMATS,
+        description: 'compact (default): result.columns describes each column once as columnFormat says ([name, type, length, description]), each row in result.values is an array in that column order, and result.emptyColumns names the columns that are blank or zero in every returned row - they are left out of columns and values. objects: the endpoint answer as it comes, every row an object keyed by column name.'
+    },
+    keepEmptyColumns: {
+        type: 'boolean',
+        description: 'Keep the columns that are blank or zero in every returned row in compact format instead of naming them in emptyColumns. Default false.'
+    }
+};
+
+/**
  * The filter of tableContents has to be a whole SELECT.
  *
  * The parameter is called sqlQuery and was described as a WHERE clause, but
@@ -59,7 +77,7 @@ export class QueryHandlers extends BaseHandler {
         return [
             {
                 name: 'tableContents',
-                description: 'Read rows of one table or view by name, with an optional filter - the quickest look at data when you know the table. Reading only: ADT serves no write here. For a join, an aggregate or anything over more than one table use runQuery; to see what FIELDS a table has use getStructureSource, because this answers with data and not with a definition. The row cap is the rowNumber parameter and nothing else - without it the backend returns 100 rows. There is no offset in the backend, so paging fetches offset+rowNumber rows and returns the tail - pass an ORDER BY to make the window stable.',
+                description: 'Read rows of one table or view by name, with an optional filter - the quickest look at data when you know the table. Reading only: ADT serves no write here. For a join, an aggregate or anything over more than one table use runQuery; to see what FIELDS a table has use getStructureSource, because this answers with data and not with a definition. The row cap is the rowNumber parameter and nothing else - without it the backend returns 100 rows. There is no offset in the backend, so paging fetches offset+rowNumber rows and returns the tail - pass an ORDER BY to make the window stable. Rows come back compact - columns once, each row an array, columns blank in every row named in emptyColumns; format "objects" gives the endpoint answer as it is.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -79,6 +97,7 @@ export class QueryHandlers extends BaseHandler {
                             type: 'number',
                             description: 'Skip this many leading rows. ADT has no offset, so the server fetches offset+rowNumber rows and returns the tail - add an ORDER BY to make the window stable.'
                         },
+                        ...ROW_FORMAT_PROPERTIES,
                         sqlQuery: {
                             type: 'string',
                             description: 'An optional filter. The endpoint itself accepts nothing but a whole SELECT, so a bare condition (BUKRS = \'1000\') is completed into SELECT * FROM <entity> WHERE <condition> and the answer says what was sent. A SELECT written out in full is passed through untouched.'
@@ -89,7 +108,7 @@ export class QueryHandlers extends BaseHandler {
             },
             {
                 name: 'runQuery',
-                description: 'Run an Open SQL SELECT of at most 255 characters and get the rows back - joins, aggregates, GROUP BY, whatever the ABAP SQL console accepts. Reading only, and only SELECT: the endpoint refuses anything that writes, and for logic around the data (call a function module, compute, loop) use runSnippet. Ask for the rows you need with the rowNumber parameter: an UP TO n ROWS inside the query text is ignored by this endpoint, and without rowNumber the answer is 100 rows of every selected column. Field lists need commas between the fields - this endpoint speaks new Open SQL.',
+                description: 'Run an Open SQL SELECT of at most 255 characters and get the rows back - joins, aggregates, GROUP BY, whatever the ABAP SQL console accepts. Reading only, and only SELECT: the endpoint refuses anything that writes, and for logic around the data (call a function module, compute, loop) use runSnippet. Ask for the rows you need with the rowNumber parameter: an UP TO n ROWS inside the query text is ignored by this endpoint, and without rowNumber the answer is 100 rows of every selected column. Field lists need commas between the fields - this endpoint speaks new Open SQL. Rows come back compact - columns once, each row an array, columns blank in every row named in emptyColumns; format "objects" gives the endpoint answer as it is.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -108,7 +127,8 @@ export class QueryHandlers extends BaseHandler {
                         offset: {
                             type: 'number',
                             description: 'Skip this many leading rows. ADT has no offset, so the server fetches offset+rowNumber rows and returns the tail - add an ORDER BY to make the window stable.'
-                        }
+                        },
+                        ...ROW_FORMAT_PROPERTIES
                     },
                     required: ['sqlQuery']
                 }
@@ -211,7 +231,7 @@ export class QueryHandlers extends BaseHandler {
                 args.decode,
                 query
             );
-            const shaped = this.shape(result, args);
+            const shaped = this.laidOut(this.shape(result, args), args);
             this.trackRequest(startTime, true);
             return {
                 content: [
@@ -232,7 +252,17 @@ export class QueryHandlers extends BaseHandler {
     }
 
     async handleRunQuery(args: any): Promise<any> {
-        return this.answer(await this.runQueryCore(args));
+        return this.answer(this.laidOut(await this.runQueryCore(args), args));
+    }
+
+    /**
+     * The rows in the format the caller asked for. Only the tool answer is
+     * laid out: runQueryCore keeps handing its in-process callers the rows as
+     * objects.
+     */
+    private laidOut<T extends Record<string, unknown>>(payload: T, args: any): T {
+        if (rowFormatOf(args) === 'objects') return payload;
+        return { ...payload, result: compactResult(payload.result, args?.keepEmptyColumns === true) };
     }
 
     /**

@@ -965,6 +965,20 @@ const check = (label, condition, detail) => {
     tableRows.payload.rows.more === true || tableRows.payload.rows.more === undefined,
     tableRows.payload.rows);
 
+  const compact = tableRows.payload.result;
+  const objects = await call('tableContents', { ddicEntityName: 'T000', rowNumber: 2, format: 'objects' });
+  const objectColumns = objects.payload.result.columns || [];
+  check('tableContents answers compact: columns once, each row an array in that order, empty columns named',
+    compact.format === 'compact'
+    && compact.values.every(row => Array.isArray(row) && row.length === compact.columns.length)
+    && compact.columns.length + (compact.emptyColumns || []).length === objectColumns.length,
+    { columns: compact.columns.length, empty: (compact.emptyColumns || []).length, of: objectColumns.length });
+  check('and format objects gives the endpoint answer as it is',
+    objects.payload.result.values.every(row => row && !Array.isArray(row) && typeof row === 'object')
+    && compact.values.every((row, i) => compact.columns.every((column, j) =>
+      row[j] === (objects.payload.result.values[i][column[0]] ?? null))),
+    objects.payload.result.values[0]);
+
   const filtered = await call('tableContents', { ddicEntityName: 'T000', sqlQuery: "MANDT = '000'", rowNumber: 5 });
   check('a bare condition is completed into the SELECT the endpoint insists on',
     filtered.payload.status === 'success'
