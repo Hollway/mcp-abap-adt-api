@@ -1,6 +1,8 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { BaseHandler } from './BaseHandler';
+import { DdifHandlerBase } from './DdifHandlerBase';
 import { wrapAdtError } from '../lib/adtError';
+import { activationVerdict, directorySql, failedStep, packageExistsSql, packageName as checkedPackage } from '../lib/ddifWrite';
+import { domainDdifSnippet, domainHeaderSql } from '../lib/domainDdif';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from 'abap-adt-api';
 import type { ObjectVersion } from 'abap-adt-api';
@@ -54,7 +56,7 @@ const domainEndpointHint = (error: unknown): string | undefined =>
  * The PUT carries the complete definition, so a change is sent as a patch
  * merged onto what the system currently holds (see lib/ddicProperties).
  */
-export class DdicPropertyHandlers extends BaseHandler {
+export class DdicPropertyHandlers extends DdifHandlerBase {
   getTools(): ToolDefinition[] {
     return [
       {
@@ -216,7 +218,7 @@ export class DdicPropertyHandlers extends BaseHandler {
       },
       {
         name: 'createDomain',
-        description: 'Create a DDIC domain and give it its definition, in one call: validate the name, create the object, lock it, write the type and output format (and value table or fixed values), unlock, activate. createObject alone leaves a domain with no definition, which cannot be activated. Nothing is rolled back if a step fails - the answer reports each step, and a domain that was created but not written is still there to correct or delete.',
+        description: 'Create a DDIC domain and give it its definition, in one call: validate the name, create the object, lock it, write the type and output format (and value table or fixed values), unlock, activate. createObject alone leaves a domain with no definition, which cannot be activated. Nothing is rolled back if a step fails - the answer reports each step, and a domain that was created but not written is still there to correct or delete. On a release that serves no /sap/bc/adt/ddic/domains (404) the same arguments are written the way SE11 writes them - RS_CORR_INSERT, DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE in a throwaway class - and the answer says so in "via"; the name, package and request are checked first, and DD01L, TADIR and the request entry are read back as the proof. A task number is lifted to its request there.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -773,6 +775,9 @@ export class DdicPropertyHandlers extends BaseHandler {
     } catch (error: any) {
       this.trackRequest(validateStart, false);
       const missing = what === 'domain' ? domainEndpointHint(error) : undefined;
+      // No domain endpoint on this release: the domain is written the way SE11
+      // writes it, through DDIF_DOMA_PUT - see lib/domainDdif.
+      if (missing) return this.createDomainThroughDdif(args, name, packageName);
       throw wrapAdtError(
         error,
         missing
@@ -955,6 +960,141 @@ export class DdicPropertyHandlers extends BaseHandler {
         hint: 'Written but not active. Nothing was rolled back; correct it and run activateSafe.'
       });
     }
+  }
+
+  /**
+   * createDomain on a release with no domain endpoint.
+   *
+   * The same arguments, written through RS_CORR_INSERT, DDIF_DOMA_PUT and
+   * DDIF_DOMA_ACTIVATE in a throwaway class. Checked before anything is
+   * generated: the name is free in DD01L and TADIR, the package exists, the
+   * transport number is a modifiable workbench request (a task is lifted to
+   * its request). Checked afterwards from the tables, not from the snippet:
+   * the active row in DD01L, the directory entry, the request entry.
+   */
+  private async createDomainThroughDdif(
+    args: any,
+    name: string,
+    givenPackage: string
+  ): Promise<any> {
+    const via = 'ddif';
+    let packageName: string;
+    try {
+      packageName = checkedPackage(givenPackage);
+    } catch (error) {
+      return this.refuse(error);
+    }
+
+    const [existing] = await this.rows(domainHeaderSql(name), 5);
+    const [directory] = await this.rows(directorySql('DOMA', name), 1);
+    if (existing || directory) {
+      return this.answer({
+        status: 'error',
+        via,
+        created: false,
+        name,
+        ...(directory ? { packageOfExisting: String(directory.DEVCLASS ?? '').trim() } : {}),
+        hint: `${name} already exists${directory ? ` in package ${String(directory.DEVCLASS ?? '').trim()}` : ''}. Nothing was written.`
+      });
+    }
+    if (!packageName.startsWith('$')) {
+      const [known] = await this.rows(packageExistsSql(packageName), 1);
+      if (!known) {
+        throw new McpError(ErrorCode.InvalidParams, `There is no package ${packageName} on this system.`);
+      }
+    }
+    const { request, fromTask } = await this.requestFor(packageName, args?.transport);
+
+    let snippet;
+    try {
+      snippet = domainDdifSnippet({
+        ...this.domainPatch(args),
+        description: args?.description,
+        name,
+        packageName,
+        request,
+        language: args?.language,
+        activate: args?.activate !== false
+      });
+    } catch (error) {
+      return this.refuse(error);
+    }
+
+    const common = {
+      via,
+      name,
+      packageName,
+      ...(request ? { request } : {}),
+      ...(fromTask ? { requestFromTask: fromTask } : {}),
+      reason: 'This release serves no /sap/bc/adt/ddic/domains (404), so the domain went through DDIF_DOMA_PUT.'
+    };
+    if (args?.dryRun === true) {
+      return this.answer({
+        status: 'success',
+        dryRun: true,
+        created: false,
+        ...common,
+        code: snippet.code,
+        note: 'The name is free and nothing was written. Without dryRun this ABAP runs in a throwaway class.'
+      });
+    }
+
+    const run = await this.runDdif(snippet.code, snippet.exceptions);
+    if (!run.ran) {
+      return this.answer({
+        status: 'error',
+        created: false,
+        ...common,
+        ...run.snippet,
+        hint: 'The throwaway class did not get as far as running, so nothing was written. The steps above say where it stopped.'
+      });
+    }
+
+    const failed = failedStep(run.print);
+    const registered = run.print.steps.some(step => step.step === 'transport' && step.ok);
+    const written = run.print.steps.some(step => step.step === 'put' && step.ok);
+    const activation = run.print.steps.find(step => step.step === 'activate');
+
+    const versions = (await this.rows(domainHeaderSql(name), 5))
+      .map(row => String(row.AS4LOCAL ?? '').trim());
+    const [entry] = await this.rows(directorySql('DOMA', name), 1);
+    const recorded = request ? await this.recordedIn('DOMA', name, request) : undefined;
+    const active = versions.includes('A');
+
+    const proof = {
+      dd01lVersions: versions,
+      directoryPackage: entry ? String(entry.DEVCLASS ?? '').trim() : null,
+      ...(run.print.info.task ? { task: run.print.info.task } : {}),
+      ...(recorded ? { requestEntry: recorded } : {})
+    };
+
+    let hint: string;
+    if (failed?.step === 'transport') {
+      hint = `RS_CORR_INSERT refused the domain (${failed.exception || `subrc ${failed.subrc}`}${failed.message ? `: ${failed.message}` : ''}), so nothing was written.`;
+    } else if (failed?.step === 'put') {
+      hint = `The domain is registered (TADIR, request) but DDIF_DOMA_PUT refused the definition (${failed.exception || `subrc ${failed.subrc}`}${failed.message ? `: ${failed.message}` : ''}). Correct the arguments; the directory entry stays until it is deleted in SE11.`;
+    } else if (failed?.step === 'activate') {
+      hint = `${activationVerdict(failed.rc)} Check it in SE11 (Utilities > Activation log).`;
+    } else if (args?.activate === false) {
+      hint = 'Written to the inactive version and not activated, as asked.';
+    } else if (!active) {
+      hint = 'The snippet reported success but DD01L holds no active version - check the domain in SE11.';
+    } else if (recorded && !recorded.recorded) {
+      hint = `Active, but no entry for R3TR DOMA ${name} was found in ${request} or its tasks - check the request before releasing it.`;
+    } else {
+      hint = `Active${request ? ` and recorded in ${run.print.info.task ? `task ${run.print.info.task} of ` : ''}${request}` : ' as a local object'}. Written through DDIF_DOMA_PUT because this release serves no domain endpoint; getDomainProperties cannot read it here either - DD01L/DD07L can.`;
+    }
+
+    return this.answer({
+      status: failed || (args?.activate !== false && !active) ? 'error' : 'success',
+      created: registered,
+      written,
+      activated: active && args?.activate !== false && activation?.ok === true,
+      ...common,
+      steps: run.print.steps,
+      ...proof,
+      hint
+    });
   }
 
   private async releaseLock(
