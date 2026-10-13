@@ -137,6 +137,15 @@ describe('planFieldChange', () => {
     expect(removal.emptyBecause).toEqual(['removing ACTIVE']);
   });
 
+  it('changes a table keyed by MANDT alone, as T000 is', () => {
+    const t000: CurrentField[] = [
+      { name: 'MANDT', key: true, dataElement: 'MANDT' },
+      { name: 'MTEXT', key: false, dataElement: 'MTEXT_D' }
+    ];
+    const plan = planFieldChange(t000, { add: [{ name: 'NOTE', dataElement: 'AS4TEXT' }] }, context());
+    expect(plan.fields.map(field => field.name)).toEqual(['MANDT', 'MTEXT', 'NOTE']);
+  });
+
   it('keeps the key together', () => {
     expect(() => planFieldChange(current, { add: [{ name: 'X', dataElement: 'Y', key: true, after: 'TOKEN' }] }, context()))
       .toThrow(/within the key/);

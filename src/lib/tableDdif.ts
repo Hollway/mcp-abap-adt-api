@@ -139,8 +139,13 @@ export function tableFields(fields: unknown, clientDependent: boolean): TableFie
   return list;
 }
 
-/** Unique names, at least one key besides the client, keys first and contiguous. */
-export function checkFieldList(list: { name: string; key?: boolean }[]): void {
+/**
+ * Unique names, keys first and contiguous - and, for a new table, a key field
+ * besides the client. An existing table keyed by MANDT alone (T000, one-row
+ * customizing tables) is legitimate and must stay changeable; a new one is
+ * nearly always a forgotten key flag.
+ */
+export function checkFieldList(list: { name: string; key?: boolean }[], requireOwnKey = true): void {
   const seen = new Set<string>();
   for (const field of list) {
     if (seen.has(field.name)) throw new DdifError(`Field ${field.name} appears twice.`);
@@ -152,7 +157,7 @@ export function checkFieldList(list: { name: string; key?: boolean }[]): void {
     const stray = list.slice(firstNonKey).find(field => field.key)!;
     throw new DdifError(`Key field ${stray.name} comes after a non-key field; the key fields come first, together.`);
   }
-  if (list.length > 0 && list.every(field => field.name === 'MANDT' || !field.key)) {
+  if (requireOwnKey && list.length > 0 && list.every(field => field.name === 'MANDT' || !field.key)) {
     throw new DdifError('The key needs a field besides MANDT.');
   }
 }
@@ -449,7 +454,10 @@ export function planFieldChange(current: CurrentField[], change: FieldChange, co
     added.push(name);
   }
 
-  checkFieldList(fields);
+  // A key of MANDT alone is kept as the table has it; removing the last key
+  // field besides it is what would be new, and that is refused.
+  const ownKeyBefore = current.some(field => field.key && field.name !== 'MANDT');
+  checkFieldList(fields, ownKeyBefore);
   return { fields, added, removed, requiresEmpty: emptyBecause.length > 0, emptyBecause };
 }
 

@@ -474,6 +474,50 @@ const check = (label, condition, detail) => {
     /key werks : werks_d not null;/.test(String(structureDryRun.payload.source)),
     structureDryRun.payload);
 
+  // The DDIF writers, on their read-only paths: a dry run checks and builds,
+  // a field change without a token only previews. None of them writes.
+  const domainDryRun = await call('createDomain', {
+    name: 'ZSMOKE_DOM', packageName: '$TMP', description: 'smoke', datatype: 'CHAR', length: 1,
+    fixValues: [{ low: 'A', text: 'smoke' }], dryRun: true
+  });
+  check('createDomain dry-runs without writing - over DDIF where ADT serves no domains',
+    domainDryRun.payload.status === 'success' && domainDryRun.payload.created === false &&
+    (domainDryRun.payload.via !== 'ddif' || domainDryRun.payload.code.some(line => line.includes("'DDIF_DOMA_PUT'"))),
+    domainDryRun.payload);
+
+  const packageDryRun = await call('createPackage', { name: '$ZSMOKE_PKG', description: 'smoke', dryRun: true });
+  check('createPackage dry-runs a local package as LOCAL with no layer',
+    packageDryRun.payload.status === 'success' && packageDryRun.payload.created === false &&
+    packageDryRun.payload.softwareComponent === 'LOCAL' && !packageDryRun.payload.transportLayer,
+    packageDryRun.payload);
+
+  const tableDryRun = await call('createTable', {
+    name: 'ZSMOKE_TAB', packageName: '$TMP', description: 'smoke',
+    fields: [{ name: 'ID', dataElement: 'CHAR10', key: true }], dryRun: true
+  });
+  check('createTable dry-runs with MANDT put in front and the DDIF calls built',
+    tableDryRun.payload.status === 'success' && tableDryRun.payload.created === false &&
+    tableDryRun.payload.fields[0].name === 'MANDT' &&
+    tableDryRun.payload.code.some(line => line.includes("'DDIF_TABL_PUT'")),
+    tableDryRun.payload);
+
+  const fieldPreview = await call('changeTableFields', {
+    name: 'T000', add: [{ name: 'ZSMOKE_NOTE', dataElement: 'AS4TEXT' }]
+  });
+  const previewRefused = fieldPreview.payload.status === 'error' && /append|INCLUDE/.test(fieldPreview.payload.hint || '');
+  check('changeTableFields without a token only previews, with a token to confirm it',
+    fieldPreview.payload.written === false &&
+    (previewRefused || (fieldPreview.payload.preview === true && /^[0-9a-f]{16}$/.test(fieldPreview.payload.previewToken))),
+    fieldPreview.payload);
+  if (!previewRefused) {
+    const wrongToken = await call('changeTableFields', {
+      name: 'T000', add: [{ name: 'ZSMOKE_NOTE', dataElement: 'AS4TEXT' }], previewToken: '0000000000000000'
+    });
+    check('changeTableFields refuses a token that is not the preview\'s, writing nothing',
+      wrongToken.payload.written === false && /does not match/.test(wrongToken.payload.hint || ''),
+      wrongToken.payload);
+  }
+
   // Message classes. Class 00 is on every system and is the size that makes
   // the filters matter: 875 messages in one 478 KB document.
   const messages = await call('getMessages', { className: '00', fromNumber: '001', toNumber: '005' });
