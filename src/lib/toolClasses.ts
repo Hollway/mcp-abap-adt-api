@@ -38,6 +38,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'transportSetOwner',
   'transportAddUser',
   'registerInTransport',
+  'moveToTask',
   'setTransportsConfig',
   'createTransportsConfig',
   // code execution
@@ -64,6 +65,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   // message classes
   'setMessages',
   'createMessageClass',
+  'deleteMessages',
   // settings
   'setPrettyPrinterSetting',
   // abapGit
@@ -104,6 +106,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
   'deleteObject',
   'deleteMethod',
+  'deleteMessages',
   'transportDelete',
   'transportRelease',
   'gitUnlinkRepo',

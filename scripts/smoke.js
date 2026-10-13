@@ -518,6 +518,21 @@ const check = (label, condition, detail) => {
       wrongToken.payload);
   }
 
+  // Deleting messages and moving request entries: only the refusals, which
+  // are reads - a token that is not the preview's stops before any ABAP runs.
+  const noMessageClass = await call('deleteMessages', { className: 'ZZSMOKE_NO_CLASS', numbers: ['001'] });
+  check('deleteMessages refuses a message class that does not exist',
+    noMessageClass.payload.deleted === false && /no message class/.test(noMessageClass.payload.hint || ''),
+    noMessageClass.payload);
+  const foreignToken = await call('deleteMessages', { className: '00', numbers: ['001'], previewToken: '0000000000000000' });
+  check('deleteMessages refuses a token that is not the preview\'s, deleting nothing',
+    foreignToken.payload.deleted === false && /does not match/.test(foreignToken.payload.hint || ''),
+    foreignToken.payload);
+  const noRequest = await call('moveToTask', { transport: 'ZZZK900000' });
+  check('moveToTask refuses a request that does not exist',
+    /does not exist/.test(JSON.stringify(noRequest.payload)),
+    noRequest.payload);
+
   // Message classes. Class 00 is on every system and is the size that makes
   // the filters matter: 875 messages in one 478 KB document.
   const messages = await call('getMessages', { className: '00', fromNumber: '001', toNumber: '005' });

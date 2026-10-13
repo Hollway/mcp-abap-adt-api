@@ -50,6 +50,8 @@ import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
 import { DdifObjectHandlers } from './handlers/DdifObjectHandlers.js';
+import { MessageDeletionHandlers } from './handlers/MessageDeletionHandlers.js';
+import { TransportMoveHandlers } from './handlers/TransportMoveHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars, serverVersion, buildStamp, startedAt } from './lib/serverConfig';
@@ -191,6 +193,8 @@ export class AbapAdtServer extends Server {
     private callHandlers: CallHandlers;
     private tableHandlers: TableHandlers;
     private ddifObjectHandlers: DdifObjectHandlers;
+    private messageDeletionHandlers: MessageDeletionHandlers;
+    private transportMoveHandlers: TransportMoveHandlers;
     private operationsHandlers: OperationsHandlers;
 
   /**
@@ -277,6 +281,8 @@ export class AbapAdtServer extends Server {
     this.callHandlers = new CallHandlers(this.adtClient);
     this.tableHandlers = new TableHandlers(this.adtClient);
     this.ddifObjectHandlers = new DdifObjectHandlers(this.adtClient);
+    this.messageDeletionHandlers = new MessageDeletionHandlers(this.adtClient);
+    this.transportMoveHandlers = new TransportMoveHandlers(this.adtClient);
     this.operationsHandlers = new OperationsHandlers(this.adtClient);
 
 
@@ -541,6 +547,12 @@ export class AbapAdtServer extends Server {
             case 'createMessageClass':
                 result = await this.messageClassHandlers.handle(toolName, args);
                 break;
+            case 'deleteMessages':
+                result = await this.messageDeletionHandlers.handle(toolName, args);
+                break;
+            case 'moveToTask':
+                result = await this.transportMoveHandlers.handle(toolName, args);
+                break;
             case 'getStructureSource':
             case 'createStructure':
                 result = await this.ddicStructureHandlers.handle(toolName, args);
@@ -704,6 +716,8 @@ export class AbapAdtServer extends Server {
       { group: 'enhancement', tools: this.enhancementHandlers.getTools() },
       { group: 'textElement', tools: this.textElementHandlers.getTools() },
       { group: 'messageClass', tools: this.messageClassHandlers.getTools() },
+      { group: 'messageClass', tools: this.messageDeletionHandlers.getTools() },
+      { group: 'transport', tools: this.transportMoveHandlers.getTools() },
       { group: 'ddic', tools: this.ddicStructureHandlers.getTools() },
       { group: 'package', tools: this.packageHandlers.getTools() },
       { group: 'rap', tools: this.rapHandlers.getTools() },

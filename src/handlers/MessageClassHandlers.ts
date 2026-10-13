@@ -36,8 +36,9 @@ const DEFAULT_MAX = 200;
  * What the backend allows is narrower than SE91: a message can be added or
  * changed, but not removed, and its long text can be read and not written.
  * Both refusals are the backend's, are stated in the tool descriptions, and
- * are reported rather than worked around - see lib/messageClass for the
- * measurements behind them.
+ * are reported here - see lib/messageClass for the measurements behind them.
+ * Removing a message is deleteMessages' job (MessageDeletionHandlers), which
+ * goes around ADT the way SE91 does.
  */
 export class MessageClassHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
@@ -434,7 +435,7 @@ export class MessageClassHandlers extends BaseHandler {
       steps,
       hint: missing.length
         ? `The class came back without ${missing.join(', ')}. Nothing was rolled back - read the class with getMessages and check what is there.`
-        : 'In T100 and usable now: no activation is involved. A message cannot be removed again through ADT - that needs SE91.'
+        : 'In T100 and usable now: no activation is involved. ADT cannot remove a message again; deleteMessages does it the way SE91 does.'
     };
   }
 
