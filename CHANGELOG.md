@@ -8,6 +8,72 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.13.0] — deleting a message, and the request header
+
+Two things SE91 and SE09 do by hand that nothing here could:
+
+- `deleteMessages` deletes messages from a message class. ADT upserts the
+  class document by number, so `setMessages` can add and change but never
+  remove, and the one standard module that deletes a message
+  (RS_DELETE_MESSAGE) asks for confirmation in a popup and for the request in
+  a dialog. Two calls, like `changeTableFields`: the preview shows each
+  message in every language with its documentation rows and where it is used
+  - where-used per number, plus the code that raises messages of the class
+  with the number in a variable, which no per-number search sees - and
+  returns a `previewToken`; the delete goes through only with that token on
+  unchanged messages. It deletes T100 in every language, T100U, T100X and the
+  long text (DOKHL, DOKTL, DOKIL) under the SE91 lock (ENQUEUE_ES_MSGSI), and
+  records the deletion in the caller's own task as LIMU MESS
+  `<class><number>` with function D - the entry SE91 writes. All in one
+  database transaction: a failed step rolls back what came before it. Usages
+  are shown, not enforced.
+- `moveToTask` moves entries that sit on a request itself - in nobody's task,
+  not covered by a task release - into a task, by default the caller's own:
+  TR_DELETE_COMM_OBJECT_KEYS, then TR_APPEND_TO_COMM_OBJS_KEYS with the
+  entry's E071K keys, in one transaction, read back from E071 and TLOCK. The
+  same two calls with a token. The preview names released tasks, whose
+  objects reach the header by the release and are not a mistake.
+
+Measured live on the ERP system and built in:
+
+- the long text is deleted with plain DELETEs, not DOCU_DEL: that module
+  calls DOCU_DELETE_EXTENSION over DESTINATION 'NONE', and a synchronous RFC
+  commits the caller's work - a rollback after it would leave the texts gone
+  and the rest not;
+- a message created as self-explanatory has T100U-SELFDEF `3`, not `X`, and
+  a DOKHL row of its own in language D with state N and no text; a written
+  long text has state R. The preview shows the state, and both go with the
+  message;
+- DOKHL keeps a row per version, so the counts the snippet checks against
+  are rows, not languages;
+- when the request already carries R3TR MSAG of the class - creating the
+  class puts it there - TR_APPEND_TO_COMM_OBJS_KEYS takes LIMU MESS entries
+  with subrc 0 and writes none: the class travels whole, and the answer says
+  so instead of calling the deletion unrecorded. What an import of R3TR MSAG
+  does with numbers missing in the source was not tested;
+- the tables handed to TR_APPEND_TO_COMM_OBJS_KEYS need the default key: a
+  table declared WITH EMPTY KEY dumps inside SAPLSTRI with
+  CALL_FUNCTION_CONFLICT_TAB_TYP.
+
+Two defects in the shared code, found on the way:
+
+- an EXCEPTIONS clause was generated on one line. With the 67 exceptions of
+  TR_APPEND_TO_COMM_OBJS_KEYS that is some 1,700 characters, and a class
+  with a line past 255 is not written - so it is wrapped now;
+- the list of those 67 exceptions was alphabetical while its comment said
+  "in the order of the signature". Generated ABAP numbers exceptions by their
+  place, so `APPEND_EXCEPTIONS` is now the signature's order, read from the
+  system.
+
+And one in the new tool before it shipped: a message class name was checked
+as a dictionary name, which must start with a letter - class 00, on every
+system, was refused. The smoke run caught it.
+
+191 tools (189), 1,348 tests in 79 suites (1,311 in 77), 325 smoke checks -
+all green on a live run. Both tools were run live on the ERP system: in
+`$TMP`, and in a transportable package with a request made for the test;
+every test object, request entry and directory entry was removed afterwards.
+
 ## [1.12.0] — the dictionary the way SE11 writes it
 
 On the classic ERP system ADT serves no `/ddic/domains`, no `/ddic/tables`

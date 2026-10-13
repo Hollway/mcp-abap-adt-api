@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 189 tools, read-only guardrails and 1,311 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 191 tools, read-only guardrails and 1,348 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -25,11 +25,11 @@ The server is not published to a package registry: clone the repository, build i
 - **Activation**: `activateSafe` activates and then verifies, because activation can report success without having activated anything.
 - **Tests**: `runTests` activates the object first and reports which test methods ran, which passed, and every failure with its ABAP Unit message - a bare test run against an inactive object answers with an empty list that reads like success.
 - **Locks**: `listLocks` and `unlockAll` make the locks this server holds visible, and they are released when it shuts down.
-- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, `transportReadiness` for what stands between a request and its release, `transportConflicts` for the objects of it that sit in somebody else open request, `objectTransports` for everywhere one object has travelled, plus creation, release and ownership tools. `registerInTransport` puts an object into a request by hand, for the writes that do not register themselves - it resolves a request to your own open task, names what each of the 67 exceptions of `TR_APPEND_TO_COMM_OBJS_KEYS` means, and verifies the entry in `E071` instead of trusting `sy-subrc`.
+- **Transports**: filterable transport lists, `transportDetails` for the objects and tasks of one request, `transportReadiness` for what stands between a request and its release, `transportConflicts` for the objects of it that sit in somebody else open request, `objectTransports` for everywhere one object has travelled, plus creation, release and ownership tools. `registerInTransport` puts an object into a request by hand, for the writes that do not register themselves - it resolves a request to your own open task, names what each of the 67 exceptions of `TR_APPEND_TO_COMM_OBJS_KEYS` means, and verifies the entry in `E071` instead of trusting `sy-subrc`. `moveToTask` moves entries that sit on a request itself, in nobody's task, into a task.
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC - `atcCheck` runs the checks over an object or a package and reports the findings, `atcDocumentation` gives the rule text - traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it - the write locks the text pool rather than the object, and activates both rows it leaves inactive. On a release that serves no `/sap/bc/adt/textelements` at all they fall back to `READ`/`INSERT TEXTPOOL` in a throwaway class, which needs neither lock nor activation; the answer says which way it went in `via`. That path also writes the program title, which ADT serves nowhere, and registers the object in a request - `registerInTransport` does that on its own too, resolving a request to your own task and verifying the entry in `E071` rather than trusting `sy-subrc`.
 - **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
-- **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
+- **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises, and `deleteMessages` removes them, which ADT cannot. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
 - **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
 - **Guardrails**: a read-only mode, tool profiles, per-tool read-only/destructive annotations and a cap on oversized answers.
@@ -74,13 +74,13 @@ Every tool this server offers is described to the model before it is asked anyth
 
 | Profile | Tools | Tool list | What it serves |
 | --- | --- | --- | --- |
-| *(none)* | 189 | 192k | Everything. |
+| *(none)* | 191 | 196k | Everything. |
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
 | `ddic` | 43 | 57k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
 | `atc` | 23 | 17k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
 | `graph` | 27 | 33k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
 | `read` | 85 | 111k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
-| `dev` | 141 | 160k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+| `dev` | 143 | 163k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
 `healthcheck` also says which build answered - the version, when it was
 compiled and when the process started - because several servers share one build
@@ -406,10 +406,15 @@ class header. Text is capped at 73 characters, what T100 holds, and the answer
 says what was cut. No activation is involved: the message is in T100 as soon
 as the call returns.
 
-Two things the backend does not allow, and neither is worked around here: a
-message cannot be removed (a PUT or DELETE on the per-message resource is
-refused whatever lock handle it is given), and a long text cannot be written
-(that resource has no PUT). Both need SE91.
+Two things the backend does not allow: a message cannot be removed (a PUT or
+DELETE on the per-message resource is refused whatever lock handle it is
+given), and a long text cannot be written (that resource has no PUT). The
+second needs SE91. The first is what `deleteMessages` does instead, the way
+SE91 does it: under the SE91 lock it deletes the text in every language, the
+change record, the supplement and the long text, and records the deletion as
+LIMU MESS with function D in the caller's own task - all in one transaction,
+and only with the `previewToken` of a preview that showed every language,
+the long text and where the message is used.
 
 **Tests**
 
