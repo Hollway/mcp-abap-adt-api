@@ -11,8 +11,23 @@ import {
   registeredSql,
   tasksSql,
   transportNumber,
-  EXCEPTIONS
+  EXCEPTIONS,
+  APPEND_EXCEPTIONS
 } from '../lib/transportRegistration';
+
+describe('APPEND_EXCEPTIONS', () => {
+  // Generated ABAP numbers the exceptions by their place in this list, so it
+  // has to be the signature's order (read from the system), not an alphabet.
+  it('holds the 67 names once each, in the order of the signature', () => {
+    expect(APPEND_EXCEPTIONS).toHaveLength(67);
+    expect(new Set(APPEND_EXCEPTIONS).size).toBe(67);
+    expect(EXCEPTIONS.size).toBe(67);
+    expect(APPEND_EXCEPTIONS[0]).toBe('KEY_CHAR_IN_NON_CHAR_FIELD');
+    expect(APPEND_EXCEPTIONS[16]).toBe('OB_CHECK_OBJ_ERROR');
+    expect(APPEND_EXCEPTIONS.indexOf('TR_WRONG_ORDER_TYPE')).toBe(57);
+    expect(APPEND_EXCEPTIONS[66]).toBe('KEY_WRONG_CLIENT');
+  });
+});
 
 /**
  * Registering an object in a request by hand, for the writes that do not do it

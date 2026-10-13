@@ -4,6 +4,7 @@ import {
   activationVerdict,
   correctionStep,
   ddicObjectName,
+  exceptionClause,
   failedStep,
   packageName,
   parseDdifPrint,
@@ -82,6 +83,18 @@ describe('stepLines', () => {
     expect(lines.find(line => line.includes('EXCEPTIONS'))).toBe(
       `  EXCEPTIONS doma_not_found = 1 put_failure = 2 OTHERS = ${OTHERS_SUBRC}.`
     );
+  });
+
+  it('wraps a long EXCEPTIONS clause: one line past 255 characters and the class is not written', () => {
+    const names = Array.from({ length: 67 }, (_, index) => `SOME_LONG_EXCEPTION_NAME_${index}`);
+    const wrapped = exceptionClause(names);
+    expect(wrapped.length).toBeGreaterThan(1);
+    expect(Math.max(...wrapped.map(line => line.length))).toBeLessThanOrEqual(255);
+    expect(wrapped[0].startsWith('  EXCEPTIONS ')).toBe(true);
+    expect(wrapped[wrapped.length - 1].endsWith(`OTHERS = ${OTHERS_SUBRC}.`)).toBe(true);
+    const joined = wrapped.join(' ');
+    expect(joined).toContain('some_long_exception_name_0 = 1 ');
+    expect(joined).toContain('some_long_exception_name_66 = 67 ');
   });
 
   it('stops on a failure, and on an activation rc above 4 when asked', () => {

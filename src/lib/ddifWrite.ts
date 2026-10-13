@@ -126,10 +126,25 @@ export interface StepSpec {
 /** The subrc OTHERS is mapped to. */
 export const OTHERS_SUBRC = 99;
 
-const exceptionClause = (exceptions: string[] = []): string =>
-  '  EXCEPTIONS ' +
-  [...exceptions.map((name, index) => `${name.toLowerCase()} = ${index + 1}`), `OTHERS = ${OTHERS_SUBRC}`].join(' ') +
-  '.';
+/**
+ * The EXCEPTIONS clause, wrapped: a module with many exceptions
+ * (TR_APPEND_TO_COMM_OBJS_KEYS has 67) would otherwise put some 1,700
+ * characters on one line, and a class with a line past 255 is not written.
+ */
+export const exceptionClause = (exceptions: string[] = []): string[] => {
+  const parts = [...exceptions.map((name, index) => `${name.toLowerCase()} = ${index + 1}`), `OTHERS = ${OTHERS_SUBRC}`];
+  const lines: string[] = [];
+  let line = '  EXCEPTIONS';
+  for (const part of parts) {
+    if (line.length + part.length + 1 > 200) {
+      lines.push(line);
+      line = '            ';
+    }
+    line += ` ${part}`;
+  }
+  lines.push(`${line}.`);
+  return lines;
+};
 
 /**
  * One call with its bookkeeping: run it, keep sy-subrc and the message before
@@ -140,7 +155,7 @@ export function stepLines(spec: StepSpec): string[] {
   return [
     'CLEAR lv_rc.',
     ...spec.call,
-    exceptionClause(spec.exceptions),
+    ...exceptionClause(spec.exceptions),
     'lv_subrc = sy-subrc.',
     'CLEAR lv_msg.',
     'IF sy-msgid IS NOT INITIAL.',
@@ -151,6 +166,16 @@ export function stepLines(spec: StepSpec): string[] {
     ...(spec.continueOnFailure ? [] : [`IF ${failed}.`, '  RETURN.', 'ENDIF.'])
   ];
 }
+
+/**
+ * A step of the snippet's own - a comparison, a count - reported the way a
+ * module call is: subrc 0 for ok, 4 for a stop, and a message with no ID, so
+ * the parser keeps the text and does not take it for a module's message.
+ * `message` may hold string-template expressions ({ lv_x }).
+ */
+export const ownStepLine = (step: string, ok: boolean, message = ''): string =>
+  `out->write( |STEP${DDIF_SEPARATOR}${step}${DDIF_SEPARATOR}${ok ? 0 : 4}${DDIF_SEPARATOR}0${DDIF_SEPARATOR}` +
+  `${DDIF_SEPARATOR}${DDIF_SEPARATOR}${message}| ).`;
 
 /** A value the snippet reports alongside its steps. */
 export const infoLine = (key: string, expression: string): string =>
