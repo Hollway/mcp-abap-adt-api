@@ -49,6 +49,7 @@ import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
+import { DdifObjectHandlers } from './handlers/DdifObjectHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
 import { isMutatingTool, isReplayable } from './lib/toolClasses';
 import { isReadOnly, excludedTokens, readOnlyAllowances, includedTokens, toolProfileName, maxResponseChars, serverVersion, buildStamp, startedAt } from './lib/serverConfig';
@@ -189,6 +190,7 @@ export class AbapAdtServer extends Server {
     private snippetHandlers: SnippetHandlers;
     private callHandlers: CallHandlers;
     private tableHandlers: TableHandlers;
+    private ddifObjectHandlers: DdifObjectHandlers;
     private operationsHandlers: OperationsHandlers;
 
   /**
@@ -274,6 +276,7 @@ export class AbapAdtServer extends Server {
     this.snippetHandlers = new SnippetHandlers(this.adtClient);
     this.callHandlers = new CallHandlers(this.adtClient);
     this.tableHandlers = new TableHandlers(this.adtClient);
+    this.ddifObjectHandlers = new DdifObjectHandlers(this.adtClient);
     this.operationsHandlers = new OperationsHandlers(this.adtClient);
 
 
@@ -643,6 +646,9 @@ export class AbapAdtServer extends Server {
             case 'tableKeys':
                 result = await this.tableHandlers.handle(toolName, args);
                 break;
+            case 'createPackage':
+                result = await this.ddifObjectHandlers.handle(toolName, args);
+                break;
             case 'getFunctionModule':
             case 'listFunctionGroup':
             case 'createFunctionModule':
@@ -714,6 +720,7 @@ export class AbapAdtServer extends Server {
       { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.callHandlers.getTools() },
       { group: 'ddic', tools: this.tableHandlers.getTools() },
+      { group: 'ddic', tools: this.ddifObjectHandlers.getTools() },
       { group: 'operations', tools: this.operationsHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];

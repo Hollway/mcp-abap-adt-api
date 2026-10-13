@@ -56,6 +56,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'createStructure',
   'setDomainProperties',
   'setDataElementProperties',
+  'createPackage',
   // text elements
   'setTextElements',
   // message classes

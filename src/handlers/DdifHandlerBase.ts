@@ -65,14 +65,15 @@ export abstract class DdifHandlerBase extends BaseHandler {
    */
   protected async requestFor(
     packageName: string,
-    transport: unknown
+    transport: unknown,
+    what = `A dictionary object in ${packageName}`
   ): Promise<{ request?: string; fromTask?: string }> {
     if (isLocalPackage(packageName)) return {};
     const given = String(transport ?? '').trim().toUpperCase();
     if (!given) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        `A dictionary object in ${packageName} needs a transport request. Only a $ package goes without one.`
+        `${what} needs a transport request. Only a $ package goes without one.`
       );
     }
     try {

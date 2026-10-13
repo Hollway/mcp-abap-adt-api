@@ -39,7 +39,7 @@ const SOURCE_URLS: Record<string, (name: string, parentName: string) => string> 
  */
 const UNCREATABLE: Record<string, string> = {
   'TABL/DT': 'A transparent table cannot be created over ADT on this kind of system: there is no ddic/tables collection, so the creation answers "Resource /sap/bc/adt/ddic/tables does not exist". Its technical settings - delivery class, buffering, size category - are not in the source form either, so it could not be finished here anyway. Create it in SE11; createStructure covers TABL/DS, and getStructureSource reads either.',
-  'DEVC/K': 'A package cannot be created over ADT on this kind of system: /sap/bc/adt/packages is not served at all - only /sap/bc/adt/packages/settings is - so the creation, the name validation and even reading an existing package all answer 404. Create it in SE80 or SE21. nodeContents lists what is in a package, and changePackagePreview shows what moving an object into one would mean.'
+  'DEVC/K': 'A package cannot be created over ADT on this kind of system: /sap/bc/adt/packages is not served at all - only /sap/bc/adt/packages/settings is - so the creation, the name validation and even reading an existing package all answer 404. Use createPackage, which falls back to the way SE21 creates one. nodeContents lists what is in a package, and changePackagePreview shows what moving an object into one would mean.'
 };
 
 const encodedName = (name: string): string => {
