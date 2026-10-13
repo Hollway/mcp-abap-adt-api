@@ -8,6 +8,74 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.12.0] — the dictionary the way SE11 writes it
+
+On the classic ERP system ADT serves no `/ddic/domains`, no `/ddic/tables`
+and no `/sap/bc/adt/packages`: a domain, a table or a package could not be
+made through this server at all, and a table could not be changed safely.
+The structure collection does serve a table - as `define type`, with no
+table class, delivery class or technical settings - and writing that text
+back is how a table once became a structure that could not be activated
+(the reason 1.10.0 closed the lock tools to tables; they stay closed).
+
+Three new tools and one fallback write these objects through the APIs SE11
+and SE21 use, in a throwaway class, and read the outcome back from the
+tables and the database rather than from the generated ABAP:
+
+- `createDomain` falls back to RS_CORR_INSERT, DDIF_DOMA_PUT and
+  DDIF_DOMA_ACTIVATE when the domain endpoint answers 404 - same arguments,
+  fixed values included, `via: "ddif"` in the answer;
+- `createPackage` tries ADT and falls back to CL_PACKAGE_FACTORY
+  (create, save, release - the release also after a failed save). A
+  transportable package always gets HOME and Z*, a $ package is local;
+- `createTable` writes header, technical settings and fields with
+  DDIF_TABL_PUT. Defaults: client-dependent with MANDT added first, delivery
+  class A, maintenance allowed, APPL2, size category 0, no buffering, not
+  extensible;
+- `changeTableFields` adds and removes fields in two calls - a preview that
+  returns a `previewToken`, and a write that goes through only with that
+  token on the unchanged table. It puts back the whole definition read with
+  DDIF_TABL_GET, foreign keys and search help assignments included: a PUT
+  without them deletes them. With data in any client only non-key fields
+  can be added. Fields used by a foreign key, an index or a search help are
+  not removed; includes and appends are left to SE11. A failed activation
+  is undone by writing back and activating the definition read before.
+
+Everything is checked before anything is written - the name is free, the
+package exists, the data elements are active, the request is an open
+workbench request - and read back afterwards: DD01L/DD02L/DD09L/TDEVC, TADIR,
+the request entry, and for tables every added or removed column in the
+database itself.
+
+What was measured live on the ERP system and is now built in (`lib/ddifWrite`,
+`lib/tableDdif`):
+
+- RS_CORR_INSERT given the request **without** `use_korrnum_immediatedly`
+  puts the entry and its TLOCK into the caller's own task and returns it as
+  `korrnum`; with the flag the entry lands on the request header, owned by
+  nobody. Given a task it answers TK 886 - and the write after it still
+  succeeds, leaving an active object recorded in no request. A task number
+  is lifted to its request first;
+- `sy-subrc` is kept before `out->write`, which resets it; a failed step
+  stops the snippet; the progress line D0/322 and the message
+  SCTS_CTO_CUST_SYNC/003 are not reported as findings;
+- an activation that fails with rc 8 leaves an A and an N version; writing
+  back the definition read before and activating it leaves the table as it
+  was;
+- a column is proven to exist with ADBC `execute_query`, `set_param` and
+  `next( )`: without `next( )` a missing column does not raise, without
+  `set_param` an existing one does. A row count through ADBC sees every
+  client, which the data preview does not;
+- a line of ABAP source longer than 255 characters stops the class from
+  being written at all.
+
+The first smoke run of `changeTableFields` found a defect in it: a table
+keyed by MANDT alone (T000) was refused by a rule meant for new tables.
+
+189 tools (186), 1,311 tests in 77 suites (1,258 in 74), 323 smoke checks
+(318) - all green on a live run. The write paths were run live on the ERP
+system in `$TMP`, every test object removed afterwards.
+
 ## [1.11.0] — rows without the repetition
 
 `tableContents` and `runQuery` answered with the data preview result as it

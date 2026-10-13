@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 186 tools, read-only guardrails and 1,176 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 189 tools, read-only guardrails and 1,311 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -13,7 +13,7 @@ The server is not published to a package registry: clone the repository, build i
 ## Features
 
 - **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, `editObject` for the whole lock/patch/unlock/activate sequence in one call, `createAndWrite` for create + write + activate, and `createInclude` for report includes.
-- **Dictionary**: `createDataElement` and `createDomain` create a DDIC object and give it its definition in one call, and `get`/`setDataElementProperties` and `get`/`setDomainProperties` read and change one. `createObject` alone leaves a DDIC object with no type, which cannot be activated.
+- **Dictionary**: `createDataElement` and `createDomain` create a DDIC object and give it its definition in one call, and `get`/`setDataElementProperties` and `get`/`setDomainProperties` read and change one. `createObject` alone leaves a DDIC object with no type, which cannot be activated. `createTable` and `changeTableFields` create a transparent table and add or remove its fields the way SE11 does, and `createPackage` makes a package - each where ADT cannot.
 - **Reading source**: `sourceOutline` lists the blocks of a program or class with their line numbers, and `findInSource` searches a source - and the includes of a report - for text or a regular expression. ADT itself can only locate a class method.
 - **Class members**: `addMethod`, `addAttribute` and `deleteMethod` change a class as one operation. A method lives in two places in one source - the declaration in a visibility section, the implementation before the closing ENDCLASS - so adding one by hand is two edits whose line numbers must both survive the first of them.
 - **Function modules**: `getFunctionModule` takes the module name alone, finds its group and answers with the signature as data; `listFunctionGroup` lists a group without the SAPGUI padding `nodeContents` pads every row with; `createFunctionModule` creates one with its interface, which is how a signature is set at all, since ADT keeps it in the source text.
@@ -70,17 +70,17 @@ The HTTP transport takes a further set, all optional: `MCP_HOST`, `MCP_PORT`, `M
 
 ### The tool list is context
 
-Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **180,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
+Every tool this server offers is described to the model before it is asked anything, and the whole list costs about **190,000 characters**. A session that reads code never calls the debugger, the traces, ATC or git, and pays for them all the same. `SAP_TOOLS_PROFILE` names a ready-made set, `SAP_TOOLS_INCLUDE` adds to it (groups or single tool names), and `SAP_TOOLS_EXCLUDE` still wins over both:
 
 | Profile | Tools | Tool list | What it serves |
 | --- | --- | --- | --- |
-| *(none)* | 186 | 180k | Everything. |
+| *(none)* | 189 | 192k | Everything. |
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
-| `ddic` | 40 | 49k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
+| `ddic` | 43 | 57k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
 | `atc` | 23 | 17k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
 | `graph` | 27 | 33k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
-| `read` | 82 | 102k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
-| `dev` | 138 | 150k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
+| `read` | 85 | 111k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
+| `dev` | 141 | 160k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
 `healthcheck` also says which build answered - the version, when it was
 compiled and when the process started - because several servers share one build
@@ -330,11 +330,43 @@ take the lock themselves and give it back, and `activate` finishes the job -
 demanding a separate `lock` call made a one-field change a three-call sequence.
 
 Not every release serves these over ADT. On a classic ERP system data elements
-work while domains answer 404 for every path including validation - the tools
-say so instead of looking like a wrong name, and the domain has to be
-maintained in SE11. On S/4 both work, and the whole cycle - create with fixed
-values, patch the description, patch the values, build a data element on the
-domain - was verified there.
+work while domains answer 404 for every path including validation. There
+`createDomain` writes the same arguments the way SE11 does - RS_CORR_INSERT,
+DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE in a throwaway class - and says so in `via`;
+`get`/`setDomainProperties` still need the endpoint. On S/4 both work over
+ADT, and the whole cycle - create with fixed values, patch the description,
+patch the values, build a data element on the domain - was verified there.
+
+Tables are the same story, worse: there is no `/ddic/tables` on the classic
+system, and the structure collection serves a table as `define type`, without
+its table class or technical settings. Written back over ADT, that text turns
+the table into a structure that cannot be activated - so the lock tools refuse
+a table outright. `createTable` and `changeTableFields` write it with
+DDIF_TABL_PUT instead, which carries the whole definition: header, technical
+settings, fields, foreign keys, search help assignments.
+
+`changeTableFields` takes two calls. The first previews the new field list and
+answers with a `previewToken`; the second writes, and only with that token on
+the table as it was previewed. A table with data in any client - counted at
+database level, not through the client-bound data preview - takes only new
+non-key fields; removing a field or adding a key field needs it empty. Fields
+used by a foreign key, an index or a search help are not removed, and tables
+with includes or appends are left to SE11. If the activation fails - a change
+that would need a conversion, say - the definition read before is written back
+and activated, and the table is as it was. Every added and removed column is
+then checked in the database itself.
+
+Each of these registers the object with RS_CORR_INSERT given the request, not
+a task, and without `use_korrnum_immediatedly`: that way the entry lands in
+the caller's own task of the request. With the flag it lands on the request
+header, and with a task number the module refuses (TK 886) while the write
+still goes through - an active object recorded nowhere. A task number passed
+in is lifted to its request first.
+
+`createPackage` tries ADT and, where `/sap/bc/adt/packages` answers 404, makes
+the package the way SE21 does with CL_PACKAGE_FACTORY. A transportable package
+always gets software component HOME and transport layer Z*; a $ package is
+local.
 
 **Working on a package**
 
