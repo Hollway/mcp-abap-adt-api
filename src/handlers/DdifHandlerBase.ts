@@ -18,6 +18,8 @@ export interface DdifRun {
   /** The class ran; false means the snippet never got as far as the first call. */
   ran: boolean;
   print: DdifPrint;
+  /** What the snippet printed, for the lines DdifPrint does not parse. */
+  output: string;
   /** The snippet report, trimmed to what explains a failure to run. */
   snippet?: Record<string, unknown>;
 }
@@ -89,11 +91,13 @@ export abstract class DdifHandlerBase extends BaseHandler {
   /** Run the generated ABAP and read its steps back. */
   protected async runDdif(code: string[], exceptions: Record<string, string[]>): Promise<DdifRun> {
     const answer: any = await this.snippets.runSnippetCore({ code });
-    const print = parseDdifPrint(String(answer?.output ?? ''), exceptions);
-    if (answer?.ran === true) return { ran: true, print };
+    const output = String(answer?.output ?? '');
+    const print = parseDdifPrint(output, exceptions);
+    if (answer?.ran === true) return { ran: true, print, output };
     return {
       ran: false,
       print,
+      output,
       snippet: {
         steps: answer?.steps,
         ...(answer?.runError ? { runError: answer.runError } : {})

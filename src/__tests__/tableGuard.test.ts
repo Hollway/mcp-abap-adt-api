@@ -62,7 +62,7 @@ describe('assertNotTable', () => {
   it.each(['TRANSP', 'POOL', 'CLUSTER', 'VIEW'])('refuses a %s', async tabclass => {
     const { client: c } = client(dd02l(tabclass));
     await expect(assertNotTable(c, TABLE_SOURCE_URL)).rejects.toThrow(TableWriteRefused);
-    await expect(assertNotTable(c, TABLE_SOURCE_URL)).rejects.toThrow(/SE11/);
+    await expect(assertNotTable(c, TABLE_SOURCE_URL)).rejects.toThrow(/changeTableFields/);
   });
 
   it('refuses an append structure - it changes the table it is appended to', async () => {

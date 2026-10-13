@@ -141,7 +141,7 @@ describe('parseDdifPrint', () => {
     '',
     'INFO~#~korrnum~#~DEVK900100',
     'STEP~#~put~#~0~#~0~#~~#~003~#~',
-    'STEP~#~activate~#~0~#~8~#~D0~#~322~#~Activation errors',
+    'STEP~#~activate~#~0~#~8~#~DT~#~001~#~Activation errors',
     ''
   ].join('\n');
 
@@ -153,7 +153,7 @@ describe('parseDdifPrint', () => {
       ['activate', false]
     ]);
     expect(print.steps[0].message).toBeUndefined();
-    expect(print.steps[2]).toMatchObject({ rc: 8, message: 'Activation errors', messageId: 'D0', messageNumber: '322' });
+    expect(print.steps[2]).toMatchObject({ rc: 8, message: 'Activation errors', messageId: 'DT', messageNumber: '001' });
     expect(print.info).toEqual({ korrnum: 'DEVK900100' });
     expect(failedStep(print)?.step).toBe('activate');
   });
@@ -165,6 +165,18 @@ describe('parseDdifPrint', () => {
       'STEP~#~put~#~4~#~0~#~SCTS_CTO_CUST_SYNC~#~003~#~Sync'
     ].join('\n'));
     expect(print.steps.map(step => step.message)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('keeps the explanation of a step of the snippet own, which has no message ID', () => {
+    const print = parseDdifPrint('STEP~#~rows~#~4~#~0~#~~#~~#~the table holds 1 rows across all clients');
+    expect(print.steps[0]).toMatchObject({ ok: false, message: 'the table holds 1 rows across all clients' });
+    expect(print.steps[0].messageId).toBeUndefined();
+  });
+
+  it('drops the activation progress line even from a failed activation', () => {
+    const print = parseDdifPrint('STEP~#~activate~#~0~#~8~#~D0~#~322~#~Closing phase 013 ****');
+    expect(print.steps[0]).toMatchObject({ ok: false, rc: 8 });
+    expect(print.steps[0].message).toBeUndefined();
   });
 
   it('names the exception a subrc stands for', () => {

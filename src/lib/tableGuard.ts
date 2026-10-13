@@ -7,8 +7,12 @@
  * activated exactly like a structure - and a table rewritten that way can
  * lose what the DDL text does not carry (technical settings, enhancement
  * category, the conversion SE14 would have run), leaving it broken or
- * inactive in the middle of a transport. That has happened; the definition
- * of a table is changed in SE11, never over this bridge.
+ * inactive in the middle of a transport. That has happened. Measured since:
+ * on a release with no /ddic/tables the text is `define type`, so written back
+ * it is saved as a structure (TABCLASS INTTAB, no DD09L) and cannot be
+ * activated over the existing table. A table is changed through
+ * changeTableFields instead, which writes the whole definition with
+ * DDIF_TABL_PUT - see lib/tableDdif.
  *
  * Every write needs a lock first, so this is checked where the lock is taken:
  * the lock tool, editObject and lib/lockCycle (every composite write). The
@@ -33,7 +37,7 @@ export interface TableClassReader {
 const DDIC_OBJECT = /^\/sap\/bc\/adt\/ddic\/(structures|tables)\/([^/?#]+)/i;
 
 const REFUSAL_TAIL =
-  'Change the definition of a table in SE11 - this bridge never locks, writes or deletes one. getStructureSource and tableFields still read it.';
+  'ADT would write it back as a structure. Add or remove fields with changeTableFields, which keeps the table class and technical settings; anything else about a table is SE11. getStructureSource and tableFields still read it.';
 
 export class TableWriteRefused extends McpError {
   constructor(message: string) {

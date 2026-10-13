@@ -251,6 +251,9 @@ export function parseDdifPrint(output: string, exceptions: Record<string, string
         ? 'OTHERS'
         : subrc > 0 ? names[subrc - 1] : undefined;
       const ok = subrc === 0 && rc <= 4;
+      // D0/322 is the activation's progress line ("closing phase 013 ****"),
+      // left in sy-msg* whatever the outcome - it says nothing about why.
+      const progress = messageId.trim() === 'D0' && messageNumber.trim() === '322';
       // A step that worked leaves its last progress line in sy-msg* ("closing
       // phase 004 ****"), which reads like a finding and is not one: the
       // message is kept only where it explains a failure.
@@ -260,8 +263,13 @@ export function parseDdifPrint(output: string, exceptions: Record<string, string
         rc,
         ok,
         ...(exception ? { exception } : {}),
-        ...(!ok && messageId.trim() && message.trim() && !isNoiseMessage(`${messageId.trim()}/${messageNumber.trim()}`)
-          ? { message: message.trim(), messageId: messageId.trim(), messageNumber: messageNumber.trim() }
+        // A step of the snippet's own (compare, rows) explains itself with no
+        // message ID at all; a module's message carries its ID and number.
+        ...(!ok && !progress && message.trim() && !isNoiseMessage(`${messageId.trim()}/${messageNumber.trim()}`)
+          ? {
+            message: message.trim(),
+            ...(messageId.trim() ? { messageId: messageId.trim(), messageNumber: messageNumber.trim() } : {})
+          }
           : {})
       });
       continue;

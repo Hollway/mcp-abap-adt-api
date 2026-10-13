@@ -647,6 +647,8 @@ export class AbapAdtServer extends Server {
                 result = await this.tableHandlers.handle(toolName, args);
                 break;
             case 'createPackage':
+            case 'createTable':
+            case 'changeTableFields':
                 result = await this.ddifObjectHandlers.handle(toolName, args);
                 break;
             case 'getFunctionModule':
