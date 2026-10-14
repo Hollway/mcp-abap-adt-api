@@ -85,7 +85,15 @@ export class ObjectDeletionHandlers extends BaseHandler {
         const taken = await takeLock(this.adtclient, objectUrl, 'MODIFY', (t, ok) => this.trackRequest(t, ok));
         lockHandle = taken.lockHandle;
       } catch (error: any) {
-        throw wrapAdtError(error, `Could not lock ${objectUrl} for deletion`);
+        // A release without an ADT address for domains or tables answers 404 on
+        // the lock already; deleteDdicObject reaches them without one.
+        const ddic = /\/sap\/bc\/adt\/ddic\/(domains|dataelements|tables|structures)\//i.test(objectUrl);
+        const missing = describeAdtError(error).status === 404;
+        throw wrapAdtError(
+          error,
+          `Could not lock ${objectUrl} for deletion` +
+            (ddic && missing ? ' - this system serves no ADT address for it; use deleteDdicObject with the type and name' : '')
+        );
       }
     }
 

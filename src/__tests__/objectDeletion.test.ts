@@ -106,6 +106,21 @@ describe('deleteObject', () => {
       .rejects.toThrow(/Could not lock .* for deletion/);
   });
 
+  it('points a dictionary object without an ADT address to deleteDdicObject', async () => {
+    lockRegistry.clear();
+    const { handlers } = handler({
+      lock: () => Promise.reject({
+        typeID: Symbol.for('ADT EXCEPTION'),
+        err: 404,
+        type: 'ExceptionResourceNotFound',
+        message: 'Resource not found',
+        localizedMessage: 'Resource not found'
+      })
+    });
+    await expect(handlers.handleDeleteObject({ objectUrl: '/sap/bc/adt/ddic/domains/zdemo_dom' }))
+      .rejects.toThrow(/deleteDdicObject/);
+  });
+
   it('asks for the object rather than guessing when no url is given', async () => {
     const { handlers } = handler();
     await expect(handlers.handleDeleteObject({})).rejects.toThrow(/Pass objectUrl/);

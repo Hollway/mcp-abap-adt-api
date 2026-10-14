@@ -60,6 +60,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'createPackage',
   'createTable',
   'changeTableFields',
+  'deleteDdicObject',
   // text elements
   'setTextElements',
   // message classes
@@ -107,6 +108,7 @@ export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
   'deleteObject',
   'deleteMethod',
   'deleteMessages',
+  'deleteDdicObject',
   'transportDelete',
   'transportRelease',
   'gitUnlinkRepo',

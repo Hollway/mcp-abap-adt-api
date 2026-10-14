@@ -50,6 +50,7 @@ import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { CallHandlers } from './handlers/CallHandlers.js';
 import { TableHandlers } from './handlers/TableHandlers.js';
 import { DdifObjectHandlers } from './handlers/DdifObjectHandlers.js';
+import { DdicDeletionHandlers } from './handlers/DdicDeletionHandlers.js';
 import { MessageDeletionHandlers } from './handlers/MessageDeletionHandlers.js';
 import { TransportMoveHandlers } from './handlers/TransportMoveHandlers.js';
 import { AdtToolError, errorPayload, describeAdtError, isSessionFailure } from './lib/adtError';
@@ -193,6 +194,7 @@ export class AbapAdtServer extends Server {
     private callHandlers: CallHandlers;
     private tableHandlers: TableHandlers;
     private ddifObjectHandlers: DdifObjectHandlers;
+    private ddicDeletionHandlers: DdicDeletionHandlers;
     private messageDeletionHandlers: MessageDeletionHandlers;
     private transportMoveHandlers: TransportMoveHandlers;
     private operationsHandlers: OperationsHandlers;
@@ -281,6 +283,7 @@ export class AbapAdtServer extends Server {
     this.callHandlers = new CallHandlers(this.adtClient);
     this.tableHandlers = new TableHandlers(this.adtClient);
     this.ddifObjectHandlers = new DdifObjectHandlers(this.adtClient);
+    this.ddicDeletionHandlers = new DdicDeletionHandlers(this.adtClient);
     this.messageDeletionHandlers = new MessageDeletionHandlers(this.adtClient);
     this.transportMoveHandlers = new TransportMoveHandlers(this.adtClient);
     this.operationsHandlers = new OperationsHandlers(this.adtClient);
@@ -663,6 +666,9 @@ export class AbapAdtServer extends Server {
             case 'changeTableFields':
                 result = await this.ddifObjectHandlers.handle(toolName, args);
                 break;
+            case 'deleteDdicObject':
+                result = await this.ddicDeletionHandlers.handle(toolName, args);
+                break;
             case 'getFunctionModule':
             case 'listFunctionGroup':
             case 'createFunctionModule':
@@ -737,6 +743,7 @@ export class AbapAdtServer extends Server {
       { group: 'codeAnalysis', tools: this.callHandlers.getTools() },
       { group: 'ddic', tools: this.tableHandlers.getTools() },
       { group: 'ddic', tools: this.ddifObjectHandlers.getTools() },
+      { group: 'ddic', tools: this.ddicDeletionHandlers.getTools() },
       { group: 'operations', tools: this.operationsHandlers.getTools() },
       { group: 'health', tools: [HEALTHCHECK_TOOL] }
     ];
