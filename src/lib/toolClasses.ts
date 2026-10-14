@@ -27,6 +27,8 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'deleteMethod',
   'addAttribute',
   'createFunctionModule',
+  'createTransaction',
+  'deleteTransaction',
   // activation
   'activateObjects',
   'activateByName',
@@ -109,6 +111,7 @@ export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
   'deleteMethod',
   'deleteMessages',
   'deleteDdicObject',
+  'deleteTransaction',
   'transportDelete',
   'transportRelease',
   'gitUnlinkRepo',
