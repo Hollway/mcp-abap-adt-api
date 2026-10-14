@@ -285,6 +285,19 @@ describe('setMessages', () => {
     expect(requests.find(r => r.method === 'PUT').qs).toEqual({ lockHandle: 'HANDLE', corrNr: 'DEVK9A3OOT' });
   });
 
+  // Measured on the live ERP system: without the packageRef the backend skips
+  // the write to a transported class and answers 200 with an empty body.
+  it('sends the package of the class it read', async () => {
+    const inPackage = classDocument([{ no: '001', text: 'One' }]).replace('adtcore:name="$TMP"', 'adtcore:name="ZAPP_BASE"');
+    const { handlers, requests } = harness([inPackage, inPackage]);
+    await handlers.handleSetMessages({
+      className: 'ZDEV_MCP_MSG',
+      messages: [{ number: '001', text: 'One' }],
+      transport: 'DEVK9A3OOT'
+    });
+    expect(requests.find(r => r.method === 'PUT').body).toContain('<adtcore:packageRef adtcore:name="ZAPP_BASE"/>');
+  });
+
   it('refuses an empty message list', async () => {
     const { handlers } = harness([classDocument([])]);
     await expect(handlers.handleSetMessages({ className: 'ZDEV_MCP_MSG', messages: [] }))

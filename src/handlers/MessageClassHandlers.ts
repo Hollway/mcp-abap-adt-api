@@ -378,6 +378,9 @@ export class MessageClassHandlers extends BaseHandler {
       description: args?.description !== undefined ? String(args.description) : before.description,
       masterLanguage: before.masterLanguage || String(this.adtclient.language || 'EN').toUpperCase(),
       language: before.language || before.masterLanguage,
+      // Without the package the backend drops a write to a transported class
+      // and still answers 200 - see lib/messageClass.
+      packageName: before.packageName,
       messages: prepared as Message[]
     });
 
@@ -434,7 +437,7 @@ export class MessageClassHandlers extends BaseHandler {
       messages: after.messages.filter(m => prepared.some(p => p.number === m.number)),
       steps,
       hint: missing.length
-        ? `The class came back without ${missing.join(', ')}. Nothing was rolled back - read the class with getMessages and check what is there.`
+        ? `The class came back without ${missing.join(', ')}. The backend answers 200 even when it skipped the write - a refused TADIR or transport check is not reported, so check the transport request and the package. Nothing was rolled back - read the class with getMessages and check what is there.`
         : 'In T100 and usable now: no activation is involved. ADT cannot remove a message again; deleteMessages does it the way SE91 does.'
     };
   }

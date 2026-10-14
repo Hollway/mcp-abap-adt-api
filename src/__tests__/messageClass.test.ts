@@ -109,6 +109,24 @@ describe('buildMessageClassDocument', () => {
     expect(document).not.toContain('documented');
   });
 
+  // The backend takes the package from this element only; without it a write
+  // to a transported class is dropped while the PUT still answers 200.
+  it('carries the package as a packageRef', () => {
+    const document = buildMessageClassDocument({
+      name: 'ZX', description: 'd', masterLanguage: 'RU', packageName: 'zapp_base',
+      messages: [{ number: '001', text: 't', selfExplanatory: true }]
+    });
+    expect(document).toContain('<adtcore:packageRef adtcore:name="ZAPP_BASE"/>');
+    expect(document.indexOf('adtcore:packageRef')).toBeLessThan(document.indexOf('mc:messages'));
+  });
+
+  it('leaves the packageRef out when the package is not known', () => {
+    const document = buildMessageClassDocument({
+      name: 'ZX', description: 'd', masterLanguage: 'RU', messages: []
+    });
+    expect(document).not.toContain('packageRef');
+  });
+
   it('falls back to the master language when no language is given', () => {
     const document = buildMessageClassDocument({
       name: 'ZX', description: 'd', masterLanguage: 'RU', messages: []

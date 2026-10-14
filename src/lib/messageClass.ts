@@ -23,6 +23,12 @@
  *  - The message text is an XML attribute and nearly every real message
  *    contains &1 &2 placeholders. Unescaped, they end the parse with
  *    "End of element messageClass expected" and nothing is written.
+ *  - The package has to travel in the document as <adtcore:packageRef>. The
+ *    backend takes it from there and nowhere else, hands it to the TADIR and
+ *    transport checks, and when those refuse an empty package it returns
+ *    before touching T100 - and the PUT still answers 200 with an empty body.
+ *    On a $TMP class this goes unnoticed; on a transported one nothing is
+ *    ever written.
  *
  * No activation is involved: the messages land in T100 immediately and
  * inactiveObjects stays empty.
@@ -157,6 +163,11 @@ export interface DocumentOptions {
   description: string;
   masterLanguage: string;
   language?: string;
+  /**
+   * The package of the class, as the backend reported it. Without it a write
+   * to a transported class is silently dropped - see the header of this file.
+   */
+  packageName?: string;
   /** Only the messages to write - the backend upserts them by number. */
   messages: Message[];
 }
@@ -183,6 +194,9 @@ export function buildMessageClassDocument(options: DocumentOptions): string {
     ` adtcore:description="${escapeXmlAttribute(options.description)}"` +
     ` adtcore:masterLanguage="${escapeXmlAttribute(options.masterLanguage)}"` +
     ` adtcore:language="${escapeXmlAttribute(language)}">` +
+    (options.packageName
+      ? `<adtcore:packageRef adtcore:name="${escapeXmlAttribute(options.packageName.toUpperCase())}"/>`
+      : '') +
     messages +
     '</mc:messageClass>';
 }
