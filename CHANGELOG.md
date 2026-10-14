@@ -8,6 +8,59 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.15.0] — deleting what ADT deletes badly, and transactions
+
+Three things that had to be done by hand in SE91, SE11 and SE93, and one
+question answered about ADT itself.
+
+- **`deleteObject` on a message class** no longer goes to ADT. ADT's delete
+  leaves the long text of every message behind - CL_ADT_MESSAGE_CLASS_API
+  deletes it through a method that returns early unless it was handed a
+  request, and the class delete never hands one - and it ignores whether its
+  own delete worked: when the transport check refuses, it returns before
+  T100A with the directory entry already marked deleted, and answers success.
+  A message class URL now takes two calls, like `deleteMessages`: a preview
+  with a token, then one snippet under the SE91 lock doing what
+  RS_DELETE_MESSAGE_ID does after its popup - RS_CORR_INSERT with mode D,
+  T100, T100A, T100O, T100T, T100U, T100X, and the long texts by exact name.
+  Not by mask: ZFOO% also matches ZFOO1's texts. A message URL inside a class
+  is refused with a pointer to `deleteMessages`.
+- **ADT can delete a single message after all**: `<mc:deletedmessages
+  mc:msgno="007"/>` in the class document (tt_deletedmessage of
+  ST_ADT_MESSAGE_CLASS). Measured, it is worse than `deleteMessages`: the long
+  text stays, and when the document language is not the logon language it
+  deletes that one T100 row and keeps the message - 200 with an empty body
+  both times. `deleteMessages` stays as it is; the comments say why.
+- **`deleteDdicObject`** deletes a domain, data element, table or structure
+  with RS_DD_DELETE_OBJ, which SE11 calls - for the release that serves no
+  `/ddic/domains` and no `/ddic/tables`, where `deleteObject` answers 404 (and
+  now says to use this). Preview and token first. The module refuses rather
+  than asks: a used object or a table with data in any client ends with
+  DIALOG_NEEDED (E2/071), and the snippet counts every client itself before
+  anything happens, because the module commits. Some of its refusals are a
+  MESSAGE and an EXIT with subrc 0, so the deletion is proven from
+  DD01L/DD04L/DD02L and, for a table, with DB_EXISTS_TABLE. `withdraw: true`
+  takes an object that never left this system off its open requests and out
+  of TADIR instead of recording a deletion.
+- **`createTransaction` and `deleteTransaction`** (SE93): report and dialog
+  transactions through RPY_TRANSACTION_INSERT and _DELETE. The insert checks
+  nothing about what it points at - a missing program, screen or variant goes
+  into TSTC as given - so the program (active, of a fitting type), the screen
+  and the variant are checked first, and a code outside Y, Z or a namespace
+  is never created. The delete preview lists the roles that still hand the
+  transaction out.
+
+Measured in $TMP on the ERP system, everything cleaned up after: a message
+class and a decoy whose name starts the same; a domain refused while a data
+element used it; a table refused for one row in another client while the
+preview counted 0 in this one; table, data element and domain deleted; a
+report and a dialog transaction created and deleted. The transportable paths
+of all three deletions and of withdrawing were not run live.
+
+One lesson for probes: on Oracle `execute_query` parses lazily, and a SELECT
+on a dropped table raises ORA-00942 only at the first fetch. A probe that
+closes without `next( )` reported a dropped table as present.
+
 ## [1.14.0] — setMessages writes to transported classes
 
 `setMessages` and `createMessageClass` with messages wrote nothing to a message

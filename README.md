@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 191 tools, read-only guardrails and 1,351 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 194 tools, read-only guardrails and 1,400 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -13,10 +13,11 @@ The server is not published to a package registry: clone the repository, build i
 ## Features
 
 - **Objects**: read, write and create ABAP objects, including `patchObjectSource` for changing part of an object instead of re-uploading all of it, `editObject` for the whole lock/patch/unlock/activate sequence in one call, `createAndWrite` for create + write + activate, and `createInclude` for report includes.
-- **Dictionary**: `createDataElement` and `createDomain` create a DDIC object and give it its definition in one call, and `get`/`setDataElementProperties` and `get`/`setDomainProperties` read and change one. `createObject` alone leaves a DDIC object with no type, which cannot be activated. `createTable` and `changeTableFields` create a transparent table and add or remove its fields the way SE11 does, and `createPackage` makes a package - each where ADT cannot.
+- **Dictionary**: `createDataElement` and `createDomain` create a DDIC object and give it its definition in one call, and `get`/`setDataElementProperties` and `get`/`setDomainProperties` read and change one. `createObject` alone leaves a DDIC object with no type, which cannot be activated. `createTable` and `changeTableFields` create a transparent table and add or remove its fields the way SE11 does, and `createPackage` makes a package - each where ADT cannot. `deleteDdicObject` deletes a domain, data element, table or structure the way SE11 does, or withdraws one that never left this system.
 - **Reading source**: `sourceOutline` lists the blocks of a program or class with their line numbers, and `findInSource` searches a source - and the includes of a report - for text or a regular expression. ADT itself can only locate a class method.
 - **Class members**: `addMethod`, `addAttribute` and `deleteMethod` change a class as one operation. A method lives in two places in one source - the declaration in a visibility section, the implementation before the closing ENDCLASS - so adding one by hand is two edits whose line numbers must both survive the first of them.
 - **Function modules**: `getFunctionModule` takes the module name alone, finds its group and answers with the signature as data; `listFunctionGroup` lists a group without the SAPGUI padding `nodeContents` pads every row with; `createFunctionModule` creates one with its interface, which is how a signature is set at all, since ADT keeps it in the source text.
+- **Transactions (SE93)**: `createTransaction` makes a report or a dialog transaction and `deleteTransaction` removes one - ADT has no transaction editor. The SE93 module checks nothing about the program, screen or variant it is given, so these are checked first.
 - **Running ABAP**: `runSnippet` wraps a piece of ABAP in a throwaway class implementing `IF_OO_ADT_CLASSRUN`, runs it and deletes it again - the only way ADT executes code. It answers what no read can: what a function module returns for these inputs, what a method does with this data. A dump comes back as its ST22 header rather than as a bare 500.
 - **Calling what is there**: `callFunction` takes a function module name and values, reads its signature, generates the call and runs it - the answer carries the exporting, changing and tables parameters by name, `sy-subrc` turned back into the name of the classic exception it stood for, and a class-based exception with its text. `callMethod` does the same for a static method, whose parameters `classComponents` does not report at all. Both execute code, and both end in `ROLLBACK WORK` unless `commit` is set.
 - **The dictionary, read whole**: `tableFields` answers a table with its includes spliced in where they sit - for `EKPO` that is 702 fields rather than the 307 its own definition lists - each with its data element, domain, type, length, check table, unit or currency field, conversion exit and text. `tableIndexes` and `tableKeys` answer the secondary indexes and the foreign keys with the fields they are built on. All three read dictionary tables and execute nothing.
@@ -29,7 +30,7 @@ The server is not published to a package registry: clone the repository, build i
 - **Code analysis**: syntax check (reusing the source last read or written), code completion, references, ATC - `atcCheck` runs the checks over an object or a package and reports the findings, `atcDocumentation` gives the rule text - traces and the debugger. `whereUsedMethod` and `typeHierarchy` take a method or class name and work the cursor position out themselves.
 - **Enhancements and texts**: `objectEnhancements` shows the enhancement implementations injected into a source, which the source itself does not reveal; `get`/`setTextElements` reach the text symbols and selection texts that live outside it - the write locks the text pool rather than the object, and activates both rows it leaves inactive. On a release that serves no `/sap/bc/adt/textelements` at all they fall back to `READ`/`INSERT TEXTPOOL` in a throwaway class, which needs neither lock nor activation; the answer says which way it went in `via`. That path also writes the program title, which ADT serves nowhere, and registers the object in a request - `registerInTransport` does that on its own too, resolving a request to your own task and verifying the entry in `E071` rather than trusting `sy-subrc`.
 - **Whole packages**: `packageTree` walks a package and its sub-packages and resolves where each object's source lives, `readSources` reads many objects in one call, and `searchInPackage` searches every source in a package. `nodeContents` answers one level and hands most objects a SAPGUI bridge URI that serves no content.
-- **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises, and `deleteMessages` removes them, which ADT cannot. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
+- **Messages (SE91)**: `getMessages`, `setMessages` and `createMessageClass` read and write the messages a `MESSAGE` statement raises, and `deleteMessages` removes them, which ADT does badly. `deleteObject` on a message class deletes it the SE91 way, long texts included. They come inside the message class document, which `objectStructure` reads and then discards, so until now a report could be written raising messages that did not exist.
 - **Diagnosable errors**: SAP's own exception type, T100 key and localized message are passed through instead of an axios status line.
 - **Session recovery**: the ADT session is re-established automatically, and read-only calls are retried once.
 - **Guardrails**: a read-only mode, tool profiles, per-tool read-only/destructive annotations and a cap on oversized answers.
@@ -368,6 +369,17 @@ the package the way SE21 does with CL_PACKAGE_FACTORY. A transportable package
 always gets software component HOME and transport layer Z*; a $ package is
 local.
 
+`deleteDdicObject` deletes a domain, data element, table or structure with
+RS_DD_DELETE_OBJ, what SE11 calls, in two calls: a preview of who uses it, the
+rows of a table and the requests it is in, then the deletion with its token.
+The module refuses rather than asks - a used object, or a table with data in
+any client, is not deleted - and some of its refusals return without an
+exception, so the deletion is proven from the dictionary tables and, for a
+table, from the database. `withdraw: true` is for an object created in a
+request still open that never left this system: its entries come off the
+requests and its directory entry goes, so nothing travels and the task can be
+deleted.
+
 **Working on a package**
 
 `packageTree` walks a package and its sub-packages breadth-first and answers
@@ -408,15 +420,23 @@ read back. Text is capped at 73 characters, what T100 holds, and the answer
 says what was cut. No activation is involved: the message is in T100 as soon
 as the call returns.
 
-Two things the backend does not allow: a message cannot be removed (a PUT or
-DELETE on the per-message resource is refused whatever lock handle it is
-given), and a long text cannot be written (that resource has no PUT). The
-second needs SE91. The first is what `deleteMessages` does instead, the way
-SE91 does it: under the SE91 lock it deletes the text in every language, the
+Two things the backend does badly or not at all. A long text cannot be written
+(that resource has no PUT), which needs SE91. And a message is removed only
+through `<mc:deletedmessages>` in the class document, which leaves the long
+text behind and, when the document language is not the logon language,
+deletes one language and keeps the message - answering 200 either way. So
+`deleteMessages` does it the way SE91 does instead: under the SE91 lock it deletes the text in every language, the
 change record, the supplement and the long text, and records the deletion as
 LIMU MESS with function D in the caller's own task - all in one transaction,
 and only with the `previewToken` of a preview that showed every language,
 the long text and where the message is used.
+
+`deleteObject` on a message class goes the same way rather than through ADT,
+whose delete leaves the long text of every message behind and can answer
+success on a transported class it did not delete. Previewed first, then one
+transaction under the SE91 lock: RS_CORR_INSERT with mode D, T100 and its
+companion tables, and the long texts by exact name - class plus three
+digits, so a class whose name only starts the same keeps its own.
 
 **Tests**
 
