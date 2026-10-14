@@ -6,11 +6,26 @@ import { messageClassUrl, messageUrl } from '../lib/messageClass';
 import { trimUsageRow } from '../lib/usageReferences';
 import { failedStep } from '../lib/ddifWrite';
 import {
+  DIRECTORY_STEP,
   MAX_NUMBERS,
   MAX_USAGE_LOOKUPS,
+  WHOLE_CLASS_ROWS,
   authorsSql,
+  classAuthorsSql,
+  classDeletionToken,
+  classDescriptions,
+  classDescriptionsSql,
+  classDirectorySql,
   classExistsSql,
+  classHeader,
+  classHeaderSql,
+  classLongTextsSql,
+  classNumbers,
   classPackageSql,
+  classRecordedSql,
+  classSupplementsSql,
+  classTextsSql,
+  deleteMessageClassSnippet,
   deleteMessagesSnippet,
   deletionToken,
   expectedCounts,
@@ -326,6 +341,179 @@ export class MessageDeletionHandlers extends DdifHandlerBase {
       ...(left.length ? { stillThere: left } : {}),
       ...(choice ? { transportEntries: recorded } : {}),
       ...(wholeClassIn.length ? { wholeClassIn } : {}),
+      steps: run.print.steps,
+      hint
+    });
+  }
+
+  /** The class as the tables have it now, every message of it. */
+  private async readWholeClass(className: string) {
+    const [header] = await this.rows(classHeaderSql(className), 1);
+    const [directory] = await this.rows(classPackageSql(className), 1);
+    return {
+      header: classHeader(header),
+      packageName: String(directory?.DEVCLASS ?? '').trim(),
+      descriptions: classDescriptions(await this.rows(classDescriptionsSql(className), 200)),
+      state: messageState(className, {
+        texts: await this.rows(classTextsSql(className), WHOLE_CLASS_ROWS),
+        authors: await this.rows(classAuthorsSql(className), WHOLE_CLASS_ROWS),
+        supplements: await this.rows(classSupplementsSql(className), WHOLE_CLASS_ROWS),
+        longTexts: await this.rows(classLongTextsSql(className), WHOLE_CLASS_ROWS)
+      })
+    };
+  }
+
+  /** Where the class is used: one where-used on the class, which covers its numbers. */
+  private async classUsages(className: string) {
+    try {
+      const rows = await this.readClient.usageReferences(messageClassUrl(className));
+      const sites = rows.filter(row => !!row.objectIdentifier);
+      return { sites: sites.length, ...(sites.length ? { first: sites.slice(0, SITES_SHOWN).map(trimUsageRow) } : {}) };
+    } catch (error) {
+      return { error: describeAdtError(error).error };
+    }
+  }
+
+  /**
+   * deleteObject on a message class.
+   *
+   * ADT's DELETE of a message class leaves every long text behind, and on a
+   * transportable class it can answer success with the class still there (see
+   * lib/messageDelete). So the class is deleted the way SE91 does it, in two
+   * calls like deleteMessages: a preview with a token, then the deletion.
+   */
+  async deleteMessageClassCore(name: string, args: any): Promise<any> {
+    let className: string;
+    try {
+      className = messageClassName(name);
+    } catch (error) {
+      return this.refuse(error);
+    }
+    if (!(await this.rows(classExistsSql(className), 1)).length) {
+      return this.answer({ status: 'error', deleted: false, className, hint: `There is no message class ${className}.` });
+    }
+    const before = await this.readWholeClass(className);
+    const { packageName, state } = before;
+    const numbers = classNumbers(state);
+    const token = classDeletionToken(className, packageName, before.header, before.descriptions, state);
+    const counts = expectedCounts(state);
+    const languages: Record<string, number> = {};
+    for (const texts of Object.values(state.texts)) {
+      for (const language of Object.keys(texts)) languages[language] = (languages[language] || 0) + 1;
+    }
+    const local = isLocalPackage(packageName);
+    const messageCount = `${numbers.length} message${numbers.length === 1 ? '' : 's'}`;
+
+    if (!args?.previewToken) {
+      return this.answer({
+        status: 'success',
+        preview: true,
+        deleted: false,
+        className,
+        packageName,
+        ...(before.header ? before.header : {}),
+        descriptions: before.descriptions,
+        messages: numbers.length,
+        textsPerLanguage: languages,
+        longTexts: Object.keys(state.longTexts).length,
+        ...(state.supplements.length ? { supplements: state.supplements.length } : {}),
+        usages: await this.classUsages(className),
+        ...(local
+          ? {}
+          : { transportEntry: `R3TR MSAG ${className} (function D), in your task of the request; the directory entry is marked deleted until the request is released.` }),
+        previewToken: token,
+        hint: `Nothing deleted. Call deleteObject again with this previewToken to delete the class with its ${messageCount}` +
+          (local ? '.' : ', and pass transport: the request (or your task in it) records the deletion.')
+      });
+    }
+
+    if (String(args.previewToken).trim() !== token) {
+      return this.answer({
+        status: 'error',
+        deleted: false,
+        className,
+        hint: 'The previewToken does not match: the class changed since the preview, or this token is from another preview. Nothing was deleted - preview again.'
+      });
+    }
+    const { request, fromTask } = await this.requestFor(packageName, requestArgument(args), `Message class ${className} in ${packageName}`);
+
+    let snippet;
+    try {
+      snippet = deleteMessageClassSnippet({ className, packageName, request, expected: counts });
+    } catch (error) {
+      return this.refuse(error);
+    }
+    const run = await this.runDdif(snippet.code, snippet.exceptions);
+    const common = {
+      className,
+      packageName,
+      ...(request ? { request, ...(fromTask ? { fromTask } : {}) } : {})
+    };
+    if (!run.ran) {
+      return this.answer({
+        status: 'error',
+        deleted: false,
+        ...common,
+        ...run.snippet,
+        hint: 'The throwaway class did not get as far as running, so nothing was deleted. The steps above say where it stopped.'
+      });
+    }
+
+    const failed = failedStep(run.print);
+    const stillThere = (await this.rows(classExistsSql(className), 1)).length > 0;
+    const after = await this.readWholeClass(className);
+    const leftTexts = expectedCounts(after.state);
+    const [directory] = await this.rows(classDirectorySql(className), 1);
+    const task = run.print.info.task || undefined;
+    let recorded: { in: string; function: string }[] = [];
+    if (request) {
+      const mine = new Set([request, ...(await this.rows(tasksSql(request), 200)).map(row => String(row.TRKORR ?? '').trim())]);
+      recorded = (await this.rows(classRecordedSql(className), 200))
+        .map(row => ({ in: String(row.TRKORR ?? '').trim(), function: String(row.OBJFUNC ?? '').trim() }))
+        .filter(entry => mine.has(entry.in));
+    }
+    const deletionRecorded = recorded.some(entry => entry.function === 'D');
+    const rowsDeleted = Object.fromEntries(
+      Object.entries(run.print.info)
+        .filter(([key]) => key !== 'task' && key !== 'request')
+        .map(([key, value]) => [key, Number(value)])
+    );
+
+    let hint: string;
+    if (failed?.step === 'enqueue') {
+      hint = `${className} is locked (${failed.exception || `subrc ${failed.subrc}`}) - somebody has it open in SE91 or ADT. Nothing was deleted.`;
+    } else if (failed?.step === 'compare') {
+      hint = `The class changed between the preview and the delete (${failed.message}). Nothing was deleted - preview again.`;
+    } else if (failed?.step === 'transport') {
+      hint = `RS_CORR_INSERT refused the deletion (${failed.exception || `subrc ${failed.subrc}`}${failed.message ? `: ${failed.message}` : ''}). Nothing was deleted.`;
+    } else if (failed?.step === DIRECTORY_STEP) {
+      hint = `The directory entry could not be removed (${failed.message || `subrc ${failed.subrc}`}); everything was rolled back. Nothing was deleted.`;
+    } else if (failed?.step === 'verify') {
+      hint = `The delete did not take (${failed.message}); it was rolled back. Nothing was deleted.`;
+    } else if (failed) {
+      hint = `Stopped at ${failed.step} (subrc ${failed.subrc}${failed.message ? `: ${failed.message}` : ''}). Check the class in SE91.`;
+    } else if (stillThere || leftTexts.texts || leftTexts.longTexts) {
+      hint = `The snippet reported success, but the class is not gone (${stillThere ? 'T100A' : ''}${leftTexts.texts ? ` ${leftTexts.texts} texts` : ''}${leftTexts.longTexts ? ` ${leftTexts.longTexts} long texts` : ''}). Check it in SE91.`;
+    } else if (local && directory) {
+      hint = `Deleted, but the directory entry R3TR MSAG ${className} is still in TADIR. Remove it in SE03 (or the class shows in the package without existing).`;
+    } else if (request && !deletionRecorded) {
+      hint = `Deleted, but no R3TR MSAG ${className} with function D was found in ${request} or its tasks - the next system keeps the class. Check the request in SE09.`;
+    } else {
+      hint = `Deleted ${className} with its ${messageCount} in every language${counts.longTexts ? ' and their long texts' : ''}` +
+        (local ? '; a local class, so nothing to transport.' : `; recorded in ${recorded.map(entry => entry.in).join(', ')}.`);
+    }
+
+    const deleted = !failed && !stillThere && !leftTexts.texts && !leftTexts.longTexts;
+    return this.answer({
+      status: deleted && !(local && directory) && !(request && !deletionRecorded) ? 'success' : 'error',
+      deleted,
+      ...common,
+      ...(task ? { task } : {}),
+      ...(Object.keys(rowsDeleted).length ? { rowsDeleted } : {}),
+      ...(request ? { transportEntries: recorded } : {}),
+      ...(directory
+        ? { directory: { packageName: String(directory.DEVCLASS ?? '').trim(), deletionFlag: String(directory.DELFLAG ?? '').trim() } }
+        : {}),
       steps: run.print.steps,
       hint
     });

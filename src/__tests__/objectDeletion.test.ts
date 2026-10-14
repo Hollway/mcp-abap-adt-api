@@ -111,6 +111,67 @@ describe('deleteObject', () => {
     await expect(handlers.handleDeleteObject({})).rejects.toThrow(/Pass objectUrl/);
   });
 
+  /**
+   * ADT's DELETE of a message class leaves every long text behind and can
+   * answer success on a transportable class it did not delete, so a message
+   * class goes the SE91 way, previewed first - never to client.deleteObject.
+   */
+  describe('on a message class', () => {
+    const CLASS_URL = '/sap/bc/adt/messageclass/zdemo_msg';
+    const tables: Record<string, Record<string, any>[]> = {
+      t100a: [{ ARBGB: 'ZDEMO_MSG', MASTERLANG: 'R', RESPUSER: 'DEVELOPER', LASTUSER: 'DEVELOPER', LDATE: '2026-10-01', LTIME: '120000' }],
+      tadir: [{ DEVCLASS: '$TMP' }],
+      t100t: [{ SPRSL: 'R', STEXT: 'Demo' }],
+      't100 ': [{ MSGNR: '001', SPRSL: 'R', TEXT: 'One' }, { MSGNR: '001', SPRSL: 'E', TEXT: 'One' }],
+      t100u: [{ MSGNR: '001', NAME: 'DEVELOPER', DATUM: '2026-10-01', SELFDEF: '3' }],
+      t100x: [],
+      dokhl: [{ OBJECT: 'ZDEMO_MSG001', LANGU: 'D', DOKVERSION: 1, DOKSTATE: 'N' }]
+    };
+    const messageClassHandler = () => {
+      const queries: string[] = [];
+      const { handlers, calls } = handler({
+        runQuery: async (sql: string) => {
+          queries.push(sql);
+          const table = Object.keys(tables).find(name => new RegExp(`FROM ${name}`, 'i').test(`${sql} `));
+          return { values: table ? tables[table] : [] };
+        },
+        usageReferences: async () => [{ objectIdentifier: 'ZR_DEMO' }]
+      });
+      return { handlers, calls, queries };
+    };
+
+    it('previews instead of deleting, with a token', async () => {
+      const { handlers, calls } = messageClassHandler();
+      const result = answer(await handlers.handleDeleteObject({ objectUrl: CLASS_URL }));
+      expect(calls).toEqual([]);
+      expect(result).toMatchObject({
+        preview: true,
+        deleted: false,
+        className: 'ZDEMO_MSG',
+        packageName: '$TMP',
+        messages: 1,
+        textsPerLanguage: { R: 1, E: 1 },
+        longTexts: 1,
+        usages: { sites: 1 }
+      });
+      expect(result.previewToken).toMatch(/^[0-9a-f]{16}$/);
+    });
+
+    it('refuses a token from another preview without running anything', async () => {
+      const { handlers, calls } = messageClassHandler();
+      const result = answer(await handlers.handleDeleteObject({ objectUrl: CLASS_URL, previewToken: '0000000000000000' }));
+      expect(calls).toEqual([]);
+      expect(result).toMatchObject({ status: 'error', deleted: false });
+      expect(result.hint).toMatch(/previewToken does not match/);
+    });
+
+    it('sends a message inside a class to deleteMessages', async () => {
+      const { handlers } = messageClassHandler();
+      await expect(handlers.handleDeleteObject({ objectUrl: `${CLASS_URL}/messages/001` }))
+        .rejects.toThrow(/deleteMessages/);
+    });
+  });
+
   it('keeps the lock when the deletion itself fails', async () => {
     const { handlers } = handler({
       deleteObject: async () => { throw new Error('object is used elsewhere'); }

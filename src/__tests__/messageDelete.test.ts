@@ -1,5 +1,10 @@
 import {
   MAX_NUMBERS,
+  classDeletionToken,
+  classHeader,
+  classLongTextsSql,
+  classNumbers,
+  deleteMessageClassSnippet,
   deleteMessagesSnippet,
   deletionToken,
   expectedCounts,
@@ -251,5 +256,149 @@ describe('deleteMessagesSnippet', () => {
   it('names a lock conflict by its exception', () => {
     const print = parseDdifPrint('STEP~#~enqueue~#~1~#~0~#~MC~#~601~#~locked', deleteMessagesSnippet(spec).exceptions);
     expect(print.steps[0].exception).toBe('FOREIGN_LOCK');
+  });
+});
+
+describe('messageState on a read of the whole class', () => {
+  it('keeps only class plus three digits - LIKE also finds ZDEMO_MSG1 and wildcard matches', () => {
+    const current = messageState('ZDEMO_MSG', {
+      texts: [],
+      authors: [],
+      supplements: [],
+      longTexts: [
+        { OBJECT: 'ZDEMO_MSG007', LANGU: 'R', DOKVERSION: 1, DOKSTATE: 'R' },
+        { OBJECT: 'ZDEMO_MSG1007', LANGU: 'R', DOKVERSION: 1, DOKSTATE: 'R' },
+        { OBJECT: 'ZDEMO_MSGX07', LANGU: 'R', DOKVERSION: 1, DOKSTATE: 'R' }
+      ]
+    });
+    expect(Object.keys(current.longTexts)).toEqual(['007']);
+  });
+
+  it('reads DOKHL by prefix under ID NA', () => {
+    expect(classLongTextsSql('ZDEMO_MSG')).toContain("id = 'NA' AND object LIKE 'ZDEMO_MSG%'");
+  });
+
+  it('lists every number with a trace: text, change record or long text', () => {
+    const current = state();
+    current.longTexts['099'] = [{ language: 'R', version: 1, state: 'R' }];
+    expect(classNumbers(current)).toEqual(['007', '012', '099']);
+  });
+});
+
+describe('classDeletionToken', () => {
+  const header = classHeader({ MASTERLANG: 'R', RESPUSER: 'DEVELOPER', LASTUSER: 'DEVELOPER', LDATE: '2026-10-01', LTIME: '120000' });
+
+  it('changes with the package, the header, a description or a message', () => {
+    const token = classDeletionToken('ZDEMO_MSG', '$TMP', header, { R: 'Demo' }, state());
+    expect(classDeletionToken('ZDEMO_MSG', '$TMP', header, { R: 'Demo' }, state())).toBe(token);
+    expect(classDeletionToken('ZDEMO_MSG', 'ZDEMO', header, { R: 'Demo' }, state())).not.toBe(token);
+    expect(classDeletionToken('ZDEMO_MSG', '$TMP', { ...header!, lastChangedOn: '2026-10-02 120000' }, { R: 'Demo' }, state())).not.toBe(token);
+    expect(classDeletionToken('ZDEMO_MSG', '$TMP', header, { R: 'Demo', E: 'Demo' }, state())).not.toBe(token);
+    const changed = state();
+    changed.texts['007'].E = 'Changed';
+    expect(classDeletionToken('ZDEMO_MSG', '$TMP', header, { R: 'Demo' }, changed)).not.toBe(token);
+  });
+});
+
+describe('deleteMessageClassSnippet', () => {
+  const local = { className: 'ZDEMO_MSG', packageName: '$TMP', expected: { texts: 3, longTexts: 2 } };
+  const transported = { ...local, packageName: 'ZDEMO', request: 'DEVK900123' };
+
+  it('locks, compares, records with RS_CORR_INSERT mode D, deletes every table, verifies, commits, releases', () => {
+    const text = deleteMessageClassSnippet(transported).code.join('\n');
+    const order = [
+      "CALL FUNCTION 'ENQUEUE_ES_MSGSI'",
+      'SELECT COUNT(*) FROM t100 ',
+      'IF lv_count <> 3.',
+      'IF lv_count <> 2.',
+      "CALL FUNCTION 'RS_CORR_INSERT'",
+      'DELETE FROM t100 ',
+      'DELETE FROM t100a ',
+      'DELETE FROM t100o ',
+      'DELETE FROM t100t ',
+      'DELETE FROM t100u ',
+      'DELETE FROM t100x ',
+      'DELETE FROM dokhl ',
+      'DELETE FROM doktl ',
+      'DELETE FROM dokil ',
+      'SELECT COUNT(*) FROM t100a ',
+      'COMMIT WORK AND WAIT.',
+      "CALL FUNCTION 'DEQUEUE_ES_MSGSI'"
+    ];
+    let at = -1;
+    for (const marker of order) {
+      const next = text.indexOf(marker, at + 1);
+      expect(next).toBeGreaterThan(at);
+      at = next;
+    }
+  });
+
+  it('gives RS_CORR_INSERT the request, object class MSAG and mode D, without immediately', () => {
+    const text = deleteMessageClassSnippet(transported).code.join('\n');
+    expect(text).toContain("object = 'ZDEMO_MSG' object_class = 'MSAG' mode = 'D'");
+    expect(text).toContain("korrnum = 'DEVK900123'");
+    expect(text).toContain("suppress_dialog = 'X'");
+    expect(text).not.toMatch(/use_korrnum_immediatedly/i);
+  });
+
+  it('needs a request outside a $ package', () => {
+    expect(() => deleteMessageClassSnippet({ ...transported, request: undefined })).toThrow(DdifError);
+  });
+
+  /**
+   * An empty range matches every row: DELETE FROM dokhl WHERE object IN lr_doc
+   * with nothing in lr_doc would take the long texts of every message class.
+   */
+  it('touches the long texts only behind IF lr_doc IS NOT INITIAL', () => {
+    const { code } = deleteMessageClassSnippet(local);
+    code.forEach((line, index) => {
+      if (/lr_doc/.test(line) && /\b(DELETE|SELECT)\b/.test(line)) {
+        const guard = code.slice(0, index).reverse().find(previous => /^\s*(IF lr_doc IS NOT INITIAL\.|ENDIF\.)\s*$/.test(previous));
+        expect(guard?.trim()).toBe('IF lr_doc IS NOT INITIAL.');
+      }
+    });
+  });
+
+  it('takes a long text only as class plus three digits', () => {
+    const text = deleteMessageClassSnippet(local).code.join('\n');
+    expect(text).toContain("object LIKE 'ZDEMO_MSG%'");
+    expect(text).toContain("IF strlen( lv_obj ) = 12 AND lv_obj(9) = 'ZDEMO_MSG' AND lv_obj+9(3) CO '0123456789'.");
+  });
+
+  it('removes the directory entry itself only in a local package', () => {
+    expect(deleteMessageClassSnippet(local).code.join('\n')).toContain("wi_delete_tadir_entry = 'X'");
+    expect(deleteMessageClassSnippet(transported).code.join('\n')).not.toContain('TR_TADIR_INTERFACE');
+  });
+
+  it('rolls back and releases the lock on every stop after the lock', () => {
+    const { code } = deleteMessageClassSnippet(local);
+    const lockedAt = code.findIndex(line => line.includes("'ENQUEUE_ES_MSGSI'"));
+    const returns = code
+      .map((line, index) => ({ line, index }))
+      .filter(entry => entry.line.trim() === 'RETURN.' && entry.index > lockedAt)
+      .map(entry => entry.index);
+    const afterLock = returns.slice(1);
+    expect(afterLock.length).toBeGreaterThanOrEqual(6);
+    for (const index of afterLock) {
+      const before = code.slice(Math.max(0, index - 4), index).join('\n');
+      expect(before).toContain('ROLLBACK WORK.');
+      expect(before).toContain("'DEQUEUE_ES_MSGSI'");
+    }
+  });
+
+  it('never calls DOCU_DEL or DOKU_DELETE_ALL, and keeps lines within 255 characters', () => {
+    const { code } = deleteMessageClassSnippet({ ...transported, className: 'Z' + 'X'.repeat(19) });
+    expect(code.join('\n')).not.toMatch(/DOCU_DEL|DOKU_DELETE_ALL/i);
+    expect(longest(code)).toBeLessThanOrEqual(255);
+  });
+
+  it('prints the task and request RS_CORR_INSERT chose, and names its exceptions', () => {
+    const { exceptions } = deleteMessageClassSnippet(transported);
+    const print = parseDdifPrint(
+      ['STEP~#~transport~#~1~#~0~#~TK~#~001~#~cancelled', 'INFO~#~task~#~DEVK900124'].join('\n'),
+      exceptions
+    );
+    expect(print.steps[0].exception).toBe('CANCELLED');
+    expect(print.info.task).toBe('DEVK900124');
   });
 });

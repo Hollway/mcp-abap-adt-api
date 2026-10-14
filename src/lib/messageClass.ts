@@ -16,8 +16,12 @@
  *    no matter which handle is offered - the class handle, or one taken on the
  *    message URL itself.
  *  - Messages are upserted by number: a PUT carrying one message leaves the
- *    others alone, and a PUT carrying none deletes nothing. Removing a message
- *    through ADT is therefore impossible. The class header, in contrast, is
+ *    others alone, and a PUT carrying none deletes nothing. The document does
+ *    have a way to delete - <mc:deletedmessages mc:msgno="007"/> (the
+ *    tt_deletedmessage of ST_ADT_MESSAGE_CLASS) - but it is not used here:
+ *    measured, it leaves the long text behind, and when the document language
+ *    is not the logon language it deletes that one language of T100 and keeps
+ *    the message (see lib/messageDelete). The class header, in contrast, is
  *    replaced - so a write that does not carry the current description wipes
  *    it, which is why setMessages reads before it writes.
  *  - The message text is an XML attribute and nearly every real message

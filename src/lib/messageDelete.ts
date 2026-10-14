@@ -1,9 +1,16 @@
 /**
  * Deleting messages of a message class, the way SE91 does it.
  *
- * ADT cannot: the message class document is upserted by number, so a message
- * left out of it stays (see lib/messageClass), and no RPY_MESSAGE* module
- * deletes one. RS_DELETE_MESSAGE does, but it asks for confirmation in a
+ * Not through ADT: the message class document is upserted by number, so a
+ * message left out of it stays (see lib/messageClass), and no RPY_MESSAGE*
+ * module deletes one. The document does carry deletions -
+ * <mc:deletedmessages mc:msgno="007"/> - and the backend acts on them, but
+ * badly, measured on the ERP system: the long text stays (its delete returns
+ * early unless a request was passed, and none is), and when the document
+ * language is not the logon language only that language's T100 row goes - the
+ * message stays and the PUT answers 200 either way. And its transport step
+ * records operation I, where SE91 writes function D (read in the code of
+ * CL_ADT_MESSAGE_CLASS_API, not measured: in $TMP nothing is recorded). RS_DELETE_MESSAGE does, but it asks for confirmation in a
  * popup and for the request in a dialog, and nothing here has a GUI. What it
  * does after that is plain table work, and this module generates it, so it can
  * be tested without a system:
@@ -27,15 +34,27 @@
  * database transaction: a failed step rolls back what came before it, so a
  * message is either gone with its long text and its transport entry, or all
  * of it is still there.
+ *
+ * The whole class is deleted here too, for deleteObject. ADT's own delete of a
+ * message class leaves the long texts of every message behind: it deletes
+ * them through a method that returns early unless it was given a request
+ * (CHECK lv_success, which only a transport step sets). It also never looks at
+ * whether its delete worked - on a refused transport check it returns before
+ * T100A, after the directory entry was already marked deleted, and answers
+ * success. SE91 (RS_DELETE_MESSAGE_ID) does it right but asks in a popup, so
+ * the snippet does what it does after the popup: RS_CORR_INSERT with mode D,
+ * then T100, T100A, T100O, T100T, T100U, T100X and the long texts.
  */
 import { createHash } from 'crypto';
 import { charLiteral } from './textPool';
 import { normaliseNumber } from './messageClass';
 import {
+  CORRECTION_EXCEPTIONS,
   DDIF_DECLARATIONS,
   DDIF_SEPARATOR,
   DdifError,
   infoLine,
+  isLocalPackage,
   ownStepLine,
   stepLines
 } from './ddifWrite';
@@ -215,7 +234,10 @@ export function messageState(
   state.supplements = [...new Set(rows.supplements.map(row => text(row.MSGNR)))].sort();
   for (const row of rows.longTexts) {
     const object = text(row.OBJECT);
-    if (!object.startsWith(name)) continue;
+    // Class and a three-digit number, nothing else: a read by prefix also
+    // finds ZFOO1's long texts when the class is ZFOO, and "_" in a class
+    // name is a wildcard to LIKE.
+    if (!object.startsWith(name) || !/^\d{3}$/.test(object.slice(name.length))) continue;
     (state.longTexts[object.slice(name.length)] ||= []).push({
       language: text(row.LANGU),
       version: Number(row.DOKVERSION ?? 0),
@@ -385,5 +407,253 @@ export function deleteMessagesSnippet(spec: DeleteSpec): DeleteSnippet {
   return {
     code,
     exceptions: { enqueue: ENQUEUE_EXCEPTIONS, ...(transport ? { transport: [...APPEND_EXCEPTIONS] } : {}) }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Deleting the whole class (deleteObject on a message class).
+// ---------------------------------------------------------------------------
+
+/** Rows one read of a whole class asks for: class 00 has 875 messages in ~30 languages. */
+export const WHOLE_CLASS_ROWS = 100000;
+
+export const classHeaderSql = (className: string): string =>
+  `SELECT arbgb, masterlang, respuser, lastuser, ldate, ltime FROM t100a WHERE arbgb = '${messageClassName(className)}'`;
+
+export const classDescriptionsSql = (className: string): string =>
+  `SELECT sprsl, stext FROM t100t WHERE arbgb = '${messageClassName(className)}'`;
+
+export const classTextsSql = (className: string): string =>
+  `SELECT msgnr, sprsl, text FROM t100 WHERE arbgb = '${messageClassName(className)}'`;
+
+export const classAuthorsSql = (className: string): string =>
+  `SELECT msgnr, name, datum, selfdef FROM t100u WHERE arbgb = '${messageClassName(className)}'`;
+
+export const classSupplementsSql = (className: string): string =>
+  `SELECT msgnr FROM t100x WHERE arbgb = '${messageClassName(className)}'`;
+
+/**
+ * The long texts of the class, by prefix. LIKE reads more than the class -
+ * ZFOO1's texts when the class is ZFOO, and "_" is a wildcard - and
+ * messageState keeps only class plus three digits.
+ */
+export const classLongTextsSql = (className: string): string =>
+  `SELECT object, langu, typ, dokversion, dokstate FROM dokhl WHERE id = 'NA' AND object LIKE '${messageClassName(className)}%'`;
+
+/** Where the class is recorded for a deletion, read back as proof. */
+export const classRecordedSql = (className: string): string =>
+  `SELECT trkorr, objfunc FROM e071 WHERE pgmid = 'R3TR' AND object = 'MSAG' AND obj_name = '${messageClassName(className)}'`;
+
+export const classDirectorySql = (className: string): string =>
+  `SELECT devclass, delflag FROM tadir WHERE pgmid = 'R3TR' AND object = 'MSAG' AND obj_name = '${messageClassName(className)}'`;
+
+export interface ClassHeader {
+  masterLanguage: string;
+  responsible: string;
+  lastChangedBy: string;
+  lastChangedOn: string;
+}
+
+export function classHeader(row: Record<string, any> | undefined): ClassHeader | undefined {
+  if (!row) return undefined;
+  return {
+    masterLanguage: text(row.MASTERLANG),
+    responsible: text(row.RESPUSER),
+    lastChangedBy: text(row.LASTUSER),
+    lastChangedOn: `${dateText(row.LDATE)} ${text(row.LTIME)}`.trim()
+  };
+}
+
+/** Per language, the class description. */
+export function classDescriptions(rows: Record<string, any>[]): Record<string, string> {
+  const descriptions: Record<string, string> = {};
+  for (const row of rows) descriptions[text(row.SPRSL)] = String(row.STEXT ?? '').replace(/\s+$/, '');
+  return descriptions;
+}
+
+/** Every number the class has a trace of: a text, a change record or a long text. */
+export const classNumbers = (state: MessageState): string[] =>
+  [...new Set([...Object.keys(state.texts), ...Object.keys(state.authors), ...Object.keys(state.longTexts)])].sort();
+
+/**
+ * The token deleting a whole class has to bring back from its preview: the
+ * package, the header and descriptions, and every message as deletionToken
+ * covers it - so the class goes only as the preview showed it.
+ */
+export function classDeletionToken(
+  className: string,
+  packageName: string,
+  header: ClassHeader | undefined,
+  descriptions: Record<string, string>,
+  state: MessageState
+): string {
+  const normal = {
+    packageName,
+    header,
+    descriptions: Object.entries(descriptions).sort(([a], [b]) => a.localeCompare(b)),
+    messages: deletionToken(className, classNumbers(state), state)
+  };
+  return createHash('sha256').update(JSON.stringify(normal)).digest('hex').slice(0, 16);
+}
+
+export interface DeleteClassSpec {
+  className: string;
+  packageName: string;
+  /** The request, for a transportable class. RS_CORR_INSERT refuses a task (TK 886). */
+  request?: string;
+  /** Rows the preview counted; the snippet stops when the tables hold others. */
+  expected: { texts: number; longTexts: number };
+}
+
+export const DIRECTORY_STEP = 'directory';
+
+/**
+ * The ABAP that deletes the class, the way SE91 does after its popup.
+ *
+ * Lock the class; collect its long texts by exact name (class plus three
+ * digits, so another class that only starts the same is left alone); stop if
+ * the rows are not the ones the preview counted; record the deletion with
+ * RS_CORR_INSERT mode D - in a transportable package that puts R3TR MSAG with
+ * function D into the caller's task and marks the directory entry deleted,
+ * exactly as SE91 leaves it until the request is released; delete the tables
+ * and the long texts; in a local package remove the directory entry if the
+ * module left it; check nothing is left; commit.
+ *
+ * A range that is empty matches every row, and DELETE ... IN lr_doc on an
+ * empty one would take the long texts of every message class in the system -
+ * so every statement on lr_doc stands behind IF lr_doc IS NOT INITIAL.
+ */
+export function deleteMessageClassSnippet(spec: DeleteClassSpec): DeleteSnippet {
+  const name = messageClassName(spec.className);
+  const local = isLocalPackage(spec.packageName);
+  if (!local && !spec.request) {
+    throw new DdifError(`${name} is in package ${spec.packageName}; deleting it needs a transport request.`);
+  }
+  const request = local ? undefined : transportNumber(spec.request!);
+  const literal = charLiteral(name);
+  const dequeue = `CALL FUNCTION 'DEQUEUE_ES_MSGSI' EXPORTING arbgb = ${literal}.`;
+  const abort = (step: string, message: string): string[] => [
+    '  ROLLBACK WORK.',
+    `  ${ownStepLine(step, false, message)}`,
+    `  ${dequeue}`,
+    '  RETURN.'
+  ];
+  const stopOnFailure = ['IF lv_subrc <> 0.', '  ROLLBACK WORK.', `  ${dequeue}`, '  RETURN.', 'ENDIF.'];
+
+  const enqueue: StepSpec = {
+    step: 'enqueue',
+    call: ["CALL FUNCTION 'ENQUEUE_ES_MSGSI'", `  EXPORTING arbgb = ${literal}`],
+    exceptions: ENQUEUE_EXCEPTIONS
+  };
+  const transport: StepSpec = {
+    step: 'transport',
+    call: [
+      "CALL FUNCTION 'RS_CORR_INSERT'",
+      `  EXPORTING object = ${literal} object_class = 'MSAG' mode = 'D' global_lock = 'X'`,
+      `            devclass = ${charLiteral(spec.packageName)}` + (request ? ` korrnum = ${charLiteral(request)}` : ''),
+      "            author = sy-uname suppress_dialog = 'X'",
+      '  IMPORTING korrnum = lv_korrnum ordernum = lv_ordernum'
+    ],
+    exceptions: CORRECTION_EXCEPTIONS,
+    continueOnFailure: true
+  };
+  const directory: StepSpec = {
+    step: DIRECTORY_STEP,
+    call: [
+      "  CALL FUNCTION 'TR_TADIR_INTERFACE'",
+      "    EXPORTING wi_delete_tadir_entry = 'X' wi_test_modus = ' ' wi_tadir_pgmid = 'R3TR'",
+      `              wi_tadir_object = 'MSAG' wi_tadir_obj_name = ${literal}`
+    ],
+    continueOnFailure: true
+  };
+
+  const deleteLines = (table: string, where: string, key: string): string[] => [
+    `DELETE FROM ${table} WHERE ${where}.`,
+    'lv_count = sy-dbcnt.',
+    infoLine(key, 'lv_count')
+  ];
+  const byClass = `arbgb = ${literal}`;
+  const byDocument = "id = 'NA' AND object IN lr_doc";
+  const countDocuments = [
+    'CLEAR lv_count.',
+    'IF lr_doc IS NOT INITIAL.',
+    `  SELECT COUNT(*) FROM dokhl INTO lv_count WHERE ${byDocument}.`,
+    'ENDIF.'
+  ];
+
+  const code = [
+    ...DDIF_DECLARATIONS,
+    'DATA lv_count TYPE i.',
+    'DATA lt_obj TYPE STANDARD TABLE OF dokhl-object WITH DEFAULT KEY.',
+    'DATA lt_more TYPE STANDARD TABLE OF dokhl-object WITH DEFAULT KEY.',
+    'DATA lr_doc TYPE RANGE OF dokhl-object.',
+    ...stepLines(enqueue),
+    // DOKIL too: an index row whose header is gone is still the class's.
+    `SELECT DISTINCT object FROM dokhl INTO TABLE lt_obj WHERE id = 'NA' AND object LIKE ${charLiteral(`${name}%`)}.`,
+    `SELECT DISTINCT object FROM dokil INTO TABLE lt_more WHERE id = 'NA' AND object LIKE ${charLiteral(`${name}%`)}.`,
+    'APPEND LINES OF lt_more TO lt_obj.',
+    'SORT lt_obj.',
+    'DELETE ADJACENT DUPLICATES FROM lt_obj.',
+    'LOOP AT lt_obj INTO DATA(lv_obj).',
+    `  IF strlen( lv_obj ) = ${name.length + 3} AND lv_obj(${name.length}) = ${literal} AND lv_obj+${name.length}(3) CO '0123456789'.`,
+    "    APPEND VALUE #( sign = 'I' option = 'EQ' low = lv_obj ) TO lr_doc.",
+    '  ENDIF.',
+    'ENDLOOP.',
+    `SELECT COUNT(*) FROM t100 INTO lv_count WHERE ${byClass}.`,
+    `IF lv_count <> ${spec.expected.texts}.`,
+    ...abort('compare', `T100 holds { lv_count } texts of the class; the preview counted ${spec.expected.texts}`),
+    'ENDIF.',
+    ...countDocuments,
+    `IF lv_count <> ${spec.expected.longTexts}.`,
+    ...abort('compare', `DOKHL holds { lv_count } long texts of the class; the preview counted ${spec.expected.longTexts}`),
+    'ENDIF.',
+    ownStepLine('compare', true),
+    ...stepLines(transport),
+    ...stopOnFailure,
+    infoLine('task', 'lv_korrnum'),
+    infoLine('request', 'lv_ordernum'),
+    ...deleteLines('t100', byClass, 'texts'),
+    ...deleteLines('t100a', byClass, 'header'),
+    ...deleteLines('t100o', byClass, 'objects'),
+    ...deleteLines('t100t', byClass, 'descriptions'),
+    ...deleteLines('t100u', byClass, 'authors'),
+    ...deleteLines('t100x', byClass, 'supplements'),
+    'IF lr_doc IS NOT INITIAL.',
+    ...deleteLines('dokhl', byDocument, 'docHeaders').map(line => `  ${line}`),
+    ...deleteLines('doktl', byDocument, 'docLines').map(line => `  ${line}`),
+    ...deleteLines('dokil', byDocument, 'docIndex').map(line => `  ${line}`),
+    'ENDIF.',
+    ...(local
+      ? [
+        "SELECT COUNT(*) FROM tadir INTO lv_count WHERE pgmid = 'R3TR' AND object = 'MSAG'",
+        `  AND obj_name = ${literal}.`,
+        'IF lv_count > 0.',
+        ...stepLines(directory).map(line => `  ${line}`),
+        ...stopOnFailure.map(line => `  ${line}`),
+        'ENDIF.'
+      ]
+      : []),
+    `SELECT COUNT(*) FROM t100a INTO lv_count WHERE ${byClass}.`,
+    'IF lv_count <> 0.',
+    ...abort('verify', 'T100A still holds the class after the delete'),
+    'ENDIF.',
+    `SELECT COUNT(*) FROM t100 INTO lv_count WHERE ${byClass}.`,
+    'IF lv_count <> 0.',
+    ...abort('verify', '{ lv_count } texts are still in T100 after the delete'),
+    'ENDIF.',
+    ...countDocuments,
+    'IF lv_count <> 0.',
+    ...abort('verify', '{ lv_count } long texts are still in DOKHL after the delete'),
+    'ENDIF.',
+    ownStepLine('verify', true),
+    'COMMIT WORK AND WAIT.',
+    'lv_subrc = sy-subrc.',
+    `out->write( |STEP${DDIF_SEPARATOR}commit${DDIF_SEPARATOR}{ lv_subrc }${DDIF_SEPARATOR}0` +
+      `${DDIF_SEPARATOR}${DDIF_SEPARATOR}${DDIF_SEPARATOR}| ).`,
+    dequeue
+  ];
+  return {
+    code,
+    exceptions: { enqueue: ENQUEUE_EXCEPTIONS, transport: CORRECTION_EXCEPTIONS, [DIRECTORY_STEP]: [] }
   };
 }

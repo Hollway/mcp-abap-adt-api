@@ -6,13 +6,20 @@ import { sourceCache } from '../lib/sourceCache';
 import type { ToolDefinition } from '../types/tools.js';
 import { ADTClient, session_types } from "abap-adt-api";
 import { takeLock } from '../lib/lockCycle';
+import { MessageDeletionHandlers } from './MessageDeletionHandlers';
+
+/** A message class URL, and a message inside one - which is deleted with deleteMessages. */
+const MESSAGE_CLASS_URL = /^\/sap\/bc\/adt\/messageclass\/([^/?#]+)\/?(?:[?#].*)?$/i;
+const MESSAGE_URL = /^\/sap\/bc\/adt\/messageclass\/[^/?#]+\/messages\//i;
 
 export class ObjectDeletionHandlers extends BaseHandler {
+  private messageDeletion?: MessageDeletionHandlers;
+
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'deleteObject',
-        description: 'Delete an object. It takes the edit lock itself when this server is not already holding one, and outside $TMP it needs a transport request. Deleting does not release the lock - the backend leaves it, pointing at an object that no longer exists - so this releases it and forgets it, and drops the cached source with it. Not undoable from here: the object is gone and only a transport of the deletion travels on.',
+        description: 'Delete an object. It takes the edit lock itself when this server is not already holding one, and outside $TMP it needs a transport request. Deleting does not release the lock - the backend leaves it, pointing at an object that no longer exists - so this releases it and forgets it, and drops the cached source with it. Not undoable from here: the object is gone and only a transport of the deletion travels on. A message class is the exception and takes two calls: ADT deletes one leaving the long texts of every message behind, and on a transportable class it can answer success with the class still there, so it is deleted as SE91 does it - the first call previews the class (messages, languages, long texts, where it is used) and returns a previewToken, the second, with that token, deletes the class with its texts and long texts and records R3TR MSAG with function D in your task.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -24,9 +31,13 @@ export class ObjectDeletionHandlers extends BaseHandler {
               type: 'string',
               description: 'Lock handle for the object; omit to use the one this server recorded for it (see listLocks), or to have the lock taken here'
             },
-            transport: { 
+            transport: {
               type: 'string',
               description: 'Transport request number'
+            },
+            previewToken: {
+              type: 'string',
+              description: 'Message classes only: the token of the preview this deletion confirms. Omit it to get the preview.'
             }
           },
           required: ['objectUrl']
@@ -53,6 +64,15 @@ export class ObjectDeletionHandlers extends BaseHandler {
     if (!objectUrl) {
       throw new McpError(ErrorCode.InvalidParams, 'Pass objectUrl - the ADT URL of the object to delete.');
     }
+    if (MESSAGE_URL.test(objectUrl)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'That is a message inside a class, which ADT does not delete. Use deleteMessages with the class and the number.'
+      );
+    }
+    const messageClass = MESSAGE_CLASS_URL.exec(objectUrl);
+    if (messageClass) return this.deleteMessageClass(objectUrl, decodeURIComponent(messageClass[1]), args);
+
     const held = lockRegistry.forUrl(objectUrl);
     let lockHandle = args?.lockHandle || held?.lockHandle;
     // Nothing held, nothing passed: take the lock rather than refuse. Demanding
@@ -111,5 +131,32 @@ export class ObjectDeletionHandlers extends BaseHandler {
         ]
       };
     });
+  }
+
+  /**
+   * A message class goes the SE91 way (MessageDeletionHandlers). That takes
+   * the SE91 lock, which an ADT lock this server holds on the class would
+   * refuse - so the deletion itself releases it first; the preview leaves it.
+   */
+  private async deleteMessageClass(objectUrl: string, name: string, args: any): Promise<any> {
+    if (args?.previewToken) {
+      const held = lockRegistry.forUrl(objectUrl);
+      if (held) {
+        try {
+          await this.adtclient.unLock(objectUrl, held.lockHandle);
+        } catch {
+          // Gone already, or not ours to release: the deletion reports a lock it still meets.
+        }
+        lockRegistry.forget(objectUrl);
+      }
+    }
+    this.messageDeletion ||= new MessageDeletionHandlers(this.adtclient);
+    const result = await this.messageDeletion.deleteMessageClassCore(name, args);
+    try {
+      if (JSON.parse(result?.content?.[0]?.text ?? '{}').deleted === true) sourceCache.forgetUnder(objectUrl);
+    } catch {
+      // Not JSON: nothing to read the outcome from, and nothing cached is at stake.
+    }
+    return result;
   }
 }
