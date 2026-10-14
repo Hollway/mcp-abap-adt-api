@@ -8,6 +8,27 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.14.0] — setMessages writes to transported classes
+
+`setMessages` and `createMessageClass` with messages wrote nothing to a message
+class in a transported package. The PUT answered 200 with an empty body, the
+read-back did not find the message, and the tool reported `notWritten`. On the
+ERP system that was 15 of 17 calls since mid-September, changes to existing
+numbers included. Neither the request number, a task number nor the whole
+class document in the PUT made a difference.
+
+The cause is on the backend: `CL_ADT_MC_RES_CONTROLLER->do_update` takes the
+package only from `<adtcore:packageRef>` in the document, which was not sent.
+`CL_ADT_MESSAGE_CLASS_API=>update_message` hands that empty package to
+TR_TADIR_INTERFACE and the CTS check and, when they refuse, returns before it
+touches T100 - and reports nothing. The document now carries the package the
+class was read with. Measured live: the same write took about 12 ms and did
+nothing without it, 143 ms and landed with it - T100, T100U with
+self-explanatory, and LIMU MESS in the caller's task of the request.
+
+The `notWritten` hint now says that the backend answers 200 even when it
+skipped the write.
+
 ## [1.13.0] — deleting a message, and the request header
 
 Two things SE91 and SE09 do by hand that nothing here could:

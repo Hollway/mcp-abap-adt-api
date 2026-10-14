@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 191 tools, read-only guardrails and 1,348 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 191 tools, read-only guardrails and 1,351 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -402,7 +402,9 @@ stored per language with no fallback.
 and fills it in one call. Only the messages passed are touched - the backend
 upserts by number - and a field left out keeps its current value. The class
 description is read first and carried over, because the write replaces the
-class header. Text is capped at 73 characters, what T100 holds, and the answer
+class header. The package goes into the write as well: without it the backend
+skips a transported class and still answers 200, which is why every write is
+read back. Text is capped at 73 characters, what T100 holds, and the answer
 says what was cut. No activation is involved: the message is in T100 as soon
 as the call returns.
 
