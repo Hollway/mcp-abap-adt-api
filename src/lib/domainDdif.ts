@@ -33,8 +33,8 @@ export interface DomainDdifSpec extends DomainPatch {
 }
 
 /** DD01V-DOMVALUE_L and _H are CHAR 10, DD07V-DDTEXT CHAR 60. */
-const FIX_VALUE_LENGTH = 10;
-const TEXT_LENGTH = 60;
+export const FIX_VALUE_LENGTH = 10;
+export const TEXT_LENGTH = 60;
 
 export const DOMAIN_PUT_EXCEPTIONS = ['DOMA_NOT_FOUND', 'NAME_INCONSISTENT', 'DOMA_INCONSISTENT', 'PUT_FAILURE', 'PUT_REFUSED'];
 export const DOMAIN_ACTIVATE_EXCEPTIONS = ['NOT_FOUND', 'PUT_FAILURE'];
@@ -45,7 +45,7 @@ export interface DomainSnippet {
   exceptions: Record<string, string[]>;
 }
 
-const dataType = (value: unknown): string => {
+export const domainDataType = (value: unknown): string => {
   const type = String(value ?? '').trim().toUpperCase();
   if (!/^[A-Z0-9]{1,10}$/.test(type)) {
     throw new DdifError(`'${value}' is not a dictionary data type, e.g. CHAR, NUMC, DEC, DATS.`);
@@ -66,7 +66,7 @@ export function domainDdifSnippet(spec: DomainDdifSpec): DomainSnippet {
   const header = [
     `ls_dd01v-domname = ${literal}.`,
     'ls_dd01v-ddlanguage = lv_langu.',
-    `ls_dd01v-datatype = ${charLiteral(dataType(spec.datatype))}.`,
+    `ls_dd01v-datatype = ${charLiteral(domainDataType(spec.datatype))}.`,
     `ls_dd01v-leng = ${length}.`,
     `ls_dd01v-outputlen = ${outputLength}.`,
     `ls_dd01v-decimals = ${decimals}.`,

@@ -3,6 +3,24 @@ import { DdifHandlerBase } from './DdifHandlerBase';
 import { wrapAdtError } from '../lib/adtError';
 import { activationVerdict, directorySql, failedStep, packageExistsSql, packageName as checkedPackage } from '../lib/ddifWrite';
 import { domainDdifSnippet, domainHeaderSql } from '../lib/domainDdif';
+import {
+  domainChangeSnippet,
+  domainDirectorySql,
+  domainPreviewToken,
+  domainStateFromTables,
+  domainTextsSql,
+  domainVersionsSql,
+  fixValueRows,
+  fixValueTextsSql,
+  fixValuesFingerprint,
+  fixValuesSql,
+  headerValue,
+  languageOfIsoSql,
+  planDomainChange,
+  textLanguages
+} from '../lib/domainChange';
+import type { DomainTables, DomainVersion, FixValueRow } from '../lib/domainChange';
+import { ddicObjectName } from '../lib/ddifWrite';
 import type { ToolDefinition } from '../types/tools';
 import { session_types } from 'abap-adt-api';
 import type { ObjectVersion } from 'abap-adt-api';
@@ -41,7 +59,13 @@ const VERSIONS: ObjectVersion[] = ['active', 'inactive', 'workingArea'];
 const domainEndpointHint = (error: unknown): string | undefined =>
   hintOn404(error, 'This release does not serve DDIC domains over ADT: /sap/bc/adt/ddic/domains answers 404 for every name, ' +
     'including its validation resource, and a domain search returns only a SAPGUI URI. ' +
-    'Data elements are served normally on the same system. Maintain the domain in SE11.');
+    'Data elements are served normally on the same system. createDomain, getDomainProperties and setDomainProperties ' +
+    'go through the dictionary tables and DDIF_DOMA_* there instead.');
+
+const DDIF_REASON = 'This release serves no /sap/bc/adt/ddic/domains (404)';
+
+const stampOf = (value: unknown): string =>
+  value instanceof Date ? value.toISOString() : String(value ?? '').trim();
 
 /**
  * The contents of DDIC domains and data elements.
@@ -61,7 +85,7 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
     return [
       {
         name: 'getDomainProperties',
-        description: 'Read the definition of a DDIC domain: data type, length, decimals, output format, value table and fixed values. Takes the domain name; the object URL is accepted as well.',
+        description: 'Read the definition of a DDIC domain: data type, length, decimals, output format, value table and fixed values. Takes the domain name; the object URL is accepted as well. On a release that serves no /sap/bc/adt/ddic/domains (404) the same fields are read from DD01L/DD01T/DD07L/DD07T and TADIR, "via" says so, languages are the one-character SAP keys, and textLanguages lists every language the domain has texts in.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -75,15 +99,20 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
             },
             version: {
               type: 'string',
-              description: 'Which version to read: "active", "inactive" or "workingArea". Omit for the ADT default.',
+              description: 'Which version to read: "active", "inactive" or "workingArea". Omit for the ADT default. Read from the tables, "inactive" and "workingArea" are both the version being edited.',
               enum: [...VERSIONS]
+            },
+            language: {
+              type: 'string',
+              description: 'Read from the tables only: the language of the texts, SAP key (R) or ISO code (RU). Defaults to the master language of the domain.'
             }
           }
         }
       },
       {
         name: 'setDomainProperties',
-        description: 'Change the definition of an existing DDIC domain. The backend PUT replaces the whole definition, so anything not passed here is kept as the system currently has it - read, merge, write happens on this side. The lock is taken and released here unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Writes the inactive version - pass activate to finish the job, or run activateSafe afterwards.',
+        description: 'Change the definition of an existing DDIC domain. The backend PUT replaces the whole definition, so anything not passed here is kept as the system currently has it - read, merge, write happens on this side. The lock is taken and released here unless you pass a handle or this server already holds one; outside $TMP a transport request is needed. Writes the inactive version - pass activate to finish the job, or run activateSafe afterwards. ' +
+          'On a release that serves no /sap/bc/adt/ddic/domains (404) the change goes the way SE11 makes it, in two calls: the first only previews (each changed field from/to, the fixed values now and after, a previewToken), the second with that previewToken writes - RS_CORR_INSERT into the request (a task is lifted to its request), DDIF_DOMA_GET, the change on top of what was read, DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE, and if the activation fails the old definition is written back. There activation is the default; a fixed value that exists keeps its place and, given without text, its text, new values go after the last, and the values are numbered 1..n again with their translations moved along (DDIF_DOMA_PUT does that). A domain with an inactive version is refused. The result is read back from DD01L/DD07L/DD07T and the request.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -127,11 +156,19 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
             },
             activate: {
               type: 'boolean',
-              description: 'Activate after the write (default false). Only possible when this tool took the lock itself - activation is refused while a session holds one.'
+              description: 'Activate after the write (default false over ADT, true on the DDIF path). Over ADT only possible when this tool took the lock itself - activation is refused while a session holds one.'
             },
             transport: {
               type: 'string',
-              description: 'Transport request number - the request itself, not a developer task.'
+              description: 'Transport request number - the request itself, not a developer task (on the DDIF path a task is lifted to its request).'
+            },
+            language: {
+              type: 'string',
+              description: 'DDIF path only: the language the description and fixed value texts are read and written in, SAP key (R) or ISO code (RU). Defaults to the master language of the domain.'
+            },
+            previewToken: {
+              type: 'string',
+              description: 'DDIF path only: the token from the preview call. Without it nothing is written; with it, exactly the previewed change is, and only if the domain did not change in between.'
             }
           }
         }
@@ -448,13 +485,9 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
       });
     } catch (error: any) {
       this.trackRequest(startTime, false);
-      const missing = domainEndpointHint(error);
-      throw wrapAdtError(
-        error,
-        missing
-          ? `Failed to read the properties of domain ${ddicNameOf(url)}. ${missing}`
-          : `Failed to read the properties of domain ${ddicNameOf(url)}`
-      );
+      // No domain endpoint on this release: the tables hold the same.
+      if (domainEndpointHint(error)) return this.domainPropertiesFromTables(url, args);
+      throw wrapAdtError(error, `Failed to read the properties of domain ${ddicNameOf(url)}`);
     }
   }
 
@@ -479,7 +512,16 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
 
   async handleSetDomainProperties(args: any): Promise<any> {
     const url = this.urlOf(args, 'domainUrl', domainUrl, 'domain');
-    const { lockHandle, from, taken } = await this.lockFor(url, args);
+    let lock: { lockHandle: string; from: string; taken: boolean };
+    try {
+      lock = await this.lockFor(url, args);
+    } catch (error) {
+      // No domain endpoint on this release: the change goes the way SE11
+      // makes it - see lib/domainChange.
+      if (domainEndpointHint(error)) return this.setDomainThroughDdif(url, args);
+      throw error;
+    }
+    const { lockHandle, from, taken } = lock;
     // Read what the system holds while the lock is ours: the patch is applied
     // to that, and reading it before the lock would patch a different moment.
     const state = await this.domainDocument(url, args);
@@ -1082,7 +1124,7 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
     } else if (recorded && !recorded.recorded) {
       hint = `Active, but no entry for R3TR DOMA ${name} was found in ${request} or its tasks - check the request before releasing it.`;
     } else {
-      hint = `Active${request ? ` and recorded in ${run.print.info.task ? `task ${run.print.info.task} of ` : ''}${request}` : ' as a local object'}. Written through DDIF_DOMA_PUT because this release serves no domain endpoint; getDomainProperties cannot read it here either - DD01L/DD07L can.`;
+      hint = `Active${request ? ` and recorded in ${run.print.info.task ? `task ${run.print.info.task} of ` : ''}${request}` : ' as a local object'}. Written through DDIF_DOMA_PUT because this release serves no domain endpoint; getDomainProperties reads it back from the tables.`;
     }
 
     return this.answer({
@@ -1095,6 +1137,328 @@ export class DdicPropertyHandlers extends DdifHandlerBase {
       ...proof,
       hint
     });
+  }
+
+  /**
+   * The language the texts are read and written in: the one given (a SAP key
+   * as it is, an ISO code through T002), or the master language of the domain.
+   */
+  private async textLanguage(given: unknown, master: string): Promise<string> {
+    const value = String(given ?? '').trim().toUpperCase();
+    if (!value) return master || 'E';
+    if (value.length === 1) return value;
+    let sql: string;
+    try {
+      sql = languageOfIsoSql(value);
+    } catch (error) {
+      return this.refuse(error);
+    }
+    const [row] = await this.rows(sql, 1);
+    const key = String(row?.SPRAS ?? '').trim();
+    if (!key) throw new McpError(ErrorCode.InvalidParams, `There is no language with the ISO code ${value} on this system.`);
+    return key;
+  }
+
+  /** One version of a domain, from the tables; tables is missing when DD01L has no such version. */
+  private async domainTables(name: string, version: DomainVersion): Promise<{ versions: string[]; tables?: DomainTables }> {
+    const headers = await this.rows(domainVersionsSql(name), 5);
+    const versions = headers.map(row => String(row.AS4LOCAL ?? '').trim());
+    const header = headers.find(row => String(row.AS4LOCAL ?? '').trim() === version);
+    if (!header) return { versions };
+    const [directory] = await this.rows(domainDirectorySql(name), 1);
+    return {
+      versions,
+      tables: {
+        header,
+        directory,
+        texts: await this.rows(domainTextsSql(name, version), 200),
+        values: await this.rows(fixValuesSql(name, version), 10000),
+        valueTexts: await this.rows(fixValueTextsSql(name, version), 50000)
+      }
+    };
+  }
+
+  /** getDomainProperties on a release with no domain endpoint. */
+  private async domainPropertiesFromTables(url: string, args: any): Promise<any> {
+    let name: string;
+    try {
+      name = ddicObjectName(ddicNameOf(url), 'domain');
+    } catch (error) {
+      return this.refuse(error);
+    }
+    const version: DomainVersion = args?.version === 'inactive' || args?.version === 'workingArea' ? 'N' : 'A';
+    const { versions, tables } = await this.domainTables(name, version);
+    if (!tables) {
+      return this.answer({
+        status: 'error',
+        via: 'tables',
+        domainUrl: url,
+        name,
+        dd01lVersions: versions,
+        hint: versions.length
+          ? `${name} has no ${version === 'A' ? 'active' : 'inactive'} version; DD01L holds ${versions.join('/')}.`
+          : `There is no domain ${name} on this system.`
+      });
+    }
+    const language = await this.textLanguage(args?.language, String(tables.directory?.MASTERLANG ?? '').trim());
+    const { state } = domainStateFromTables(tables, language);
+    state.metaData.name = name;
+    return this.answer({
+      status: 'success',
+      domainUrl: url,
+      version: args?.version || 'default',
+      via: 'tables',
+      reason: `${DDIF_REASON}, so the definition was read from DD01L/DD01T/DD07L/DD07T and TADIR.`,
+      ...state,
+      textLanguages: textLanguages(tables),
+      dd01lVersions: versions,
+      ...(version === 'A' && versions.includes('N')
+        ? { note: 'There is also an inactive version - somebody is in the middle of changing the domain. Pass version "inactive" to read it.' }
+        : {})
+    });
+  }
+
+  /**
+   * setDomainProperties on a release with no domain endpoint: preview, then
+   * the write with the preview's token. See lib/domainChange.
+   */
+  private async setDomainThroughDdif(url: string, args: any): Promise<any> {
+    const via = 'ddif';
+    let name: string;
+    try {
+      name = ddicObjectName(ddicNameOf(url), 'domain');
+    } catch (error) {
+      return this.refuse(error);
+    }
+    if (args?.properties || args?.metaData) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'properties and metaData are ADT documents, and this release serves no domain endpoint. Pass the fields to change instead (description, datatype, length, fixValues, ...).'
+      );
+    }
+    const refusal = (hint: string, extra: Record<string, unknown> = {}) =>
+      this.answer({ status: 'error', via, written: false, name, ...extra, hint });
+
+    const { versions, tables } = await this.domainTables(name, 'A');
+    if (!tables) {
+      return refusal(versions.length
+        ? `${name} has no active version (DD01L holds ${versions.join('/')}). Finish it in SE11 first.`
+        : `There is no domain ${name} on this system.`);
+    }
+    if (versions.some(version => version !== 'A')) {
+      return refusal(`${name} has an inactive version: somebody is in the middle of changing it. Activate or discard that in SE11 first - a write here would overwrite it.`);
+    }
+    const packageName = String(tables.directory?.DEVCLASS ?? '').trim();
+    if (!packageName) return refusal(`${name} has no directory entry (TADIR), so there is no package to record the change for. Check it in SE11.`);
+    const master = String(tables.directory?.MASTERLANG ?? '').trim();
+    const language = await this.textLanguage(args?.language, master);
+
+    const fixValues = fixValueRows(tables.values, tables.valueTexts);
+    const description = tables.texts.find(row => String(row.DDLANGUAGE ?? '').trim() === language);
+    const current = { header: tables.header, description: String(description?.DDTEXT ?? '').trim(), fixValues };
+    let plan;
+    try {
+      plan = planDomainChange(current, this.domainPatch(args), language);
+    } catch (error) {
+      return this.refuse(error);
+    }
+    const common = {
+      via,
+      reason: `${DDIF_REASON}, so the change goes through DDIF_DOMA_PUT.`,
+      name,
+      packageName,
+      textLanguage: language,
+      ...(master && master !== language ? { masterLanguage: master } : {})
+    };
+    if (!plan.changed) {
+      return this.answer({ status: 'success', written: false, ...common, hint: 'Nothing to change: the domain already holds this.' });
+    }
+
+    const view = (values: { position: number; low: string; high: string; text: string; origin?: string; retexted?: boolean }[]) =>
+      values.map(value => ({
+        position: value.position,
+        low: value.low,
+        ...(value.high ? { high: value.high } : {}),
+        text: value.text,
+        ...(value.origin === 'added' ? { added: true } : {}),
+        ...(value.retexted ? { retexted: true } : {})
+      }));
+    const currentValues = fixValues.map(value => ({ ...value, text: value.texts[language] ?? '' }));
+    const otherLanguages = textLanguages(tables).filter(key => key !== language);
+    const change = {
+      header: plan.header,
+      ...(plan.fixValues ? { fixValues: { current: view(currentValues), planned: view(plan.fixValues) } } : {}),
+      added: plan.added,
+      removed: plan.removed,
+      retexted: plan.retexted
+    };
+    const token = domainPreviewToken(
+      name,
+      language,
+      `${stampOf(tables.header.AS4DATE)}|${stampOf(tables.header.AS4TIME)}`,
+      current,
+      plan
+    );
+    const activate = args?.activate !== false;
+
+    if (!args?.previewToken) {
+      const notes = [
+        plan.added.length && otherLanguages.length
+          ? `The new values get a text in ${language} only; the domain also has texts in ${otherLanguages.join(', ')}, which they will lack until translated.`
+          : '',
+        plan.removed.length ? `Removing ${plan.removed.join(', ')}: data that holds these values stays as it is and fails the fixed value check from then on.` : ''
+      ].filter(Boolean);
+      return this.answer({
+        status: 'success',
+        preview: true,
+        written: false,
+        ...common,
+        ...change,
+        activate,
+        ...(otherLanguages.length ? { otherTextLanguages: otherLanguages } : {}),
+        ...(notes.length ? { notes } : {}),
+        previewToken: token,
+        hint: `Nothing written. Call again with this previewToken${packageName.startsWith('$') ? '' : ' and the transport request'} to write exactly this change.`
+      });
+    }
+    if (String(args.previewToken).trim() !== token) {
+      return refusal('The previewToken does not match: the domain changed since the preview, or this is not the change that was previewed. Nothing was written - preview again.');
+    }
+
+    const { request, fromTask } = await this.requestFor(packageName, args?.transport, `The domain ${name} in ${packageName}`);
+    let snippet;
+    try {
+      snippet = domainChangeSnippet({
+        name,
+        packageName,
+        request,
+        language,
+        expected: fixValuesFingerprint(fixValues),
+        plan,
+        activate
+      });
+    } catch (error) {
+      return this.refuse(error);
+    }
+    const run = await this.runDdif(snippet.code, snippet.exceptions);
+    const where = {
+      ...common,
+      ...(request ? { request } : {}),
+      ...(fromTask ? { requestFromTask: fromTask } : {}),
+      ...change
+    };
+    if (!run.ran) {
+      return this.answer({
+        status: 'error',
+        written: false,
+        ...where,
+        ...run.snippet,
+        hint: 'The throwaway class did not get as far as running, so the domain was not touched. The steps above say where it stopped.'
+      });
+    }
+
+    const step = (stepName: string) => run.print.steps.find(candidate => candidate.step === stepName);
+    const failed = failedStep(run.print);
+    const after = await this.domainTables(name, 'A');
+    const valuesAfter = after.tables ? fixValueRows(after.tables.values, after.tables.valueTexts) : [];
+    const descriptionAfter = after.tables?.texts.find(row => String(row.DDLANGUAGE ?? '').trim() === language);
+    const disagreements = [
+      ...this.domainDisagreements(plan, after.versions, valuesAfter, fixValues, language, activate),
+      // The activation corrects what it does not accept and says rc 4 - a
+      // DEC of length 2 with 5 decimals came out with 2 - so every field the
+      // change touched is read back.
+      ...(after.tables && activate
+        ? Object.entries(plan.header)
+          .map(([field, { to }]) => [field, to, headerValue(field, after.tables!.header, String(descriptionAfter?.DDTEXT ?? '').trim())])
+          .filter(([, to, now]) => to !== now)
+          .map(([field, to, now]) => `${field} is '${now}', not '${to}'`)
+        : [])
+    ];
+    const recorded = request ? await this.recordedIn('DOMA', name, request) : undefined;
+    const rolledBack = step('rollback_put') !== undefined;
+    const rollbackOk = rolledBack && step('rollback_put')?.ok === true && step('rollback_activate')?.ok === true;
+    const reasonOf = (failure: { exception?: string; subrc: number; message?: string }) =>
+      `${failure.exception || `subrc ${failure.subrc}`}${failure.message ? `: ${failure.message}` : ''}`;
+
+    let hint: string;
+    if (failed?.step === 'transport') {
+      hint = `RS_CORR_INSERT refused the domain (${reasonOf(failed)}) - it may be locked in somebody else's request. The domain was not touched.`;
+    } else if (failed?.step === 'get') {
+      hint = `DDIF_DOMA_GET could not read the domain (${reasonOf(failed)}). Nothing was written.`;
+    } else if (failed?.step === 'compare') {
+      hint = `The domain changed between the preview and the write (${failed.message}). Nothing was written - preview again.`;
+    } else if (failed?.step === 'put') {
+      hint = `DDIF_DOMA_PUT refused the new definition (${reasonOf(failed)}). The active domain is unchanged.`;
+    } else if (rolledBack) {
+      const reason = step('activate');
+      hint = rollbackOk
+        ? `The activation failed (rc ${reason?.rc}${reason?.message ? `: ${reason.message}` : ''}), so the definition read before was written back and activated: the domain is as it was. The activation log in SE11 says why.`
+        : `The activation failed AND putting the old definition back did not finish cleanly. Check ${name} in SE11 now (DD01L shows ${after.versions.join('/') || 'nothing'}).`;
+    } else if (disagreements.length) {
+      hint = `Written, but the read-back disagrees: ${disagreements.join('; ')}. Check the domain in SE11.`;
+    } else if (!activate) {
+      hint = 'Written to the inactive version and not activated, as asked. Activate it in SE11 - until then this tool refuses the domain, because of that inactive version.';
+    } else if (recorded && !recorded.recorded) {
+      hint = `Changed and active, but no entry for R3TR DOMA ${name} was found in ${request} or its tasks - check the request before releasing it.`;
+    } else {
+      hint = `Changed and active${request ? `; recorded in ${recorded?.in?.join(', ') || request}` : ' (a local object, no request)'}.`;
+    }
+
+    const clean = !failed && !rolledBack && disagreements.length === 0;
+    return this.answer({
+      status: clean ? 'success' : 'error',
+      written: clean,
+      ...(rolledBack ? { rolledBack: rollbackOk } : {}),
+      ...where,
+      ...(run.print.info.task ? { task: run.print.info.task } : {}),
+      steps: run.print.steps,
+      dd01lVersions: after.versions,
+      ...(after.tables ? { fixValuesAfter: view(valuesAfter.map(value => ({ ...value, text: value.texts[language] ?? '' }))) } : {}),
+      ...(recorded ? { requestEntry: recorded } : {}),
+      hint
+    });
+  }
+
+  /**
+   * Where the tables after the write differ from the plan: the versions, the
+   * values in their order and their texts - including the texts in other
+   * languages of the values that were kept, which the write must not lose.
+   * Values are matched by low and high, not by position: DDIF_DOMA_PUT
+   * numbers them 1..n again and takes their texts along.
+   */
+  private domainDisagreements(
+    plan: ReturnType<typeof planDomainChange>,
+    versions: string[],
+    after: FixValueRow[],
+    before: FixValueRow[],
+    language: string,
+    activate: boolean
+  ): string[] {
+    const found: string[] = [];
+    const expectedVersions = activate ? 'A' : 'A,N';
+    if ([...versions].sort().join() !== expectedVersions) found.push(`DD01L versions ${versions.join('/') || 'none'}`);
+    if (!activate) return found;
+
+    const expected = plan.fixValues ?? before.map(value => ({ ...value, text: value.texts[language] ?? '' }));
+    const key = (value: { low: string; high: string }) => `${value.low}..${value.high}`;
+    const shape = (values: { low: string; high: string }[]) => values.map(key).join(', ');
+    if (shape(after) !== shape(expected)) found.push(`fixed values are ${shape(after) || 'none'}`);
+
+    const byValue = new Map(after.map(value => [key(value), value]));
+    for (const value of expected) {
+      const now = byValue.get(key(value));
+      if (now && (now.texts[language] ?? '') !== value.text) found.push(`text of ${value.low} is '${now.texts[language] ?? ''}'`);
+    }
+    const lost: string[] = [];
+    for (const value of before) {
+      const now = byValue.get(key(value));
+      if (!now) continue;
+      for (const other of Object.keys(value.texts)) {
+        if (other !== language && value.texts[other] && !now.texts[other]) lost.push(`${value.low} (${other})`);
+      }
+    }
+    if (lost.length) found.push(`texts lost in other languages: ${lost.join(', ')}`);
+    return found;
   }
 
   private async releaseLock(
