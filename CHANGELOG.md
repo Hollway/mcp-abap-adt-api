@@ -8,6 +8,45 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.16.0] — changing a domain where ADT serves none
+
+A task stopped on one fixed value. On the release that serves no
+`/sap/bc/adt/ddic/domains`, `createDomain` already fell back to DDIF_DOMA_PUT,
+but a domain that exists could be neither read nor changed: both tools
+answered 404 and sent the caller to SE11. Writing it by hand meant a snippet
+calling RS_CORR_INSERT and DDIF_DOMA_PUT - which an automatic permission check
+reads, rightly, as getting round a missing tool, and refused.
+
+- **`getDomainProperties`** reads the domain from DD01L, DD01T, DD07L, DD07T
+  and TADIR when ADT answers 404 - the same fields in the same shape, the
+  texts in the master language unless `language` says otherwise, and
+  `textLanguages` listing every language there are texts in.
+- **`setDomainProperties`** changes it the way SE11 does, in two calls like
+  `changeTableFields`: a preview with each changed field from/to, the fixed
+  values now and after, and a `previewToken`; then the write with that token -
+  RS_CORR_INSERT into the request (a task is lifted to its request),
+  DDIF_DOMA_GET, the change on top of what was read so nothing the tool does
+  not model is blanked, DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE, and on a failed
+  activation the old definition written back and activated. A domain with an
+  inactive version is refused. A value given without a text keeps its text.
+  The result is read back from the tables: the values in order, their texts,
+  the texts in the other languages, every header field the change touched,
+  and the request entry.
+
+Measured in $TMP on the ERP system, the test domain deleted afterwards:
+
+- DDIF_DOMA_PUT numbers the values 1..n again on every write and moves the
+  texts in the other languages along with their value - with 3 of 1-3-4
+  removed, the English text of 4 went from position 3 to 2. So values are
+  matched by low and high, never by position, and the preview shows the
+  positions they end up at. The first version kept positions and its own
+  read-back flagged the correct result as a disagreement.
+- Activation corrects what it does not take and still answers rc 4: a DEC of
+  length 2 asked for 5 decimals came out with 2, and a value table that does
+  not exist was accepted. Hence the read-back of every header field.
+- A NUMC domain given the value A failed activation with rc 8; the old
+  definition went back and the domain was as before.
+
 ## [1.15.0] — deleting what ADT deletes badly, and transactions
 
 Three things that had to be done by hand in SE91, SE11 and SE93, and one

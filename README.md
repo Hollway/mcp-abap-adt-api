@@ -2,7 +2,7 @@ DISCLAIMER: This server is still in experimental status! Use it with caution!
 
 # ABAP-ADT-API MCP-Server
 
-> 194 tools, read-only guardrails and 1,400 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
+> 194 tools, read-only guardrails and 1,423 tests. See the [CHANGELOG](CHANGELOG.md) for how it got there. Not published to npm — clone the repository and build it from source.
 
 ## Description
 
@@ -333,8 +333,13 @@ demanding a separate `lock` call made a one-field change a three-call sequence.
 Not every release serves these over ADT. On a classic ERP system data elements
 work while domains answer 404 for every path including validation. There
 `createDomain` writes the same arguments the way SE11 does - RS_CORR_INSERT,
-DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE in a throwaway class - and says so in `via`;
-`get`/`setDomainProperties` still need the endpoint. On S/4 both work over
+DDIF_DOMA_PUT, DDIF_DOMA_ACTIVATE in a throwaway class - and says so in `via`.
+`getDomainProperties` reads the same fields from DD01L/DD01T/DD07L/DD07T there,
+and `setDomainProperties` changes the domain in two calls - a preview with a
+`previewToken`, then the write: DDIF_DOMA_GET, the change on top, DDIF_DOMA_PUT,
+activation, and the old definition put back if the activation fails. The values
+are matched by low and high, because DDIF_DOMA_PUT numbers them 1..n again and
+moves their translations along. On S/4 both work over
 ADT, and the whole cycle - create with fixed values, patch the description,
 patch the values, build a data element on the domain - was verified there.
 
