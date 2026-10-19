@@ -10,6 +10,8 @@
  */
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import type { ADTClient } from "abap-adt-api";
+import { activateWithContexts } from './includeContext';
+import type { IncludeContext } from './includeContext';
 
 export interface InactiveObject {
   "adtcore:uri": string;
@@ -56,6 +58,8 @@ export interface ActivationOutcome {
   /** Inactive objects that were not part of this activation. */
   othersInactive?: ObjectRef[];
   othersInactiveCount?: number;
+  /** The main program each report include was activated in - see lib/includeContext. */
+  includeContexts?: IncludeContext[];
   note?: string;
   hint?: string;
 }
@@ -66,6 +70,8 @@ export interface ActivationRequest {
   parentUri?: string;
   objects?: InactiveObject[];
   preauditRequested?: boolean;
+  /** The main program for report includes that belong to several. */
+  mainProgram?: string;
 }
 
 /**
@@ -228,7 +234,14 @@ export async function activateAndVerify(
     );
   }
 
-  const result: ActivationResult = await client.activate(objects, request.preauditRequested);
+  // A report include goes with ?context=<main program>, or the backend refuses
+  // it with "Select a master program" - see lib/includeContext.
+  const { result, contexts } = await activateWithContexts<ActivationResult>(
+    client,
+    objects,
+    entries => client.activate(entries, request.preauditRequested),
+    request.mainProgram
+  );
 
   const after: InactiveObjectRecord[] = await client.inactiveObjects();
   const { forObject: stillInactive, others } = splitInactive(after, request.objectName, request.objectUrl);
@@ -238,6 +251,7 @@ export async function activateAndVerify(
     success,
     activated: objects.map(asRef),
     messages: result.messages,
+    ...(contexts.length ? { includeContexts: contexts } : {}),
     stillInactive,
     // Only what was asked for was activated, and success says only that. What
     // else is inactive is the caller's own worklist, and a program whose other

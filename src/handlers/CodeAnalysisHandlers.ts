@@ -493,9 +493,12 @@ export class CodeAnalysisHandlers extends BaseHandler {
         // from what is stored, which is why a write has to come first.
         const isInclude = /\/programs\/includes\//.test(String(args.url));
         let checkedAgainst: string | undefined;
+        let otherMainPrograms: string[] = [];
         if (isInclude) {
             if (!mainUrl) {
-                mainUrl = await this.mainProgramOf(String(args.url));
+                const found = await this.mainProgramOf(String(args.url));
+                mainUrl = found?.url;
+                otherMainPrograms = found?.others || [];
                 mainUrlResolved = mainUrl;
             }
             if (mainUrl) {
@@ -545,6 +548,14 @@ export class CodeAnalysisHandlers extends BaseHandler {
                             usedCachedSource,
                             ...(readSource ? { readSource } : {}),
                             ...(mainUrlResolved ? { mainUrlResolved } : {}),
+                            // A check is a read, so several main programs are no
+                            // reason to refuse - but which one it was is said.
+                            ...(otherMainPrograms.length
+                                ? {
+                                    otherMainPrograms,
+                                    mainProgramNote: `The include belongs to ${otherMainPrograms.length + 1} main programs; it was checked in the first. Pass mainUrl to check it in ${otherMainPrograms.join(' or ')}.`
+                                }
+                                : {}),
                             ...(checkedAgainst
                                 ? {
                                     checkedAgainst,
@@ -781,7 +792,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
      * throwing: a check that then fails says so itself, which is better than
      * losing a lookup that was only meant to help.
      */
-    protected async mainProgramOf(sourceUrl: string): Promise<string | undefined> {
+    protected async mainProgramOf(sourceUrl: string): Promise<{ url: string; others: string[] } | undefined> {
         const startTime = performance.now();
         try {
             const includeUrl = sourceUrl.split('#')[0].replace(/\/source\/main.*$/, '');
@@ -789,7 +800,10 @@ export class CodeAnalysisHandlers extends BaseHandler {
             this.trackRequest(startTime, true);
             const uri = mains?.[0]?.['adtcore:uri'] || mains?.[0]?.uri;
             if (!uri) return undefined;
-            return /\/source\/main/.test(uri) ? uri : `${uri}/source/main`;
+            return {
+                url: /\/source\/main/.test(uri) ? uri : `${uri}/source/main`,
+                others: (mains || []).slice(1).map(main => String(main?.['adtcore:name'] || main?.['adtcore:uri'] || '')).filter(Boolean)
+            };
         } catch {
             this.trackRequest(startTime, false);
             return undefined;

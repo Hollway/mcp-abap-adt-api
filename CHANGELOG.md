@@ -8,7 +8,7 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
-## [1.16.0] — changing a domain where ADT serves none, and where-used where it has no address
+## [1.16.0] — a domain where ADT serves none, where-used where it has no address, and the main program of an include
 
 A task stopped on one fixed value. On the release that serves no
 `/sap/bc/adt/ddic/domains`, `createDomain` already fell back to DDIF_DOMA_PUT,
@@ -65,6 +65,31 @@ because it is not an ABAP type.
   through its data elements.
 - **`deleteDdicObject`** no longer asks ADT where a domain is used in code -
   the answer is 0 by definition - and so no longer reports the error there.
+
+And the refusal that came back most: "Select a master program for include X
+in the properties view" - 165 times in two weeks of task chats (activateSafe
+97, activateObjects 54, editObject 8, activateByName 3), each worked round by
+hand with ?context= written into the URI. The inactive list names a report
+include by its bare URI, and CL_SEDI_ADT_WB_HELPER->is_frame_program_valid
+refuses a bare URI for any include that has a main program at all - even
+the only one there is. Reproduced in $TMP: bare refused, the same call with
+`?context=<program>` activated.
+
+- **Activation** (`activateSafe`, `editObject`, `createAndWrite` and the rest
+  through `activateAndVerify`, plus `activateObjects`) sends every report
+  include without a context with one: the main program when there is one,
+  the one activated in the same call when there are several, `mainProgram`
+  otherwise - and refuses before activating when it cannot tell. An include
+  no active program contains yet goes without one, as the backend wants it
+  (with one it answers "Master program X is invalid for include Y"). If the
+  backend still refuses the main program of one include, that include is
+  flipped and the call made once more. `includeContexts` says what was sent.
+  Measured: an old include, a new include and their program activated in one
+  call with nothing passed.
+- **`activateByName`** looks the main program up for a report include when
+  `mainInclude` is not given.
+- **`syntaxCheckCode`** still checks an include in its first main program,
+  and now says so when there are others.
 
 ## [1.15.0] — deleting what ADT deletes badly, and transactions
 

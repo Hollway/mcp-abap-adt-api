@@ -9,13 +9,14 @@ import type {
   ObjectRef
 } from '../lib/activation';
 import type { ToolDefinition } from '../types/tools';
+import { activateWithContexts, mainProgramsOf, needsContext } from '../lib/includeContext';
 
 export class ObjectManagementHandlers extends BaseHandler {
   getTools(): ToolDefinition[] {
     return [
       {
         name: 'activateObjects',
-        description: 'Activate the objects you name, as rows shaped like the ones inactiveObjects returns. Prefer activateSafe, which activates and then proves it: this call can answer success:true while the object stays inactive, and activating only the class row leaves changed method fragments behind, so the old implementation keeps running under an already-active signature. Every row needs a non-empty adtcore:parentUri, which the inactive list leaves empty for programs.',
+        description: 'Activate the objects you name, as rows shaped like the ones inactiveObjects returns. Prefer activateSafe, which activates and then proves it: this call can answer success:true while the object stays inactive, and activating only the class row leaves changed method fragments behind, so the old implementation keeps running under an already-active signature. Every row needs a non-empty adtcore:parentUri, which the inactive list leaves empty for programs. A row that already carries ?context= goes as it is. A report include (PROG/I) is sent with ?context=<main program>, which the backend demands (\"Select a master program for include\"): the one main program it has, or among several the one activated in the same call, or mainProgram; an include no active program contains yet goes without one. If the backend still refuses the main program of one include, that include is flipped and the call made once more; includeContexts says what was sent.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -36,6 +37,10 @@ export class ObjectManagementHandlers extends BaseHandler {
             preauditRequested: {
               type: 'boolean',
               description: 'Whether to perform pre-audit checks'
+            },
+            mainProgram: {
+              type: 'string',
+              description: 'Main program (name or URI) for report includes that belong to several; not needed when there is one.'
             }
           },
           required: ['objects']
@@ -57,7 +62,7 @@ export class ObjectManagementHandlers extends BaseHandler {
             },
             mainInclude: {
               type: 'string',
-              description: 'Main include context'
+              description: 'Main program URI for a report include, sent as ?context=. Omit it: for a report include with one main program it is looked up here.'
             },
             preauditRequested: {
               type: 'boolean',
@@ -77,7 +82,7 @@ export class ObjectManagementHandlers extends BaseHandler {
       },
       {
         name: 'activateSafe',
-        description: 'Activate an object and prove it worked. Reads inactiveObjects, activates exactly those entries (class plus its method fragments, sections and test include), then re-reads inactiveObjects and fails if anything is still inactive. Prefer this over activateByName, which can answer success:true without activating anything.',
+        description: 'Activate an object and prove it worked. Reads inactiveObjects, activates exactly those entries (class plus its method fragments, sections and test include), then re-reads inactiveObjects and fails if anything is still inactive. Prefer this over activateByName, which can answer success:true without activating anything. A report include (PROG/I) is sent with ?context=<main program>, which the backend demands (\"Select a master program for include\"): the one main program it has, or among several the one activated in the same call, or mainProgram; an include no active program contains yet goes without one. If the backend still refuses the main program of one include, that include is flipped and the call made once more; includeContexts says what was sent.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -101,6 +106,10 @@ export class ObjectManagementHandlers extends BaseHandler {
             preauditRequested: {
               type: 'boolean',
               description: 'Ask the backend to list the fragments it would activate. Useful on a large live class: it is the only diff available here.'
+            },
+            mainProgram: {
+              type: 'string',
+              description: 'Main program (name or URI) for report includes that belong to several; not needed when there is one.'
             }
           },
           required: []
@@ -141,7 +150,8 @@ export class ObjectManagementHandlers extends BaseHandler {
         objects: args?.objects
           ? this.parseObjectArg<InactiveObject[]>(args.objects, 'objects')
           : undefined,
-        preauditRequested: args?.preauditRequested
+        preauditRequested: args?.preauditRequested,
+        mainProgram: args?.mainProgram
       });
       return this.answer({
         status: outcome.success ? 'success' : 'error',
@@ -178,12 +188,17 @@ export class ObjectManagementHandlers extends BaseHandler {
         );
       }
 
-      const result = await this.adtclient.activate(objects, args.preauditRequested);
+      const { result, contexts } = await activateWithContexts(
+        this.adtclient,
+        objects,
+        entries => this.adtclient.activate(entries, args.preauditRequested),
+        args.mainProgram
+      );
       this.trackRequest(startTime, true);
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(result)
+          text: JSON.stringify(contexts.length ? { ...result, includeContexts: contexts } : result)
         }]
       };
     } catch (error: any) {
@@ -224,10 +239,25 @@ export class ObjectManagementHandlers extends BaseHandler {
         throw new McpError(ErrorCode.InvalidParams, "objectName and objectUrl parameters are required");
       }
 
+      // A report include needs its main program as ?context= - see
+      // lib/includeContext. With one main program it is looked up here.
+      let mainInclude: string | undefined = args.mainInclude;
+      let lookedUp: string | undefined;
+      const entry = { 'adtcore:uri': String(args.objectUrl).split('/source/main')[0], 'adtcore:type': 'PROG/I', 'adtcore:name': String(args.objectName), 'adtcore:parentUri': '' };
+      if (!mainInclude && needsContext(entry)) {
+        const mains = await mainProgramsOf(this.adtclient, entry['adtcore:uri']);
+        if (mains.length > 1) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `${args.objectName} belongs to ${mains.length} main programs (${mains.map(main => main.name).join(', ')}). Pass mainInclude with the URI of the one to activate it in.`
+          );
+        }
+        if (mains.length === 1) mainInclude = lookedUp = mains[0].uri;
+      }
       const result: ActivationResult = await this.adtclient.activate(
         args.objectName,
         args.objectUrl,
-        args.mainInclude,
+        mainInclude,
         args.preauditRequested
       );
 
@@ -252,6 +282,7 @@ export class ObjectManagementHandlers extends BaseHandler {
             ...result,
             success: verified === false ? false : result.success,
             reportedSuccess: result.success,
+            ...(lookedUp ? { mainInclude: lookedUp, mainIncludeFrom: 'mainPrograms' } : {}),
             verified,
             stillInactive,
             ...(others.length
