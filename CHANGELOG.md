@@ -8,7 +8,7 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
-## [1.17.0] — the description of a class or an interface
+## [1.17.0] — the descriptions of a class, an interface and their components
 
 A refactoring chat had to rename the descriptions of fourteen classes and an
 interface, and found no tool for it: the description is metadata, not source,
@@ -42,7 +42,35 @@ afterwards: both written and activated in one call, SEOCLASSTX in the logon
 language carries the new text, the active source is unchanged, and nothing is
 left inactive. The change wrote nothing to TREELOG, so the object list of the
 package is not rebuilt for it - the list keeps no texts anyway (SNODE has no
-text field). The transport path was not run.
+text field). Then on the eleven classes and interfaces of a transported
+package, with the request they are in: all written and
+active; they were already in the task whole (R3TR), so no new entry appeared.
+
+Later in the same chat, the short texts of methods. They have no metadata
+resource: the backend takes them from the source. Measured in $TMP: an ABAP
+Doc line `"! <p class="shorttext synchronized" lang="ru">...</p>` above a
+declaration lands in SEOCOMPOTX when the source is saved, and
+`"! @parameter x | <p class="shorttext synchronized" ...>` in SEOSUBCOTX. The
+synchronisation runs one way: removing the line leaves the text in the table,
+so a source without ABAP Doc never wipes a text written in SE24.
+
+- **`setObjectDescription` with `component`** changes the short text of a
+  method, an attribute, a constant or an event, and with `parameters` those
+  of its parameters - classes and interfaces alike. The declaration is found
+  in the definition part, an entry of a chain included (an entry on the line
+  of the colon is refused: its ABAP Doc has nowhere to go). An ABAP Doc block
+  already there is kept and only its short-text lines change. The edit goes
+  through `editObject` with the same transport and inactive-part rules; the
+  texts are read back from the tables (the source served with its ABAP Doc
+  rebuilt from them).
+- **`addMethod`** takes `description` for the method and for each parameter
+  and writes them as ABAP Doc above the new declaration.
+
+Measured in $TMP, the test objects deleted afterwards: a method with two
+parameters, an entry of a chain, an attribute, a constant, a method of an
+interface, a change of a text already there, a second call that writes
+nothing, and a method added with texts - every text in SEOCOMPOTX and
+SEOSUBCOTX, nothing left inactive.
 
 ## [1.16.0] — a domain where ADT serves none, where-used where it has no address, and the main program of an include
 

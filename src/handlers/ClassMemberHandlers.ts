@@ -36,7 +36,8 @@ const PARAMETER_SCHEMA = {
       name: { type: 'string' },
       type: { type: 'string', description: 'ABAP type, e.g. i, string, mara-matnr, ztt_foo.' },
       optional: { type: 'boolean', description: 'IMPORTING only: mark it OPTIONAL.' },
-      default: { type: 'string', description: 'IMPORTING only: DEFAULT <this>, e.g. abap_true.' }
+      default: { type: 'string', description: 'IMPORTING only: DEFAULT <this>, e.g. abap_true.' },
+      description: { type: 'string', description: 'Short text of the parameter (at most 60 characters), written as ABAP Doc.' }
     },
     required: ['name', 'type']
   }
@@ -70,8 +71,12 @@ export class ClassMemberHandlers extends BaseHandler {
             changing: PARAMETER_SCHEMA,
             returning: {
               type: 'object',
-              description: 'Returning parameter: {name, type}. Becomes RETURNING VALUE(name) TYPE type.',
-              properties: { name: { type: 'string' }, type: { type: 'string' } }
+              description: 'Returning parameter: {name, type, description?}. Becomes RETURNING VALUE(name) TYPE type.',
+              properties: { name: { type: 'string' }, type: { type: 'string' }, description: { type: 'string' } }
+            },
+            description: {
+              type: 'string',
+              description: 'Short text of the method (at most 60 characters) - what SE24 shows next to it. Written as an ABAP Doc line ("! <p class="shorttext synchronized">) above the declaration, together with the short texts of the parameters that have one; the backend copies them into the class on save.'
             },
             raising: {
               type: 'array',
@@ -231,7 +236,9 @@ export class ClassMemberHandlers extends BaseHandler {
       returning: this.parseObjectArg(args?.returning, 'returning'),
       raising: this.parseObjectArg(args?.raising, 'raising'),
       implementation: this.parseObjectArg(args?.implementation, 'implementation'),
-      declaration: args?.declaration
+      declaration: args?.declaration,
+      description: args?.description,
+      language: String(this.adtclient.language || 'EN').trim().toLowerCase()
     };
 
     const { sourceUrl, source } = await this.readSource(className);

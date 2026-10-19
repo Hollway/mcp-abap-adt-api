@@ -12,6 +12,7 @@
  * answers with the edits patchObjectSource takes. What the edits are applied
  * with, and how the object is locked and activated, is the handler's business.
  */
+import { abapDocLines, checkedShortText } from './abapDocText';
 
 export type Visibility = 'public' | 'protected' | 'private';
 
@@ -21,6 +22,8 @@ export interface Parameter {
   /** IMPORTING only: OPTIONAL, or DEFAULT <value> when a default is given. */
   optional?: boolean;
   default?: string;
+  /** Short text, written as ABAP Doc above the declaration. */
+  description?: string;
 }
 
 export interface MethodSpec {
@@ -37,6 +40,13 @@ export interface MethodSpec {
   implementation?: string[];
   /** Declaration text to use verbatim, instead of building one. */
   declaration?: string;
+  /**
+   * Short text of the method, written as an ABAP Doc line the backend copies
+   * into SEOCOMPOTX on save - see lib/abapDocText.
+   */
+  description?: string;
+  /** ISO language of the short texts, e.g. ru. */
+  language?: string;
 }
 
 export interface AttributeSpec {
@@ -215,6 +225,37 @@ export function methodDeclaration(spec: MethodSpec, indent: string): string[] {
   return lines;
 }
 
+/**
+ * The ABAP Doc lines that carry the short texts of a new method and of its
+ * parameters, or none when no text was given.
+ */
+export function methodDoc(spec: MethodSpec, indent: string): string[] {
+  const parameters = [
+    ...(spec.importing || []),
+    ...(spec.exporting || []),
+    ...(spec.changing || []),
+    ...(spec.returning ? [spec.returning] : [])
+  ]
+    .filter(parameter => parameter.description !== undefined && String(parameter.description).trim() !== '')
+    .map(parameter => ({
+      name: String(parameter.name).trim(),
+      text: checkedText(parameter.description, `parameter ${String(parameter.name).toUpperCase()}`)
+    }));
+  const description = spec.description !== undefined && String(spec.description).trim() !== ''
+    ? checkedText(spec.description, String(spec.name).toUpperCase())
+    : undefined;
+  if (!description && !parameters.length) return [];
+  return abapDocLines(indent, spec.language || 'en', description, parameters);
+}
+
+const checkedText = (value: unknown, what: string): string => {
+  try {
+    return checkedShortText(value, what);
+  } catch (error: any) {
+    throw new ClassEditError(error.message);
+  }
+};
+
 /** The METHOD ... ENDMETHOD block, with the body indented one step in. */
 export function methodImplementation(spec: MethodSpec, indent: string): string[] {
   const name = String(spec.name || '').trim();
@@ -322,7 +363,8 @@ export function planAddMethod(source: string, spec: MethodSpec): ClassEdit[] {
     throw new ClassEditError('This source has no CLASS ... IMPLEMENTATION part, so a method has nowhere to be implemented.');
   }
 
-  const declaration = methodDeclaration(spec, sectionIndent(layout, visibility)).join('\n');
+  const indent = sectionIndent(layout, visibility);
+  const declaration = [...methodDoc(spec, indent), ...methodDeclaration(spec, indent)].join('\n');
   const implementation = methodImplementation(spec, methodIndent(layout)).join('\n');
 
   // Last non-blank line before the implementation's ENDCLASS: appending after

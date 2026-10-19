@@ -228,6 +228,75 @@ describe('setObjectDescription', () => {
     expect(result).toMatchObject({ status: 'error', written: false, readBack: 'Old text' });
   });
 
+  describe('with a component', () => {
+    const source = (text: string) => [
+      'CLASS zcl_app_vacation DEFINITION PUBLIC FINAL CREATE PUBLIC.',
+      '  PUBLIC SECTION.',
+      ...(text ? [`    "! <p class="shorttext synchronized" lang="ru">${text}</p>`] : []),
+      '    METHODS run IMPORTING iv_id TYPE i.',
+      'ENDCLASS.',
+      'CLASS zcl_app_vacation IMPLEMENTATION.',
+      '  METHOD run.',
+      '  ENDMETHOD.',
+      'ENDCLASS.'
+    ].join('\r\n');
+
+    const componentHarness = (current: string, fromTables: string, pkg = 'ZAPP') => {
+      const h = harness([classDocument('Class text', pkg)], [[]], {
+        getObjectSource: async () => current
+      });
+      const client = (h.handlers as any).adtclient;
+      const plainRequest = client.httpClient.request;
+      client.httpClient.request = async (url: string, config: any) => {
+        if (url.endsWith('/source/main?withAbapDocFromShortTexts=true')) {
+          h.calls.push(`GET ${url}`);
+          return { body: fromTables, headers: {} };
+        }
+        return plainRequest(url, config);
+      };
+      const edit = jest.fn(async (_args: any) => ({ status: 'success', activated: true, steps: [] }));
+      (h.handlers as any).editor.editObjectCore = edit;
+      return { ...h, edit };
+    };
+
+    it('writes the ABAP Doc through editObject and checks the texts the tables give back', async () => {
+      const { handlers, edit } = componentHarness(source(''), source('Запуск'));
+      const result = answer(await handlers.handle('setObjectDescription', {
+        name: 'ZCL_APP_VACATION', component: 'run', description: 'Запуск', parameters: { iv_id: 'Номер' }, transport: 'DEVK900123'
+      }));
+      expect(edit).toHaveBeenCalledTimes(1);
+      const args = edit.mock.calls[0][0];
+      expect(args).toMatchObject({ objectSourceUrl: `${URL}/source/main`, transport: 'DEVK900123', activate: true });
+      expect(args.edits[0].insertion).toContain('lang="ru">Запуск</p>');
+      // The texts read back carry the method text but not the parameter one.
+      expect(result).toMatchObject({ status: 'error', written: true, component: 'RUN', after: 'Запуск' });
+    });
+
+    it('answers success when the tables give the texts back', async () => {
+      const back = source('Запуск').replace('    METHODS run', '    "! @parameter iv_id | <p class="shorttext synchronized" lang="ru">Номер</p>\r\n    METHODS run');
+      const { handlers } = componentHarness(source(''), back);
+      const result = answer(await handlers.handle('setObjectDescription', {
+        name: 'ZCL_APP_VACATION', component: 'run', description: 'Запуск', parameters: { iv_id: 'Номер' }, transport: 'DEVK900123'
+      }));
+      expect(result).toMatchObject({ status: 'success', written: true });
+    });
+
+    it('writes nothing when the ABAP Doc already says it, and needs a transport otherwise', async () => {
+      const same = componentHarness(source('Запуск'), source('Запуск'));
+      const result = answer(await same.handlers.handle('setObjectDescription', {
+        name: 'ZCL_APP_VACATION', component: 'run', description: 'Запуск'
+      }));
+      expect(result).toMatchObject({ status: 'success', written: false });
+      expect(same.edit).not.toHaveBeenCalled();
+
+      const other = componentHarness(source(''), source(''));
+      await expect(other.handlers.handle('setObjectDescription', {
+        name: 'ZCL_APP_VACATION', component: 'run', description: 'Запуск'
+      })).rejects.toThrow(/transport request/);
+      expect(other.edit).not.toHaveBeenCalled();
+    });
+  });
+
   it('notes a master language other than the logon language', async () => {
     const doc = classDocument('Old text').replace('adtcore:masterLanguage="RU"', 'adtcore:masterLanguage="EN"');
     const { handlers } = harness([doc]);
