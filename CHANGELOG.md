@@ -8,6 +8,42 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.17.0] — the description of a class or an interface
+
+A refactoring chat had to rename the descriptions of fourteen classes and an
+interface, and found no tool for it: the description is metadata, not source,
+so `editObject` never reaches it. What was left was an UPDATE on SEOCLASSTX
+from a snippet - outside the class builder, with nothing registered in a
+transport, and SE80 showing the old text for a while after.
+
+ADT serves the write; nothing here asked for it. A PUT of the metadata
+document to the object URL itself, without /source/main, ends in
+`UPDATE_METADATA` of CL_OO_ADT_RES_CLASS (CL_OO_ADT_RES_INTF for an
+interface): the length is checked (60 characters, not blank),
+SEO_CLASS_CHANGE_F_DATA or SEO_INTERFACE_CHANGE_F_DATA changes the text, and
+SEO_CLIF_SAVE_ALL saves it with the transport given as corrNr. That is what
+Eclipse does.
+
+- **`setObjectDescription`** reads the metadata document, replaces only
+  `adtcore:description` in it, and writes it back under its own lock.
+  UPDATE_METADATA also takes the message class, the shared-memory flag and
+  the fixed-point flag from the document, so it is never built from scratch.
+  The save leaves the CU/CP (IU/IP) includes inactive, so the object is
+  activated afterwards. An activation takes every inactive part of the
+  object along, so an object that already has inactive changes is refused
+  before anything is locked, unless `activate: false`. The text is checked the
+  way the backend checks it, a description that is already the text writes
+  nothing, `dryRun` stops after the checks, a master language other than the
+  logon language is named in the answer, and the result is read back.
+  Outside a local package a transport request is required.
+
+Measured in $TMP on the ERP system, a test class and a test interface deleted
+afterwards: both written and activated in one call, SEOCLASSTX in the logon
+language carries the new text, the active source is unchanged, and nothing is
+left inactive. The change wrote nothing to TREELOG, so the object list of the
+package is not rebuilt for it - the list keeps no texts anyway (SNODE has no
+text field). The transport path was not run.
+
 ## [1.16.0] — a domain where ADT serves none, where-used where it has no address, and the main program of an include
 
 A task stopped on one fixed value. On the release that serves no
