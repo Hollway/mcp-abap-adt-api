@@ -26,6 +26,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'addMethod',
   'deleteMethod',
   'addAttribute',
+  'setObjectDescription',
   'createFunctionModule',
   'createTransaction',
   'deleteTransaction',

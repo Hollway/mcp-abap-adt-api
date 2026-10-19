@@ -44,6 +44,7 @@ import { TraceHandlers } from './handlers/TraceHandlers.js';
 import { RefactorHandlers } from './handlers/RefactorHandlers.js';
 import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
+import { ObjectDescriptionHandlers } from './handlers/ObjectDescriptionHandlers.js';
 import { ImpactHandlers } from './handlers/ImpactHandlers.js';
 import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
@@ -189,6 +190,7 @@ export class AbapAdtServer extends Server {
     private refactorHandlers: RefactorHandlers;
     private revisionHandlers: RevisionHandlers;
     private classMemberHandlers: ClassMemberHandlers;
+    private objectDescriptionHandlers: ObjectDescriptionHandlers;
     private impactHandlers: ImpactHandlers;
     private functionModuleHandlers: FunctionModuleHandlers;
     private snippetHandlers: SnippetHandlers;
@@ -279,6 +281,7 @@ export class AbapAdtServer extends Server {
     this.refactorHandlers = new RefactorHandlers(this.adtClient);
     this.revisionHandlers = new RevisionHandlers(this.adtClient);
     this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
+    this.objectDescriptionHandlers = new ObjectDescriptionHandlers(this.adtClient);
     this.impactHandlers = new ImpactHandlers(this.adtClient);
     this.functionModuleHandlers = new FunctionModuleHandlers(this.adtClient);
     this.snippetHandlers = new SnippetHandlers(this.adtClient);
@@ -692,6 +695,9 @@ export class AbapAdtServer extends Server {
             case 'addAttribute':
                 result = await this.classMemberHandlers.handle(toolName, args);
                 break;
+            case 'setObjectDescription':
+                result = await this.objectDescriptionHandlers.handle(toolName, args);
+                break;
             case 'healthcheck':
                 result = await this.healthcheck();
                 break;
@@ -744,6 +750,7 @@ export class AbapAdtServer extends Server {
       { group: 'refactor', tools: this.refactorHandlers.getTools() },
       { group: 'revision', tools: this.revisionHandlers.getTools() },
       { group: 'source', tools: this.classMemberHandlers.getTools() },
+      { group: 'source', tools: this.objectDescriptionHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.impactHandlers.getTools() },
       { group: 'registration', tools: this.functionModuleHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },

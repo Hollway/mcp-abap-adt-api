@@ -92,7 +92,7 @@ export function escapeXmlAttribute(value: unknown): string {
     .replace(/'/g, '&apos;');
 }
 
-function unescapeXml(value: string): string {
+export function unescapeXml(value: string): string {
   return value
     .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_m, code) => String.fromCharCode(parseInt(code, 16)))
