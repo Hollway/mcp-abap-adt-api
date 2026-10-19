@@ -105,6 +105,12 @@ export class DdicDeletionHandlers extends DdifHandlerBase {
 
   /** Where the object is used in code, by ADT's where-used. A failure is reported, not fatal. */
   private async codeUsages(kind: DdicKind, name: string) {
+    // A domain is not an ABAP type: code reaches it only through its data
+    // elements, which the dictionary usages already list. Asking ADT anyway
+    // answered 500 on the release with no domain address.
+    if (kind === 'DOMA') {
+      return { sites: 0, note: 'A domain is not an ABAP type; code uses it only through the data elements listed under dictionary.' };
+    }
     const url = `/sap/bc/adt/${kindInfo(kind).adtCollection}/${encodeURIComponent(name.toLowerCase())}`;
     try {
       const rows = await this.readClient.usageReferences(url);

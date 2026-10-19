@@ -24,7 +24,9 @@
  * sends the whole tree and this server still parses it. What is saved is the
  * context of whoever asked.
  */
-import type { UsageReference } from 'abap-adt-api';
+import type { ADTClient, UsageReference } from 'abap-adt-api';
+import { describeAdtError } from './adtError';
+import { ddicObjectName } from './ddifWrite';
 
 export interface UsageRow {
   name?: string;
@@ -135,3 +137,104 @@ export const snippetableReferences = (references: any): UsageReference[] => {
   const rows = Array.isArray(references) ? references : [];
   return rows.filter(row => row && typeof row.objectIdentifier === 'string' && row.objectIdentifier.length > 0);
 };
+
+// ---------------------------------------------------------------------------
+// Addresses the where-used cannot take.
+// ---------------------------------------------------------------------------
+
+/**
+ * The where-used answers 500 "Error while converting object references" for
+ * an address this release does not serve, rather than 404. Measured on the
+ * classic ERP system: /ddic/tables/<name> answers that, while the same table
+ * at /ddic/structures/<name> - the address the system serves tables under -
+ * answers the whole tree; /ddic/domains/<name> answers it because domains
+ * have no address there at all.
+ */
+export const isUnconvertibleReference = (error: unknown): boolean => {
+  const info = describeAdtError(error);
+  return info.status === 500 &&
+    /converting object references/i.test(`${info.error} ${info.localizedMessage ?? ''}`);
+};
+
+const TABLE_ADDRESS = /^(\/sap\/bc\/adt\/ddic\/)tables(\/[^/?#]+)/i;
+const DOMAIN_ADDRESS = /^\/sap\/bc\/adt\/ddic\/domains\/([^/?#]+)/i;
+
+/** The same table at the address the release serves tables under, or undefined. */
+export const tableAsStructureUrl = (url: string): string | undefined =>
+  TABLE_ADDRESS.test(url) ? url.replace(TABLE_ADDRESS, '$1structures$2') : undefined;
+
+/** The domain a /ddic/domains address points at, or undefined. */
+export const domainOfUrl = (url: string): string | undefined => {
+  const match = DOMAIN_ADDRESS.exec(url);
+  return match ? decodeURIComponent(match[1]).toUpperCase() : undefined;
+};
+
+/**
+ * Where-used rows for the address, with a table asked again at the address the
+ * release serves it under when the first one cannot be converted. addressedAs
+ * says which address answered when it was not the one given.
+ */
+export async function usageReferencesAt(
+  client: Pick<ADTClient, 'usageReferences'>,
+  url: string,
+  line?: number,
+  column?: number
+): Promise<{ rows: UsageReference[]; addressedAs?: string }> {
+  try {
+    return { rows: (await client.usageReferences(url, line, column)) || [] };
+  } catch (error) {
+    const other = isUnconvertibleReference(error) ? tableAsStructureUrl(url) : undefined;
+    if (!other) throw error;
+    return { rows: (await client.usageReferences(other, line, column)) || [], addressedAs: other };
+  }
+}
+
+/**
+ * The users of a domain, from the dictionary.
+ *
+ * A domain is not an ABAP type - no DATA x TYPE <domain> compiles - so code
+ * reaches it only through the data elements built on it, and the where-used
+ * index holds no entry for it at all. Its users are DD04L (data elements) and,
+ * through them, DD03L (fields of tables and structures).
+ */
+export const domainDataElementsSql = (domain: string): string =>
+  `SELECT rollname FROM dd04l WHERE domname = '${ddicObjectName(domain, 'domain')}' AND as4local = 'A' ORDER BY rollname`;
+
+export const domainFieldsSql = (domain: string): string =>
+  `SELECT tabname, COUNT(*) AS cnt FROM dd03l WHERE domname = '${ddicObjectName(domain, 'domain')}' AND as4local = 'A' ` +
+  'GROUP BY tabname ORDER BY tabname';
+
+/** Rows the domain answer reads at most per query; more is reported as more. */
+export const DOMAIN_ROW_LIMIT = 5000;
+
+export interface DomainUsage {
+  domain: string;
+  dataElements: string[];
+  dataElementCount: number;
+  tables: { name: string; fields: number }[];
+  tableCount: number;
+  /** A query came back at the row limit, so the counts are "at least". */
+  atLeast: boolean;
+}
+
+/** The domain answer, a page of each list. */
+export function domainUsage(
+  domain: string,
+  elementRows: Record<string, any>[],
+  fieldRows: Record<string, any>[],
+  maxResults: number
+): DomainUsage {
+  const dataElements = elementRows.map(row => String(row.ROLLNAME ?? '').trim()).filter(Boolean);
+  const tables = fieldRows
+    .map(row => ({ name: String(row.TABNAME ?? '').trim(), fields: Number(row.CNT ?? 0) || 0 }))
+    .filter(row => row.name);
+  const max = Math.max(1, Math.floor(maxResults));
+  return {
+    domain,
+    dataElements: dataElements.slice(0, max),
+    dataElementCount: dataElements.length,
+    tables: tables.slice(0, max),
+    tableCount: tables.length,
+    atLeast: elementRows.length >= DOMAIN_ROW_LIMIT || fieldRows.length >= DOMAIN_ROW_LIMIT
+  };
+}

@@ -8,7 +8,7 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
-## [1.16.0] — changing a domain where ADT serves none
+## [1.16.0] — changing a domain where ADT serves none, and where-used where it has no address
 
 A task stopped on one fixed value. On the release that serves no
 `/sap/bc/adt/ddic/domains`, `createDomain` already fell back to DDIF_DOMA_PUT,
@@ -46,6 +46,25 @@ Measured in $TMP on the ERP system, the test domain deleted afterwards:
   not exist was accepted. Hence the read-back of every header field.
 - A NUMC domain given the value A failed activation with rc 8; the old
   definition went back and the domain was as before.
+
+Later in the same chat, the where-used. It answered 500 "Error while
+converting object references" for a table and for a domain, and the preview
+of `deleteDdicObject` carried that error for every domain. Measured: the
+error is about the address, not the object - the release serves tables only
+as /ddic/structures/<name>, which answers the whole tree (22 rows, 9 usage
+sites for the table that failed), while /ddic/tables/<name> answers 500; a
+domain has no address at all, and is not in the where-used index either,
+because it is not an ABAP type.
+
+- **`usageReferences`** asks a table given at /ddic/tables again at
+  /ddic/structures when the first answer is that 500, and says so in
+  `addressedAs`; `impactOf` goes through the same path.
+- **A domain** is answered from the dictionary instead: the data elements on
+  it (DD04L) and the tables whose fields use it (DD03L), counted in full and
+  listed a page at a time, with the pointer that code reaches a domain only
+  through its data elements.
+- **`deleteDdicObject`** no longer asks ADT where a domain is used in code -
+  the answer is 0 by definition - and so no longer reports the error there.
 
 ## [1.15.0] — deleting what ADT deletes badly, and transactions
 

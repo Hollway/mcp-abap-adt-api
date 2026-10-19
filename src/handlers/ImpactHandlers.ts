@@ -15,6 +15,7 @@ import { buildGraph, functionModulesOf, renderDiagram } from '../lib/abapGraph';
 import type { ScannedObject, OutsideTarget, DiagramFormat } from '../lib/abapGraph';
 import { sourceCache } from '../lib/sourceCache';
 import { describeAdtError } from '../lib/adtError';
+import { usageReferencesAt } from '../lib/usageReferences';
 
 /**
  * What depends on an object - the question asked before changing one.
@@ -363,8 +364,10 @@ export class ImpactHandlers extends BaseHandler {
    * and the object URL is tried when that comes back empty.
    */
   private async references(url: string, line?: number, column?: number): Promise<UsageRow[]> {
-    const rows = await this.readClient.usageReferences(url, line, column);
-    return (rows || []) as UsageRow[];
+    // A table given at /ddic/tables is asked again at /ddic/structures - see
+    // usageReferencesAt.
+    const { rows } = await usageReferencesAt(this.readClient, url, line, column);
+    return rows as UsageRow[];
   }
 
   async handleImpactOf(args: any): Promise<any> {

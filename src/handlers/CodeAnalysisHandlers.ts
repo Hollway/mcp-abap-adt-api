@@ -13,7 +13,18 @@ import {
     objectUrlOf
 } from '../lib/symbolPosition';
 import type { CursorAt, SymbolPosition } from '../lib/symbolPosition';
-import { pageUsages, snippetableReferences } from '../lib/usageReferences';
+import {
+    DEFAULT_MAX_RESULTS,
+    DOMAIN_ROW_LIMIT,
+    domainDataElementsSql,
+    domainFieldsSql,
+    domainOfUrl,
+    domainUsage,
+    isUnconvertibleReference,
+    pageUsages,
+    snippetableReferences,
+    usageReferencesAt
+} from '../lib/usageReferences';
 import { documentText } from '../lib/htmlText';
 import { fixProposalRows, FIX_PROPOSAL_FIELDS } from '../lib/quickFixes';
 import { requireShape } from '../lib/argShape';
@@ -104,7 +115,7 @@ export class CodeAnalysisHandlers extends BaseHandler {
             },
             {
                 name: 'usageReferences',
-                description: 'Where-used for the symbol at a cursor position, or for the whole object when no position is given. The backend answers with the whole tree at once and has no paging of its own - measured, CL_ABAP_TYPEDESCR answers with 40,660 rows and 21 million characters, a hundred times the response cap - so the answer is summarised and paged here: counts of rows, usage sites, objects and packages over the whole result, then one page of rows trimmed to name, type, package, uri and the objectIdentifier that usageReferenceSnippets needs. The rows are a tree flattened: only those carrying an objectIdentifier are usage sites, and onlyWithSnippets keeps just those. The fetch still costs what it costs on the backend; what is saved is the reading. For a rolled-up answer over the whole tree use impactOf, for one method by name whereUsedMethod.',
+                description: 'Where-used for the symbol at a cursor position, or for the whole object when no position is given. The backend answers with the whole tree at once and has no paging of its own - measured, CL_ABAP_TYPEDESCR answers with 40,660 rows and 21 million characters, a hundred times the response cap - so the answer is summarised and paged here: counts of rows, usage sites, objects and packages over the whole result, then one page of rows trimmed to name, type, package, uri and the objectIdentifier that usageReferenceSnippets needs. The rows are a tree flattened: only those carrying an objectIdentifier are usage sites, and onlyWithSnippets keeps just those. The fetch still costs what it costs on the backend; what is saved is the reading. For a rolled-up answer over the whole tree use impactOf, for one method by name whereUsedMethod. A table given at /ddic/tables/<name> on a release that does not serve that address (the where-used answers 500) is asked again at /ddic/structures/<name>, and addressedAs says so. A domain on a release with no domain address is answered from the dictionary instead - the data elements built on it and the tables whose fields use it, via says so - because a domain is not an ABAP type and code reaches it only through its data elements.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -667,34 +678,76 @@ export class CodeAnalysisHandlers extends BaseHandler {
     }
 
     async handleUsageReferences(args: any): Promise<any> {
-        return this.tracked('Usage references failed', async () => {
-            const rows = await this.readClient.usageReferences(
-                args.url,
-                args.line,
-                args.column
-            );
-            const page = pageUsages(rows, {
-                offset: args.offset,
-                maxResults: args.maxResults,
-                onlyWithSnippets: args.onlyWithSnippets
-            });
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            status: 'success',
-                            ...page,
-                            hint: page.more
-                                ? `More rows follow: ask again with offset=${page.offset + page.returned}.`
-                                : undefined,
-                            snippetsHint: page.summary.usageSites > 0 && !args.onlyWithSnippets
-                                ? `${page.summary.usageSites} of the ${page.summary.total} rows are usage sites with source behind them; onlyWithSnippets keeps just those.`
-                                : undefined
-                        })
-                    }
-                ]
-            };
+        const startTime = performance.now();
+        let found: { rows: any[]; addressedAs?: string };
+        try {
+            found = await usageReferencesAt(this.readClient, args.url, args.line, args.column);
+            this.trackRequest(startTime, true);
+        } catch (error) {
+            this.trackRequest(startTime, false);
+            const domain = isUnconvertibleReference(error) ? domainOfUrl(String(args.url || '')) : undefined;
+            if (domain) return this.domainUsers(domain, args);
+            throw wrapAdtError(error, 'Usage references failed');
+        }
+        const page = pageUsages(found.rows, {
+            offset: args.offset,
+            maxResults: args.maxResults,
+            onlyWithSnippets: args.onlyWithSnippets
+        });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify({
+                        status: 'success',
+                        ...(found.addressedAs
+                            ? {
+                                addressedAs: found.addressedAs,
+                                note: 'This release does not serve tables under /ddic/tables - the where-used answered 500 for it - so the table was asked about at the address it serves tables under.'
+                            }
+                            : {}),
+                        ...page,
+                        hint: page.more
+                            ? `More rows follow: ask again with offset=${page.offset + page.returned}.`
+                            : undefined,
+                        snippetsHint: page.summary.usageSites > 0 && !args.onlyWithSnippets
+                            ? `${page.summary.usageSites} of the ${page.summary.total} rows are usage sites with source behind them; onlyWithSnippets keeps just those.`
+                            : undefined
+                    })
+                }
+            ]
+        };
+    }
+
+    /**
+     * Where-used for a domain on a release that serves no domain address: the
+     * dictionary answers instead - see domainUsage in lib/usageReferences.
+     */
+    private async domainUsers(domain: string, args: any): Promise<any> {
+        let elementsSql: string;
+        let fieldsSql: string;
+        try {
+            elementsSql = domainDataElementsSql(domain);
+            fieldsSql = domainFieldsSql(domain);
+        } catch (error: any) {
+            throw new McpError(ErrorCode.InvalidParams, error?.message || String(error));
+        }
+        const query = async (sql: string) => {
+            const result: any = await this.tracked('Reading the users of the domain from the dictionary failed',
+                () => this.readClient.runQuery(sql, DOMAIN_ROW_LIMIT));
+            return Array.isArray(result?.values) ? result.values : [];
+        };
+        const usage = domainUsage(domain, await query(elementsSql), await query(fieldsSql), args.maxResults ?? DEFAULT_MAX_RESULTS);
+        const shown = usage.dataElements.length < usage.dataElementCount || usage.tables.length < usage.tableCount;
+        return this.answer({
+            status: 'success',
+            via: 'dictionary',
+            reason: 'This release serves no /sap/bc/adt/ddic/domains, and the where-used answers 500 for that address. A domain is not an ABAP type: code reaches it only through the data elements built on it, so its users were read from DD04L and DD03L.',
+            ...usage,
+            ...(shown ? { note: `Lists cut to ${args.maxResults ?? DEFAULT_MAX_RESULTS}; the counts cover all of them.` } : {}),
+            hint: usage.dataElementCount
+                ? `For the code that uses it, ask usageReferences about each data element, e.g. /sap/bc/adt/ddic/dataelements/${encodeURIComponent(usage.dataElements[0].toLowerCase())}.`
+                : 'No data element is built on this domain, so nothing in code reaches it.'
         });
     }
 
