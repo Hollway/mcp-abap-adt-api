@@ -62,6 +62,11 @@ What the index records, as measured on the ERP system:
   timeout. The bridge's `offset` fetches offset+n rows and keeps the tail, so
   the load pages by key instead: ordered by include, each page starting at
   the last include of the previous one.
+- One LIKE on the include answers in half a second; three LIKEs ORed
+  together took twenty - the database gives up the index and reads the whole
+  table. The first delta after a transport import, 150 objects, took five
+  minutes that way; with one statement per class or function group and the
+  programs together in IN lists the same delta takes 44 seconds.
 
 - A DATS column reaches in-process callers of the data preview as a Date at
   UTC midnight, not as eight digits; the first live load wrote its change

@@ -5,7 +5,7 @@ import {
   ownerOfInclude, sourcePartOf, parseGtName, crossTarget, ftsQuery, normalizeText, languageKey, methodIndexOf, isCustomerName
 } from '../lib/sapGraph/names';
 import { GraphStore } from '../lib/sapGraph/store';
-import { fullSync, deltaSync, batchedSql, ownerFilter, changeStamp } from '../lib/sapGraph/sync';
+import { fullSync, deltaSync, batchedSql, ownerStatements, changeStamp } from '../lib/sapGraph/sync';
 import { GraphExplorer } from '../lib/sapGraph/explore';
 import { methodBlock, blocksNaming, sourceUrlOf, linesNaming } from '../lib/sapGraph/source';
 import { graphFileFor, foreignLoad, startLoad, waitFor, closeGraphs, graphStore } from '../lib/sapGraph';
@@ -114,10 +114,19 @@ describe('statements', () => {
     expect(changeStamp({ UDAT: new Date('invalid'), UTIME: '' })).toBeNull();
   });
 
-  it('selects exactly one owner', () => {
-    expect(ownerFilter({ objectType: 'CLAS', object: 'ZCL_A' })).toBe(`include LIKE '${classInclude('ZCL_A', '')}%'`);
-    expect(ownerFilter({ objectType: 'FUGR', object: 'ZFG' })).toBe("( include LIKE 'LZFG___' OR include = 'SAPLZFG' )");
-    expect(ownerFilter({ objectType: 'PROG', object: 'ZR_REP' }, 'progname')).toBe("progname = 'ZR_REP'");
+  it('selects each owner with one LIKE, and programs together - an OR of LIKEs reads the whole table', () => {
+    const statements = ownerStatements('SELECT otype FROM wbcrossgt WHERE ', [
+      { objectType: 'CLAS', object: 'ZCL_A' }, { objectType: 'FUGR', object: 'ZFG' },
+      { objectType: 'PROG', object: 'ZR_REP' }, { objectType: 'PROG', object: 'ZR_REP_F01' }
+    ]);
+    expect(statements).toEqual([
+      `SELECT otype FROM wbcrossgt WHERE include LIKE '${classInclude('ZCL_A', '')}%'`,
+      "SELECT otype FROM wbcrossgt WHERE include LIKE 'LZFG___'",
+      "SELECT otype FROM wbcrossgt WHERE include IN ( 'SAPLZFG', 'ZR_REP', 'ZR_REP_F01' )"
+    ]);
+    const many = ownerStatements('SELECT otype FROM wbcrossgt WHERE ', Array.from({ length: 30 }, (_, i) => ({ objectType: 'PROG' as const, object: `ZR_SOME_REPORT_${i}` })));
+    expect(many.length).toBeGreaterThan(1);
+    for (const sql of many) expect(sql.length).toBeLessThanOrEqual(255);
   });
 });
 

@@ -5,7 +5,7 @@ import { QueryHandlers } from './QueryHandlers';
 import type { ToolDefinition } from '../types/tools';
 import { sourceCache } from '../lib/sourceCache';
 import { languageKey } from '../lib/sapGraph/names';
-import type { RowSource } from '../lib/sapGraph/sync';
+import type { RowSource, SyncResult } from '../lib/sapGraph/sync';
 import {
   graphFileFor, graphStore, graphPrefixes, graphMaxAgeMinutes, startLoad, loadJob, foreignLoad, waitFor, LoadJob, LoadInfo
 } from '../lib/sapGraph';
@@ -174,7 +174,7 @@ export class SapGraphHandlers extends BaseHandler {
       runningSeconds: Math.round((Date.now() - Date.parse(info.startedAt)) / 1000),
       ...(job?.finishedAt ? { finishedAt: job.finishedAt } : {}),
       ...(job?.error ? { error: job.error } : {}),
-      ...(job?.result ? { result: job.result } : {})
+      ...(job?.result ? { result: summarized(job.result) } : {})
     };
   }
 
@@ -443,6 +443,14 @@ function levels(walk: WalkEntry[], maxResults: number): { byDepth: Record<number
   return { byDepth, shown, budgetReached: walk.length >= WALK_BUDGET };
 }
 
+/** Objects a delta reloaded, shown up to this many - a transport import can touch hundreds. */
+const MAX_RELOADED_SHOWN = 20;
+
+const summarized = (result: SyncResult): Record<string, unknown> => {
+  const reloaded = result.objectsReloaded;
+  if (!reloaded || reloaded.length <= MAX_RELOADED_SHOWN) return { ...result };
+  return { ...result, objectsReloaded: reloaded.slice(0, MAX_RELOADED_SHOWN), objectsReloadedCount: reloaded.length };
+};
 /** The word to look for in a caller's code: the member called, or the object. */
 const targetName = (node: GraphNode): string => node.functionName || node.member || node.object;
 

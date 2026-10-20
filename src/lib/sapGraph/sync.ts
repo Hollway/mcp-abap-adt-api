@@ -140,22 +140,43 @@ const customerNames = (column: string, prefixes: string[]): string =>
 
 const inList = (values: string[]): string => `IN ( ${values.map(sqlLiteral).join(', ')} )`;
 
-/** The include filter that selects every include of one owner, and nothing of another. */
-export function ownerFilter(owner: { objectType: OwnerType; object: string }, column = 'include'): string {
-  switch (owner.objectType) {
-    case 'CLAS':
-    case 'INTF':
-      // Padded to 30 with '=', so ZCL_A does not also pick up ZCL_AB.
-      return `${column} LIKE ${sqlLiteral(`${owner.object.padEnd(30, '=')}%`)}`;
-    case 'FUGR':
-      // L<group> and exactly three characters - '_' is the one-character wildcard.
-      return `( ${column} LIKE ${sqlLiteral(`L${owner.object}___`)} OR ${column} = ${sqlLiteral(`SAPL${owner.object}`)} )`;
-    default:
-      return `${column} = ${sqlLiteral(owner.object)}`;
-  }
-}
-
 const ownerKey = (owner: { objectType: string; object: string }): string => `${owner.objectType}:${owner.object}`;
+
+/**
+ * Statements that select every include of the given owners.
+ *
+ * Measured on the ERP system: one LIKE on the include answers in half a
+ * second, three LIKEs ORed together in twenty - the database gives up the
+ * index and reads the whole table. So a class or a function group gets a
+ * statement of its own with its one LIKE, and plain programs (and the main
+ * programs of function groups) go together as IN lists, which keep the index.
+ */
+export function ownerStatements(head: string, owners: { objectType: OwnerType; object: string }[], column = 'include', tail = ''): string[] {
+  const statements: string[] = [];
+  const names: string[] = [];
+  for (const owner of owners) {
+    if (owner.objectType === 'CLAS' || owner.objectType === 'INTF') {
+      statements.push(`${head}${column} LIKE ${sqlLiteral(`${owner.object.padEnd(30, '=')}%`)}${tail}`);
+    } else if (owner.objectType === 'FUGR') {
+      statements.push(`${head}${column} LIKE ${sqlLiteral(`L${owner.object}___`)}${tail}`);
+      names.push(`SAPL${owner.object}`);
+    } else {
+      names.push(owner.object);
+    }
+  }
+  const lists: string[][] = [];
+  let current: string[] = [];
+  const build = (list: string[]) => `${head}${column} ${inList(list)}${tail}`;
+  for (const name of names) {
+    if (current.length > 0 && build([...current, name]).length > MAX_SQL) {
+      lists.push(current);
+      current = [];
+    }
+    current.push(name);
+  }
+  if (current.length > 0) lists.push(current);
+  return [...statements, ...lists.map(build)];
+}
 
 /** What turns an include into its owner and member: the method and function module directories. */
 class Resolver {
@@ -638,8 +659,7 @@ export async function deltaSync(store: GraphStore, source: RowSource, options: S
     }
 
     load.enter('includes');
-    const includeTerms = owners.map(owner => ownerFilter(owner, 'progname'));
-    for (const row of await load.all(batchedSql('SELECT progname, subc, udat, utime FROM reposrc WHERE ', includeTerms, ` AND r3state = 'A'`))) {
+    for (const row of await load.all(ownerStatements('SELECT progname, subc, udat, utime FROM reposrc WHERE ', owners, 'progname', ` AND r3state = 'A'`))) {
       collected.includes.push(load.resolver.includeFromRepository(row));
     }
 
@@ -649,12 +669,11 @@ export async function deltaSync(store: GraphStore, source: RowSource, options: S
     }
 
     load.enter('references');
-    const referenceTerms = owners.map(owner => ownerFilter(owner));
-    for (const row of await load.all(batchedSql('SELECT otype, name, include FROM wbcrossgt WHERE ', referenceTerms))) {
+    for (const row of await load.all(ownerStatements('SELECT otype, name, include FROM wbcrossgt WHERE ', owners))) {
       const edge = gtEdge(row, load.resolver, prefixes);
       if (edge) collected.edges.push(edge);
     }
-    for (const row of await load.all(batchedSql('SELECT type, name, prog, include FROM cross WHERE ', referenceTerms))) {
+    for (const row of await load.all(ownerStatements('SELECT type, name, prog, include FROM cross WHERE ', owners))) {
       const edge = crossEdge(row, load.resolver);
       if (edge) collected.edges.push(edge);
     }
