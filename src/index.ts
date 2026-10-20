@@ -46,6 +46,7 @@ import { RevisionHandlers } from './handlers/RevisionHandlers.js';
 import { ClassMemberHandlers } from './handlers/ClassMemberHandlers.js';
 import { ObjectDescriptionHandlers } from './handlers/ObjectDescriptionHandlers.js';
 import { ImpactHandlers } from './handlers/ImpactHandlers.js';
+import { SapGraphHandlers } from './handlers/SapGraphHandlers.js';
 import { FunctionModuleHandlers } from './handlers/FunctionModuleHandlers.js';
 import { SnippetHandlers } from './handlers/SnippetHandlers.js';
 import { CallHandlers } from './handlers/CallHandlers.js';
@@ -192,6 +193,7 @@ export class AbapAdtServer extends Server {
     private classMemberHandlers: ClassMemberHandlers;
     private objectDescriptionHandlers: ObjectDescriptionHandlers;
     private impactHandlers: ImpactHandlers;
+    private sapGraphHandlers: SapGraphHandlers;
     private functionModuleHandlers: FunctionModuleHandlers;
     private snippetHandlers: SnippetHandlers;
     private callHandlers: CallHandlers;
@@ -283,6 +285,7 @@ export class AbapAdtServer extends Server {
     this.classMemberHandlers = new ClassMemberHandlers(this.adtClient);
     this.objectDescriptionHandlers = new ObjectDescriptionHandlers(this.adtClient);
     this.impactHandlers = new ImpactHandlers(this.adtClient);
+    this.sapGraphHandlers = new SapGraphHandlers(this.adtClient);
     this.functionModuleHandlers = new FunctionModuleHandlers(this.adtClient);
     this.snippetHandlers = new SnippetHandlers(this.adtClient);
     this.callHandlers = new CallHandlers(this.adtClient);
@@ -690,6 +693,10 @@ export class AbapAdtServer extends Server {
             case 'abapGraph':
                 result = await this.impactHandlers.handle(toolName, args);
                 break;
+            case 'sapGraphSync':
+            case 'sapGraphExplore':
+                result = await this.sapGraphHandlers.handle(toolName, args);
+                break;
             case 'addMethod':
             case 'deleteMethod':
             case 'addAttribute':
@@ -752,6 +759,7 @@ export class AbapAdtServer extends Server {
       { group: 'source', tools: this.classMemberHandlers.getTools() },
       { group: 'source', tools: this.objectDescriptionHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.impactHandlers.getTools() },
+      { group: 'sapGraph', tools: this.sapGraphHandlers.getTools() },
       { group: 'registration', tools: this.functionModuleHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.snippetHandlers.getTools() },
       { group: 'codeAnalysis', tools: this.callHandlers.getTools() },

@@ -36,13 +36,13 @@ export const TOOL_PRESETS: Readonly<Record<string, readonly string[]>> = {
   read: [
     'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
     'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement',
-    'operations'
+    'operations', 'sapGraph'
   ],
   /** Reading plus writing, activation, transports and tests - no debugger, traces, ATC, git or RAP. */
   dev: [
     'health', 'auth', 'object', 'source', 'package', 'node', 'discovery',
     'ddic', 'codeAnalysis', 'class', 'revision', 'query', 'feed', 'enhancement', 'textElement',
-    'operations',
+    'operations', 'sapGraph',
     'lock', 'activation', 'registration', 'deletion', 'transport', 'unitTest',
     'prettyPrinter', 'refactor', 'rename', 'messageClass'
   ],
@@ -62,7 +62,8 @@ export const TOOL_PRESETS: Readonly<Record<string, readonly string[]>> = {
     'packageTree', 'searchInPackage', 'nodeContents', 'mainPrograms',
     'classComponents', 'classIncludes', 'listFunctionGroup',
     'usageReferences', 'whereUsedMethod', 'typeHierarchy', 'findDefinition',
-    'impactOf', 'abapPath', 'callsFrom', 'abapGraph'
+    'impactOf', 'abapPath', 'callsFrom', 'abapGraph',
+    'sapGraph'
   ],
   /** Quality checks and what it takes to read one: the ATC group, plus enough navigation to reach the object. */
   atc: [

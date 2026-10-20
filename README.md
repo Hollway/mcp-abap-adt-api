@@ -58,10 +58,13 @@ Clone it, build it, and point your client at `dist/main.js` with the environment
 | `SAP_CLIENT`, `SAP_LANGUAGE` | Logon client and language. |
 | `SAP_READONLY` | `1` hides every tool that changes the system and refuses it if called anyway. Use it for a system that must only be read. |
 | `SAP_READONLY_ALLOW` | Groups or tool names let through the read-only fence, e.g. `debugger` for a system that must not be developed on but does need debugging. Exclusion wins over an allowance, and these tools keep `readOnlyHint: false`. |
-| `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, enhancement, textElement, messageClass, package, rap, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, health`. |
+| `SAP_TOOLS_EXCLUDE` | Groups or tool names to hide, comma or space separated, e.g. `debugger,traces,atc,git`. Groups: `auth, transport, object, class, codeAnalysis, lock, source, deletion, activation, registration, node, discovery, unitTest, prettyPrinter, git, ddic, enhancement, textElement, messageClass, package, rap, serviceBinding, query, feed, debugger, rename, atc, traces, refactor, revision, operations, sapGraph, health`. |
 | `SAP_TOOLS_INCLUDE` | The other way round: groups or tool names to serve, to the exclusion of everything else. Cheaper to write when a session needs ten tools rather than all of them. Exclusion still wins, and `healthcheck` is served either way. |
 | `SAP_TOOLS_PROFILE` | A ready-made include list: `min`, `ddic`, `graph`, `atc`, `read` or `dev`. See [the tool list is context](#the-tool-list-is-context). |
 | `SAP_MAX_RESPONSE_CHARS` | Cap on a single answer (default 200000). Over it, the answer is replaced by an envelope with the size and a preview. |
+| `SAP_GRAPH_DIR` | Where `sapGraphSync` keeps the code graph of each system, one SQLite file per host, path and client (default `~/.abap-graph`). Needs Node 22.13 or newer; the rest of the server does not. |
+| `SAP_GRAPH_PREFIXES` | First letters of customer objects the graph loads (default `Z,Y`). |
+| `SAP_GRAPH_MAX_AGE_MIN` | After how many minutes `sapGraphExplore` first reloads what changed (default 60; `0` never). |
 | `LOG_LEVEL` | `error`, `warn` (default), `info` or `debug`. All logging goes to stderr - over stdio, stdout carries the protocol. Over HTTP, `info` adds one line per request carrying its id, the caller and the tool. |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `0` accepts a self-signed certificate (development only). |
 
@@ -79,7 +82,7 @@ Every tool this server offers is described to the model before it is asked anyth
 | `min` | 21 | 22k | Find an object, read it, walk its package. |
 | `ddic` | 43 | 57k | Dictionary work: tables, structures, data elements, domains, and the sources around them. |
 | `atc` | 23 | 17k | Quality checks: the ATC group, plus enough navigation to reach the object a finding points at. |
-| `graph` | 27 | 33k | Understanding a system nobody documented: `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
+| `graph` | 29 | 37k | Understanding a system nobody documented: `sapGraphExplore` over a graph kept on disk (`sapGraphSync`), `abapGraph`, `callsFrom`, `impactOf`, `abapPath`, where-used, and the reads that feed them. |
 | `read` | 85 | 111k | Everything that reads: the above plus history, analysis, enhancements and text elements. |
 | `dev` | 143 | 163k | Reading plus writing, activation, transports and tests — no debugger, traces, ATC, git, RAP or service bindings. |
 
