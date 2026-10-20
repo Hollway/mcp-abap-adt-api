@@ -46,12 +46,23 @@ export const CALL_KINDS: readonly CallKind[] = [
   'macro'
 ];
 
+/**
+ * What a statement does to a database table: reads it (SELECT, JOIN), writes
+ * it - and how - or only declares a work area over it (TABLES).
+ */
+export type TableAccess = 'read' | 'insert' | 'update' | 'modify' | 'delete' | 'declare';
+
+export const isTableWrite = (access: TableAccess | undefined): boolean =>
+  access === 'insert' || access === 'update' || access === 'modify' || access === 'delete';
+
 /** One place in the source that reaches another object. */
 export interface CallSite {
   target: string;
   kind: CallKind;
   /** Method, function module or form name, where the kind has one. */
   member?: string;
+  /** For a table: what the statement does to it. */
+  access?: TableAccess;
   line: number;
   statement: string;
   /** Which source the line is in, when more than one was scanned. */
@@ -363,18 +374,19 @@ function scan(
     : undefined;
   state.statements += statements.length;
 
-  const add = (statement: Statement, kind: CallKind, target: string, member?: string): void => {
+  const add = (statement: Statement, kind: CallKind, target: string, member?: string, access?: TableAccess): void => {
     if (wantedKinds && !wantedKinds.has(kind)) return;
     const name = target.trim().toUpperCase();
     if (!name || name === 'ME' || name === 'SUPER') return;
     if (onlyCustom && !CUSTOM_NAME.test(name)) { state.standardTargetsHidden++; return; }
-    const key = `${sourceName || ''}|${kind}|${name}|${(member || '').toUpperCase()}|${statement.line}`;
+    const key = `${sourceName || ''}|${kind}|${name}|${(member || '').toUpperCase()}|${statement.line}|${access || ''}`;
     if (state.seen.has(key)) return;
     state.seen.add(key);
     state.calls.push({
       target: name,
       kind,
       ...(member ? { member: member.trim().toUpperCase() } : {}),
+      ...(access ? { access } : {}),
       line: statement.line,
       statement: statement.text,
       ...(sourceName ? { source: sourceName } : {})
@@ -524,23 +536,23 @@ function scan(
     // Database access. A name this source declares is an internal table, not a
     // table: MODIFY lt_rows FROM ls and MODIFY zrows FROM ls are one statement
     // shape, and the declarations are what tell them apart.
-    const table = (name: string | undefined): void => {
+    const table = (name: string | undefined, access: TableAccess): void => {
       if (!name) return;
       const upper = name.toUpperCase();
       if (NOT_A_TABLE.has(upper) || locals.declared.has(upper) || upper.startsWith('@')) return;
-      add(statement, 'table', upper);
+      add(statement, 'table', upper, undefined, access);
     };
     if (/\bSELECT\b/i.test(text)) {
-      for (const match of text.matchAll(/\bFROM\s+([\w/]+)/gi)) table(match[1]);
-      for (const match of text.matchAll(/\bJOIN\s+([\w/]+)/gi)) table(match[1]);
+      for (const match of text.matchAll(/\bFROM\s+([\w/]+)/gi)) table(match[1], 'read');
+      for (const match of text.matchAll(/\bJOIN\s+([\w/]+)/gi)) table(match[1], 'read');
       if (/\b(?:FROM|JOIN)\s*\(/i.test(text)) {
         cannotName(statement, 'table', 'the table read from is in a variable');
       }
     }
-    const written = /^(?:UPDATE|MODIFY)\s+([\w/]+)/i.exec(text)
-      || /^INSERT\s+(?:INTO\s+)?([\w/]+)/i.exec(text)
-      || /^DELETE\s+(?:FROM\s+)?([\w/]+)/i.exec(text);
-    if (written) table(written[1]);
+    const written = /^(UPDATE|MODIFY)\s+([\w/]+)/i.exec(text)
+      || /^(INSERT)\s+(?:INTO\s+)?([\w/]+)/i.exec(text)
+      || /^(DELETE)\s+(?:FROM\s+)?([\w/]+)/i.exec(text);
+    if (written) table(written[2], written[1].toLowerCase() as TableAccess);
     else if (/^(?:UPDATE|MODIFY|INSERT\s+INTO|DELETE\s+FROM)\s*\(/i.test(text)) {
       cannotName(statement, 'table', 'the table written to is in a variable');
     }
@@ -548,7 +560,7 @@ function scan(
     // TABLES declares a work area over a database table, and naming one is a
     // dependency on it even where nothing reads it in this source.
     const tablesStatement = /^TABLES\s+([\w/]+)/i.exec(text);
-    if (tablesStatement) add(statement, 'table', tablesStatement[1]);
+    if (tablesStatement) add(statement, 'table', tablesStatement[1], undefined, 'declare');
 
     // A type named in a declaration is a dependency without being a call:
     // TYPE zorders reaches the table whether or not this source ever selects
@@ -658,7 +670,9 @@ export interface CallTarget {
   kind: CallKind;
   calls: number;
   members?: string[];
-  places: Array<{ line: number; member?: string; statement: string; source?: string }>;
+  places: Array<{ line: number; member?: string; access?: TableAccess; statement: string; source?: string }>;
+  /** For a table: every kind of access the places make, writes first. */
+  access?: TableAccess[];
   /** Places beyond the listed ones. */
   morePlaces?: number;
 }
@@ -688,6 +702,7 @@ export function groupCalls(
     entry.places.push({
       line: call.line,
       ...(call.member ? { member: call.member } : {}),
+      ...(call.access ? { access: call.access } : {}),
       statement: shorten(call.statement),
       ...(call.source ? { source: call.source } : {})
     });
@@ -700,6 +715,8 @@ export function groupCalls(
   for (const entry of kept) {
     const members = [...new Set(entry.places.map(place => place.member).filter(Boolean))] as string[];
     if (members.length) entry.members = members.sort();
+    const accesses = [...new Set(entry.places.map(place => place.access).filter(Boolean))] as TableAccess[];
+    if (accesses.length) entry.access = accesses.sort((a, b) => Number(isTableWrite(b)) - Number(isTableWrite(a)) || a.localeCompare(b));
     if (entry.places.length > maxPlaces) {
       entry.morePlaces = entry.places.length - maxPlaces;
       entry.places = entry.places.slice(0, maxPlaces);

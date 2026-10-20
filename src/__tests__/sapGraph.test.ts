@@ -10,6 +10,8 @@ import { GraphExplorer } from '../lib/sapGraph/explore';
 import { methodBlock, blocksNaming, sourceUrlOf, linesNaming } from '../lib/sapGraph/source';
 import { graphFileFor, foreignLoad, startLoad, waitFor, closeGraphs, graphStore } from '../lib/sapGraph';
 import { fakeSql } from './helpers/fakeSql';
+import { extractCallsAcross, groupCalls } from '../lib/abapCalls';
+import { SourceSearchHandlers } from '../handlers/SourceSearchHandlers';
 import { graphTables, classInclude } from './helpers/graphFixture';
 
 const options = { prefixes: ['Z', 'Y'], languages: ['R', 'E'] };
@@ -380,6 +382,39 @@ describe('code of the places an answer points at', () => {
     expect(sourceUrlOf({ objectType: 'FUGR', object: 'ZFG', member: 'Z_FM_READ' })).toBe('/sap/bc/adt/functions/groups/zfg/fmodules/z_fm_read/source/main');
     expect(sourceUrlOf({ objectType: 'PROG', object: 'ZR_REP_F01', subc: 'I' })).toBe('/sap/bc/adt/programs/includes/zr_rep_f01/source/main');
     expect(sourceUrlOf({ objectType: 'PROG', object: '/ARM/R_X' })).toBe('/sap/bc/adt/programs/programs/%2Farm%2Fr_x/source/main');
+  });
+});
+
+describe('what a statement does to a table', () => {
+  const sites = (lines: string[]) =>
+    extractCallsAcross([{ name: 'X', source: lines.join('\n') }], { onlyCustom: false, kinds: ['table'] }).calls
+      .map(call => `${call.target}:${call.access}`);
+
+  it('tells reading from each way of writing, and leaves internal tables out', () => {
+    expect(sites([
+      'DATA lt_rows TYPE STANDARD TABLE OF ztab.',
+      'SELECT a~x FROM ztab AS a INNER JOIN ekko AS k ON k~ebeln = a~ebeln INTO TABLE @lt_rows.',
+      'INSERT ztab FROM TABLE lt_rows.',
+      'INSERT INTO zlog VALUES ls_log.',
+      'UPDATE ekko SET loekz = space WHERE ebeln = lv_ebeln.',
+      'MODIFY ztab FROM ls_row.',
+      'DELETE FROM zlog WHERE id = 1.',
+      'DELETE lt_rows WHERE x = 1.',
+      'MODIFY lt_rows FROM ls_row INDEX 1.',
+      'TABLES t001w.'
+    ])).toEqual(['ZTAB:read', 'EKKO:read', 'ZTAB:insert', 'ZLOG:insert', 'EKKO:update', 'ZTAB:modify', 'ZLOG:delete', 'T001W:declare']);
+  });
+
+  it('groups the accesses of a target with the writes first', () => {
+    const found = extractCallsAcross([{ name: 'X', source: 'SELECT * FROM ztab INTO TABLE @DATA(lt).\nMODIFY ztab FROM ls.' }], { kinds: ['table'] });
+    expect(groupCalls(found.calls).targets[0].access).toEqual(['modify', 'read']);
+  });
+});
+
+describe('findInSource without its address', () => {
+  it('names the argument it needs, and the one it was given instead', async () => {
+    await expect(new SourceSearchHandlers({} as any).handle('findInSource', { objectUrl: '/sap/bc/adt/oo/classes/zcl_x', pattern: 'x' }))
+      .rejects.toThrow(/needs objectSourceUrl.*passed as objectUrl/);
   });
 });
 

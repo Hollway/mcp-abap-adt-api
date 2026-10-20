@@ -41,6 +41,24 @@ WBCROSSGT and CROSS, updated on every activation and import.
   asked method or function module and the block (METHOD, FORM, MODULE,
   FUNCTION) around the reference in the first callers, not whole sources. A
   graph older than an hour is brought up to date first.
+- **`sapGraphExplore` with `tableAccess`** answers who writes a database
+  table - INSERT, UPDATE, MODIFY, DELETE, with the statement and its line -
+  who reads it and who only uses it as a type. The where-used index records
+  a table used in SQL as a type reference (SELECT ... JOIN zprices comes
+  out as TY ZPRICES), so it names every place that touches the table but
+  not what the place does; only those places are read and scanned - the
+  method a CMnnn include is, the function module, the program include. The
+  scan is kept per include with its change stamp: asked again, nothing is
+  read, and a changed include is scanned again. A standard table is used in
+  well over a thousand places (EKKO: 1,853 on the ERP system), so a call
+  scans at most `maxScan` (80, about ten seconds) and the next one goes on
+  where it stopped. A customer price table: ten places,
+  two writers, about a second. The call scanner itself (`callsFrom`) now says the
+  same of every table it finds: `access` read, insert, update, modify,
+  delete or declare.
+- `findInSource` and `sourceOutline` called without `objectSourceUrl` said
+  "Cannot read properties of undefined (reading 'match')"; they now name the
+  argument, and the one it was passed as instead.
 - Both are in the new group `sapGraph`, served by the `read`, `dev` and
   `graph` profiles. Neither changes the system.
 

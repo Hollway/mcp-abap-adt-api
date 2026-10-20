@@ -63,6 +63,7 @@ export function graphTables(): Tables {
       { OTYPE: 'TY', NAME: 'ZTAB', INCLUDE: 'ZR_REP_F01' },
       { OTYPE: 'ME', NAME: 'ZCL_B\\ME:EXECUTE', INCLUDE: 'LZFGU01' },
       { OTYPE: 'TY', NAME: 'ZTAB', INCLUDE: classInclude('ZCL_B', 'CM002') },
+      { OTYPE: 'TY', NAME: 'ZTAB', INCLUDE: classInclude('ZCL_B', 'CU') },
       { OTYPE: 'DA', NAME: 'ZCL_A\\ME:GET_BUKRS\\DA:IV_WERKS', INCLUDE: classInclude('ZCL_A', 'CM001') },
       { OTYPE: 'DA', NAME: 'ZCL_A\\DA:GC_PLANT', INCLUDE: classInclude('ZCL_B', 'CM001') },
       { OTYPE: 'ME', NAME: 'ZIF_C\\ME:DO', INCLUDE: classInclude('ZCL_B', 'CU') },
@@ -128,12 +129,20 @@ export const graphSources: Record<string, string> = {
     '    " get_bukrs in a comment is not a hit',
     '    DATA(lv_bukrs) = zcl_a=>get_bukrs( iv_werks = \'1000\' ).',
     '  ENDMETHOD.',
+    '  METHOD zif_c~do.',
+    '    DATA lt_rows TYPE STANDARD TABLE OF ztab.',
+    '    DELETE lt_rows WHERE kbetr = 0.',
+    '    MODIFY ztab FROM TABLE lt_rows.',
+    '  ENDMETHOD.',
     'ENDCLASS.'
   ].join('\n'),
   '/sap/bc/adt/programs/includes/zr_rep_f01/source/main': [
     '*&---- forms',
     'FORM read_data.',
     '  DATA(lv_bukrs) = zcl_a=>get_bukrs( p_werks ).',
+    'ENDFORM.',
+    'FORM read_prices.',
+    '  SELECT * FROM ztab INTO TABLE @DATA(lt_prices).',
     'ENDFORM.'
   ].join('\n')
 };

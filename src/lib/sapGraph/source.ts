@@ -130,15 +130,22 @@ function render(lines: string[], start: number, end: number, hits: number[], max
   return { code: out.join('\n'), omitted };
 }
 
-/** The implementation of one method in a class source, by name (interface methods as zif_x~meth). */
-export function methodBlock(source: string, method: string, maxLines = 150, target?: string): CodeBlock | undefined {
-  const lines = source.split(/\r?\n/);
+/** Where one method's implementation lies in a class source: 0-based first and last line. */
+export function methodLines(lines: string[], method: string): { from: number; to: number } | undefined {
   const start = new RegExp(`^\\s*METHOD\\s+${escapeRegex(method)}\\s*\\.`, 'i');
   const from = lines.findIndex(line => start.test(line));
   if (from < 0) return undefined;
   let to = from + 1;
   while (to < lines.length && !BLOCK_END.METHOD.test(lines[to])) to++;
-  if (to >= lines.length) to = lines.length - 1;
+  return { from, to: Math.min(to, lines.length - 1) };
+}
+
+/** The implementation of one method in a class source, by name (interface methods as zif_x~meth). */
+export function methodBlock(source: string, method: string, maxLines = 150, target?: string): CodeBlock | undefined {
+  const lines = source.split(/\r?\n/);
+  const range = methodLines(lines, method);
+  if (!range) return undefined;
+  const { from, to } = range;
   const hits = target ? linesNaming(lines, target).filter(line => line > from && line <= to) : [];
   const rendered = render(lines, from, to, hits, maxLines);
   return {

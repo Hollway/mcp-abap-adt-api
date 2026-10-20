@@ -128,9 +128,42 @@ describe('sapGraphSync and sapGraphExplore', () => {
     expect(answer.results[0].callers.map((caller: any) => caller.name)).toEqual(['ZCL_A=>RUN', 'ZCL_B=>EXECUTE']);
   });
 
+  it('tells who writes a table, who reads it and who only uses it as a type', async () => {
+    const { adt, read } = client();
+    const handlers = new SapGraphHandlers(adt);
+    await handlers.syncCore({ wait: 30 });
+    const answer: any = await handlers.exploreCore({ tableAccess: ['ztab'] });
+    const [result] = answer.tableAccess;
+    expect(result).toMatchObject({ table: 'ZTAB', candidates: 3, scannedNow: 2 });
+    expect(result.writers).toEqual([expect.objectContaining({
+      name: 'ZCL_B=>ZIF_C~DO', access: ['modify'],
+      places: [{ line: 9, access: 'modify', statement: 'MODIFY ztab FROM TABLE lt_rows' }]
+    })]);
+    expect(result.readers.map((user: any) => `${user.name}:${user.access}:${user.places[0].line}`)).toEqual(['ZR_REP_F01:read:6']);
+    expect(result.typeOnly).toEqual(['ZCL_B']);
+
+    // Asked again, nothing is read: the scans are kept until the include changes.
+    const before = read.length;
+    const again: any = await handlers.exploreCore({ tableAccess: ['ZTAB'] });
+    expect(again.tableAccess[0]).toMatchObject({ scannedNow: 0, fromCache: 2 });
+    expect(again.tableAccess[0].writers[0].name).toBe('ZCL_B=>ZIF_C~DO');
+    expect(read.length).toBe(before);
+  });
+
+  it('scans at most maxScan places a call and goes on from there the next time', async () => {
+    const handlers = new SapGraphHandlers(client().adt);
+    await handlers.syncCore({ wait: 30 });
+    const first: any = await handlers.exploreCore({ tableAccess: ['ZTAB'], maxScan: 1 });
+    expect(first.tableAccess[0]).toMatchObject({ scannedNow: 1, notScanned: 1 });
+    expect(first.tableAccess[0].hint).toMatch(/ask again/);
+    const second: any = await handlers.exploreCore({ tableAccess: ['ZTAB'], maxScan: 1 });
+    expect(second.tableAccess[0]).toMatchObject({ scannedNow: 1, fromCache: 1 });
+    expect(second.tableAccess[0].notScanned).toBe(0);
+  });
+
   it('refuses a question about nothing and a direction it does not know', async () => {
     const handlers = new SapGraphHandlers(client().adt);
-    await expect(handlers.exploreCore({})).rejects.toThrow(/names, search or usesAll/);
+    await expect(handlers.exploreCore({})).rejects.toThrow(/names, search, usesAll or tableAccess/);
     await expect(handlers.exploreCore({ names: ['ZCL_A'], direction: 'up' })).rejects.toThrow(/direction/);
     await expect(handlers.syncCore({ mode: 'all' })).rejects.toThrow(/mode/);
   });

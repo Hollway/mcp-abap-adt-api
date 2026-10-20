@@ -11,9 +11,11 @@ import {
 } from '../lib/sapGraph';
 import { GraphExplorer, GraphNode, CallerEntry, WalkEntry } from '../lib/sapGraph/explore';
 import { sourceUrlOf, methodBlock, blocksNaming, CodeBlock } from '../lib/sapGraph/source';
+import { tableAccess } from '../lib/sapGraph/tableAccess';
 
 const DEFAULT_MAX_RESULTS = 40;
 const DEFAULT_MAX_SOURCES = 5;
+const DEFAULT_MAX_SCAN = 80;
 const MAX_DEPTH = 4;
 const AUTO_REFRESH_WAIT_SECONDS = 20;
 /** Nodes a walk of several levels may visit before it stops. */
@@ -58,7 +60,7 @@ export class SapGraphHandlers extends BaseHandler {
       },
       {
         name: 'sapGraphExplore',
-        description: 'Ask the local SAP code graph (load it with sapGraphSync first) - the cheap first step of understanding code: who calls a method, function module, class, report or uses a table type; what it calls in turn, several levels deep; which objects and methods are described in given words (searching names and short texts, Russian or English - how to find logic that already exists before writing it again); and which code uses several things at once (usesAll - existing code built on the same pieces). Answers with the graph and the code of only the places it points at: the asked method or function module itself and the blocks of the first callers that make the reference, not whole sources. Grouped per calling method / function module / program include. Built from the where-used index of SAP, so it sees active code only, not dynamic calls (CALL METHOD (name), CALL FUNCTION lv_fm), and not database tables used in SELECT - use callsFrom on one object for those. A graph older than SAP_GRAPH_MAX_AGE_MIN minutes (default 60) is brought up to date first.',
+        description: 'Ask the local SAP code graph (load it with sapGraphSync first) - the cheap first step of understanding code: who calls a method, function module, class, report or uses a table type; what it calls in turn, several levels deep; which objects and methods are described in given words (searching names and short texts, Russian or English - how to find logic that already exists before writing it again); and which code uses several things at once (usesAll - existing code built on the same pieces). Answers with the graph and the code of only the places it points at: the asked method or function module itself and the blocks of the first callers that make the reference, not whole sources. Grouped per calling method / function module / program include. Built from the where-used index of SAP, so it sees active code only, not dynamic calls (CALL METHOD (name), CALL FUNCTION lv_fm), and tells what a place does with a database table only when asked with tableAccess (who writes, who reads it). A graph older than SAP_GRAPH_MAX_AGE_MIN minutes (default 60) is brought up to date first.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -69,7 +71,7 @@ export class SapGraphHandlers extends BaseHandler {
             },
             search: {
               type: 'string',
-              description: 'Words to find in names and short texts, e.g. "балансовая единица завод" or "price ozon". Every word matches as the start of a word; ё and е are the same.'
+              description: 'Words to find in names and short texts, e.g. "балансовая единица завод" or "price list". Every word matches as the start of a word; ё and е are the same.'
             },
             usesAll: {
               type: 'array',
@@ -113,6 +115,15 @@ export class SapGraphHandlers extends BaseHandler {
             refresh: {
               type: 'boolean',
               description: 'Bring an old graph up to date before answering. Default true.'
+            },
+            tableAccess: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Database tables (customer or standard, e.g. ZPRICES, EKKO) to answer who writes them (INSERT, UPDATE, MODIFY, DELETE - with the statement and line), who reads them (SELECT, JOIN) and who only uses them as a type. The places come from the where-used index, then only those places are read and scanned; what was scanned is kept until the include changes, so asking again is free and goes on where the last call stopped.'
+            },
+            maxScan: {
+              type: 'number',
+              description: `tableAccess: places to read and scan in this call, per table. Default ${DEFAULT_MAX_SCAN}; the answer says how many are left.`
             }
           }
         }
@@ -265,9 +276,13 @@ export class SapGraphHandlers extends BaseHandler {
     const names = this.names(args?.names, 'names');
     const usesAll = this.names(args?.usesAll, 'usesAll');
     const search = typeof args?.search === 'string' ? args.search.trim() : '';
-    if (names.length === 0 && usesAll.length === 0 && !search) {
-      throw new McpError(ErrorCode.InvalidParams, 'Ask about something: names, search or usesAll.');
+    const tables = this.names(args?.tableAccess, 'tableAccess').map(table => table.toUpperCase());
+    if (names.length === 0 && usesAll.length === 0 && !search && tables.length === 0) {
+      throw new McpError(ErrorCode.InvalidParams, 'Ask about something: names, search, usesAll or tableAccess.');
     }
+    const badTable = tables.find(table => !/^[A-Z0-9_/]{1,30}$/.test(table));
+    if (badTable) throw new McpError(ErrorCode.InvalidParams, `'${badTable}' is not a table name.`);
+    const maxScan = Math.max(0, Math.floor(Number(args?.maxScan ?? DEFAULT_MAX_SCAN)));
     const direction = String(args?.direction || 'callers').toLowerCase();
     if (!['callers', 'callees', 'both'].includes(direction)) {
       throw new McpError(ErrorCode.InvalidParams, `direction must be callers, callees or both, not '${args?.direction}'.`);
@@ -363,6 +378,32 @@ export class SapGraphHandlers extends BaseHandler {
       };
     }
 
+    if (tables.length > 0) {
+      const accessResults: Record<string, unknown>[] = [];
+      for (const table of tables.slice(0, 5)) {
+        const candidates = await this.tableCandidates(table);
+        const result = await tableAccess(table, candidates, {
+          store, explorer, read: url => this.read(url), prefixes: graphPrefixes()
+        }, maxScan);
+        accessResults.push(dropEmpty({
+          table: result.table,
+          candidates: result.candidates,
+          scannedNow: result.scannedNow,
+          fromCache: result.fromCache,
+          notScanned: result.notScanned,
+          ...(result.notScanned > 0 ? { hint: `${result.notScanned} place(s) not read yet - ask again to go on; what was read is kept.` } : {}),
+          writers: result.writers,
+          readerCount: result.readers.length,
+          readers: cut(result.readers, `readers of ${table}`),
+          typeOnlyCount: result.typeOnly.length,
+          typeOnly: cut(result.typeOnly, `type users of ${table}`).map(user => user.name),
+          failed: result.failed,
+          notCached: result.notCached
+        }));
+      }
+      answer.tableAccess = accessResults;
+    }
+
     if (search) {
       const found = explorer.search(search, Math.min(maxResults, 25));
       answer.search = {
@@ -417,6 +458,27 @@ export class SapGraphHandlers extends BaseHandler {
       out.push({ of: node.label, role: job.role, url, blocks });
     }
     return out;
+  }
+
+  /**
+   * The customer includes the where-used index names for a table - asked of
+   * SAP rather than of the graph, which keeps standard types out and may be
+   * an hour old. OTYPE and NAME lead the key, so this is an index lookup
+   * however large the table's use; the include patterns only filter what it
+   * found.
+   */
+  private async tableCandidates(table: string): Promise<string[]> {
+    const includes: string[] = [];
+    // One statement per prefix: a 30-character name and every pattern of two
+    // prefixes would not fit the 255 characters a statement may have.
+    for (const prefix of graphPrefixes()) {
+      const patterns = [`${prefix}%`, `L${prefix}%`, `SAPL${prefix}%`];
+      const sql = `SELECT include FROM wbcrossgt WHERE otype = 'TY' AND name = '${table}' AND ( ${patterns.map(pattern => `include LIKE '${pattern}'`).join(' OR ')} )`;
+      const payload: any = await this.queries.runQueryCore({ sqlQuery: sql, rowNumber: 100000 });
+      const values = Array.isArray(payload?.result?.values) ? payload.result.values : [];
+      includes.push(...values.map((row: any) => String(row.INCLUDE ?? row.include ?? '').trim()).filter(Boolean));
+    }
+    return includes;
   }
 
   private async read(url: string): Promise<string> {

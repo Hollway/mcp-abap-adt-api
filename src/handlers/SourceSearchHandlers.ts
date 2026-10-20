@@ -109,6 +109,18 @@ export class SourceSearchHandlers extends BaseHandler {
   }
 
   async handle(toolName: string, args: any): Promise<any> {
+    // Without it the library is handed undefined and answers "Cannot read
+    // properties of undefined (reading 'match')" - which says nothing about
+    // the argument that is missing. objectUrl and url are the names it was
+    // called with instead.
+    if (typeof args?.objectSourceUrl !== 'string' || args.objectSourceUrl.trim() === '') {
+      const given = ['objectUrl', 'url', 'sourceUrl'].find(name => typeof args?.[name] === 'string');
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `${toolName} needs objectSourceUrl, the source address (e.g. /sap/bc/adt/oo/classes/zcl_x/source/main)` +
+        (given ? ` - it was passed as ${given}.` : '.')
+      );
+    }
     switch (toolName) {
       case 'findInSource':
         return this.handleFindInSource(args);

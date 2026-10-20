@@ -58,6 +58,11 @@ CREATE INDEX IF NOT EXISTS members_member ON members(member);
 CREATE TABLE IF NOT EXISTS texts(
   object TEXT NOT NULL, member TEXT NOT NULL, lang TEXT NOT NULL, text TEXT NOT NULL,
   PRIMARY KEY(object, member, lang));
+CREATE TABLE IF NOT EXISTS scanned_includes(include TEXT PRIMARY KEY, stamp TEXT NOT NULL, scanned_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS table_sites(
+  include TEXT NOT NULL, tab TEXT NOT NULL, access TEXT NOT NULL, line INTEGER NOT NULL, statement TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS table_sites_tab ON table_sites(tab);
+CREATE INDEX IF NOT EXISTS table_sites_include ON table_sites(include);
 CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
   object UNINDEXED, object_type UNINDEXED, member UNINDEXED, words,
   tokenize = 'unicode61 remove_diacritics 2');
@@ -110,6 +115,17 @@ export interface TextRow {
   member: string;
   lang: string;
   text: string;
+}
+
+/** One statement that touches a database table, found by scanning the include. */
+export interface TableSiteRow {
+  include: string;
+  table: string;
+  /** read, insert, update, modify, delete, declare. */
+  access: string;
+  /** Line in the scanned source. */
+  line: number;
+  statement: string;
 }
 
 export interface SearchHit {
@@ -289,6 +305,59 @@ export class GraphStore {
       ? this.statement('SELECT COUNT(*) AS n FROM edges WHERE dst_obj = ? AND dst_member = ?').get(object, member)
       : this.statement('SELECT COUNT(*) AS n FROM edges WHERE dst_obj = ?').get(object);
     return Number(row?.n || 0);
+  }
+
+  /**
+   * The stamp an include was last scanned for table access at - compared with
+   * its current stamp, that says whether the cached sites still hold. The
+   * scans are kept apart from the load tables: a load does not clear them,
+   * since a scan stays true for as long as the include does not change.
+   */
+  scannedStamp(include: string): string | undefined {
+    const row: any = this.statement('SELECT stamp FROM scanned_includes WHERE include = ?').get(include);
+    return row?.stamp ?? undefined;
+  }
+
+  /** The table access sites found in the given includes, for one table. */
+  tableSites(table: string, includes: string[]): TableSiteRow[] {
+    if (includes.length === 0) return [];
+    const rows: TableSiteRow[] = [];
+    // A long IN list in slices: SQLite allows some thousands of parameters, not unlimited.
+    for (let start = 0; start < includes.length; start += 500) {
+      const slice = includes.slice(start, start + 500);
+      rows.push(...(this.statement(`SELECT include, tab, access, line, statement FROM table_sites WHERE tab = ? AND include IN (${placeholders(slice.length)})`)
+        .all(table, ...slice) as any[]).map(row => ({ include: row.include, table: row.tab, access: row.access, line: Number(row.line), statement: row.statement })));
+    }
+    return rows;
+  }
+
+  /**
+   * One include's scan, replacing the previous one. Written on the read
+   * connection: it is a few rows, and waiting for a load to commit (which
+   * holds the write lock for minutes) is what busy_timeout is not for - a
+   * scan that cannot be cached is still an answer, so a busy file is reported
+   * to the caller rather than waited on.
+   */
+  saveScan(include: string, stamp: string, sites: TableSiteRow[]): boolean {
+    try {
+      this.db.exec('PRAGMA busy_timeout = 200');
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.statement('DELETE FROM table_sites WHERE include = ?').run(include);
+        const insert = this.statement('INSERT INTO table_sites(include, tab, access, line, statement) VALUES (?, ?, ?, ?, ?)');
+        for (const site of sites) insert.run(include, site.table, site.access, site.line, site.statement);
+        this.statement('INSERT OR REPLACE INTO scanned_includes(include, stamp, scanned_at) VALUES (?, ?, ?)').run(include, stamp, new Date().toISOString());
+        this.db.exec('COMMIT');
+        return true;
+      } catch (error) {
+        try { this.db.exec('ROLLBACK'); } catch { /* nothing open */ }
+        throw error;
+      }
+    } catch {
+      return false;
+    } finally {
+      this.db.exec('PRAGMA busy_timeout = 10000');
+    }
   }
 
   /** A connection of its own for a load. */
