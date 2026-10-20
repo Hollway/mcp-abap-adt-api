@@ -8,6 +8,82 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.18.0] — a code graph of the system, kept on disk
+
+Chats about SAP tasks spend about two thirds of their tokens reading context,
+and over a third on `getObjectSource` alone. `impactOf`, `abapPath` and
+`abapGraph` answer who calls what by reading sources, again on every call,
+and keep nothing. SAP keeps the answer itself: the where-used index in
+WBCROSSGT and CROSS, updated on every activation and import.
+
+- **`sapGraphSync`** loads that index for the customer code of one system -
+  method calls, events, attributes and types (WBCROSSGT), function modules,
+  PERFORM, SUBMIT, transactions and messages (CROSS) - into a local SQLite
+  file, along with what turns an include into the method or function module
+  it belongs to (TMDIR, TFDIR), the includes of each program (D010INC), the
+  packages (TADIR), REPOSRC change stamps and the short texts of classes,
+  methods, function modules, programs, function groups and tables. A full
+  load reads everything; a delta reloads, whole, every object one of whose
+  includes changed since the newest change the graph has seen. The load runs
+  in the background and in one transaction: questions keep getting the
+  previous graph until it commits, and a failure leaves it as it was. One
+  load at a time per system, across processes - every chat runs its own
+  bridge on the same file - announced in a lock file with a heartbeat, so a
+  second one is told who is loading and how far it got.
+- **`sapGraphExplore`** answers from that file: who reaches a method, a
+  function module, a class, a report or a table type, grouped per calling
+  method, function module or program include, with packages and texts; what
+  it reaches in turn (a report through its includes), standard targets
+  counted apart; several levels deep, each entry saying the way it was
+  reached; which objects and methods are named or described in given words -
+  how to find logic that already exists before writing it again; and which
+  code uses several things at once (`usesAll`). It attaches the code of the
+  asked method or function module and the block (METHOD, FORM, MODULE,
+  FUNCTION) around the reference in the first callers, not whole sources. A
+  graph older than an hour is brought up to date first.
+- Both are in the new group `sapGraph`, served by the `read`, `dev` and
+  `graph` profiles. Neither changes the system.
+
+What the index records, as measured on the ERP system:
+
+- A reference is recorded by the include it sits in, never by its line; the
+  method is the include (CMnnn, numbered in base 36 against TMDIR's
+  decimal), the function module is Unn of the group (TFDIR). References from
+  the definition sections (CU, CO, CI) are declarations - ALIASES,
+  INTERFACES, REDEFINITION - and are left out of callers unless asked for.
+- The index is updated row by row: the rows of one include carry different
+  change dates. A removed reference therefore leaves nothing a date filter
+  could find, which is why a delta reloads changed objects whole; objects
+  deleted in SAP leave the graph only with the next full load.
+- Of 360,000 customer DA rows, 248,000 are a method's references to its own
+  parameters (`ZCL_X\ME:M\DA:P`); those, a program's locals (`\PR:`) and
+  standard types are not loaded.
+- One data preview call returned 213,699 rows in 38 seconds, with no gateway
+  timeout. The bridge's `offset` fetches offset+n rows and keeps the tail, so
+  the load pages by key instead: ordered by include, each page starting at
+  the last include of the previous one.
+
+- A DATS column reaches in-process callers of the data preview as a Date at
+  UTC midnight, not as eight digits; the first live load wrote its change
+  stamps from String() of it.
+
+On the ERP system a full load read 1.39 million rows in 91 calls and four to
+five minutes: 928,000 references, 122,000 includes, 62,000 methods and
+function modules, 65,000 texts, a 270 MB file. A delta with nothing to do
+took under a second. Who calls a much-used plant utility method came back in half a
+second as 96 methods, function modules and includes, with the method itself
+and the two first calling places, in 8,500 characters - `impactOf` answers
+the same question in about 22,000, without the code.
+
+The search folds ё into е and cuts Russian words back to what their forms
+share (цены, цен and ценам all start with цен), since the index tokenizer has
+no morphology. Hits are ordered by how many of the words they match, then
+code before data - bm25 alone preferred a dozen attributes called "Company
+code" to the class that works one out - then by how much the code base uses
+them. The graph needs Node 22.13 or newer for the built-in
+`node:sqlite`; it is loaded only when a graph tool is called, so the rest of
+the server still runs on an older Node.
+
 ## [1.17.0] — the descriptions of a class, an interface and their components
 
 A refactoring chat had to rename the descriptions of fourteen classes and an
