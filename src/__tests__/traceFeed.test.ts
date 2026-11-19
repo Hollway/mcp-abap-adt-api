@@ -14,7 +14,7 @@ import { TraceHandlers } from '../handlers/TraceHandlers';
 const FEED = `<?xml version="1.0" encoding="utf-8"?>
 <atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:trc="http://www.sap.com/adt/runtime/traces/abaptraces">
   <atom:author><atom:name>HOST</atom:name></atom:author>
-  <atom:contributor><atom:name>EUD</atom:name></atom:contributor>
+  <atom:contributor><atom:name>DEV</atom:name></atom:contributor>
   <atom:title>ABAP Traces</atom:title>
   <atom:updated>2026-09-10T11:34:29Z</atom:updated>
   <atom:entry xml:lang="RU">
@@ -33,7 +33,7 @@ const FEED = `<?xml version="1.0" encoding="utf-8"?>
       <trc:runtimeSystem>325</trc:runtimeSystem>
       <trc:runtimeDatabase>8117276</trc:runtimeDatabase>
       <trc:expiration>2026-10-08T11:34:31Z</trc:expiration>
-      <trc:system>EUD</trc:system>
+      <trc:system>DEV</trc:system>
       <trc:client>102</trc:client>
       <trc:isAggregated>true</trc:isAggregated>
       <trc:aggregationKind>byCallPosition</trc:aggregationKind>
@@ -54,7 +54,7 @@ const FEED = `<?xml version="1.0" encoding="utf-8"?>
       <trc:size>34</trc:size>
       <trc:runtime>5321045</trc:runtime>
       <trc:expiration>2026-10-07T14:37:46Z</trc:expiration>
-      <trc:system>EUD</trc:system>
+      <trc:system>DEV</trc:system>
       <trc:client>102</trc:client>
       <trc:isAggregated>true</trc:isAggregated>
       <trc:objectName></trc:objectName>

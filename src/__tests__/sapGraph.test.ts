@@ -82,7 +82,7 @@ describe('index names', () => {
 
 describe('search text', () => {
   it('folds ё and splits names into words', () => {
-    expect(normalizeText('Пересчёт ZCL_MM=>GET_BUKRS')).toBe('пересчет zcl mm get bukrs');
+    expect(normalizeText('Пересчёт ZCL_APP=>GET_BUKRS')).toBe('пересчет zcl app get bukrs');
   });
 
   it('quotes every word as a prefix term', () => {

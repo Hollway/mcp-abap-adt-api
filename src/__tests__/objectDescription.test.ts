@@ -9,7 +9,7 @@ import {
 } from '../lib/objectDescription';
 
 /**
- * The document is the one GET answered with, as EUD served it for a class: the
+ * The document is the one GET answered with, as DEV served it for a class: the
  * root element carries the description, the package is a child element, and
  * the rest (includes, links, syntax configuration) has to come back untouched
  * because UPDATE_METADATA reads more than the description out of it.

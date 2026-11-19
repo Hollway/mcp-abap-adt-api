@@ -92,7 +92,7 @@ describe('dumps without their pages', () => {
     id: `dump-${index}`,
     author: 'TESTER',
     type: 'E',
-    links: [{ href: `adt://EUD/dump/${index}` }],
+    links: [{ href: `adt://DEV/dump/${index}` }],
     categories: [
       { term: 'GETWA_NOT_ASSIGNED', label: 'ABAP runtime error' },
       { term: 'CL_SOMETHING=========CP', label: 'Terminated ABAP program' }

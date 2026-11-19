@@ -2,7 +2,7 @@
  * The short description of a class or an interface (SE24 "Description").
  *
  * The description is metadata, not source, so editObject never reaches it.
- * Measured on EUD before this existed: the only way left was an UPDATE on
+ * Measured on DEV before this existed: the only way left was an UPDATE on
  * SEOCLASSTX from a snippet, which bypasses the class builder: nothing is
  * registered in a transport, and SE80 went on showing the old text for a
  * while (SEOCLASSTX is buffered generically).

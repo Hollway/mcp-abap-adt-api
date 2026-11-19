@@ -1,7 +1,7 @@
 import { sessionLink } from '../lib/sessionId';
 
 /**
- * Measured against EUD: a live cookie decoded to
+ * Measured against DEV: a live cookie decoded to
  *   3E675D79E8FA97BC7B40B0BAEA737BF9 DB883C5FADA111F18000005056A2C8B3
  * and SECURITY_CONTEXT held a row whose LINK was the second half exactly,
  * while its ID - the first half - was already a different value, because SAP
