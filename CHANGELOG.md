@@ -8,6 +8,38 @@ the backend actually does — not what its documentation implies.
 The versions here are not published to a registry; the numbers track the work
 rather than a release.
 
+## [1.19.0] — who calls a FORM of a report
+
+Asked who calls `ZR_APP_INVOICE_LOAD=>CREATE_ITEMS`, `sapGraphExplore`
+answered with a method of a class that does not exist and no callers - while
+the report calls the form in one of its includes. The where-used index is not
+to blame for the first part and cannot help with the second: CROSS records
+`PERFORM` only when it names another program (`PERFORM form IN PROGRAM zother`).
+A report calling its own subroutine, which is nearly every call, is not
+recorded at all - on a large ERP system the index holds some forty such rows,
+every one of them named `?`.
+
+- **`REPORT=>FORM` is a subroutine.** A name whose owner is a report is taken
+  as one of its forms, not as a method of a class; `REPORT=>LCL_X=>METH` stays
+  a method of a local class.
+- **Its callers come from reading the report.** The graph knows which includes
+  make up the report (D010INC), so those - at most 60, the report first - are
+  read through the source cache and searched for `PERFORM form`. D010INC also
+  lists the sections of every class the report uses (`ZCL_X=====CU`) and
+  function group includes - 87 of the 121 rows of `ZR_APP_INVOICE_LOAD`;
+  no form of the report lives there, so only its own program includes are read
+  (34 of them, under two seconds, nothing the second time). Chains
+  (`PERFORM: a, form`) included, a comment or `IN PROGRAM` another report left
+  out. Each calling include comes with its lines, the block the call is made
+  from (`FORM other`, or the main code) and `found: scan`; calls from other
+  programs that the index does keep are listed beside them. The answer says
+  where the form is defined, attaches its `FORM ... ENDFORM` and the calling
+  blocks, and says plainly that these callers come from the code, not from
+  the index. A form that is in none of the includes is named as not found
+  instead of answered with zero callers.
+- **A bare form name is pointed to `REPORT=>FORM`** in the note on unknown
+  names.
+
 ## [1.18.0] — a code graph of the system, kept on disk
 
 Chats about SAP tasks spend about two thirds of their tokens reading context,

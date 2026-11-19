@@ -7,7 +7,8 @@ import {
 import { GraphStore } from '../lib/sapGraph/store';
 import { fullSync, deltaSync, batchedSql, ownerStatements, changeStamp } from '../lib/sapGraph/sync';
 import { GraphExplorer } from '../lib/sapGraph/explore';
-import { methodBlock, blocksNaming, sourceUrlOf, linesNaming } from '../lib/sapGraph/source';
+import { methodBlock, blocksNaming, sourceUrlOf, linesNaming, performLines, formLines } from '../lib/sapGraph/source';
+import { includesOfReport } from '../lib/sapGraph/formCalls';
 import { graphFileFor, foreignLoad, startLoad, waitFor, closeGraphs, graphStore } from '../lib/sapGraph';
 import { fakeSql } from './helpers/fakeSql';
 import { extractCallsAcross, groupCalls } from '../lib/abapCalls';
@@ -448,5 +449,36 @@ describe('one load at a time', () => {
     expect(await waitFor(first.job, 30)).toBe(true);
     expect(first.job.result?.mode).toBe('full');
     expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+});
+
+describe('the subroutines of a report', () => {
+  it('reads only the report and its own program includes, not the classes and function groups it uses', () => {
+    const rows: Record<string, { objectType: string }> = {
+      ZR_REP_F01: { objectType: 'PROG' },
+      [classInclude('ZCL_A', 'CU')]: { objectType: 'CLAS' },
+      LZFGU01: { objectType: 'FUGR' }
+    };
+    const store = {
+      includesOf: () => [classInclude('ZCL_A', 'CU'), 'ZR_REP_F01', 'LZFGU01', '<ICON>', 'ZR_REP_TOP', 'ZCL_UNKNOWN=========CP'],
+      includeRow: (include: string) => rows[include] as any
+    };
+    expect(includesOfReport(store, 'ZR_REP')).toEqual(['ZR_REP', 'ZR_REP_F01', 'ZR_REP_TOP']);
+  });
+
+  it('finds PERFORM of a form - chained, after other statements - and leaves comments and other programs out', () => {
+    const lines = [
+      'PERFORM read_data.',
+      '* PERFORM read_data.',
+      'IF x = 1. PERFORM read_data USING 1. ENDIF.',
+      'PERFORM: init, read_data.',
+      'PERFORM read_data IN PROGRAM zr_other.',
+      'PERFORM read_data IN PROGRAM zr_rep.',
+      'PERFORM read_data_old. " PERFORM read_data',
+      'FORM read_data.',
+      'ENDFORM.'
+    ];
+    expect(performLines(lines, 'READ_DATA', 'ZR_REP')).toEqual([0, 2, 3, 5]);
+    expect(formLines(lines, 'read_data')).toEqual({ from: 7, to: 8 });
   });
 });

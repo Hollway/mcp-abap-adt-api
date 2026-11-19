@@ -12,11 +12,14 @@ import {
 import { GraphExplorer, GraphNode, CallerEntry, WalkEntry } from '../lib/sapGraph/explore';
 import { sourceUrlOf, methodBlock, blocksNaming, CodeBlock } from '../lib/sapGraph/source';
 import { tableAccess } from '../lib/sapGraph/tableAccess';
+import { formCalls } from '../lib/sapGraph/formCalls';
 
 const DEFAULT_MAX_RESULTS = 40;
 const DEFAULT_MAX_SOURCES = 5;
 const DEFAULT_MAX_SCAN = 80;
 const MAX_DEPTH = 4;
+/** Includes of a report read to find who calls one of its FORMs. */
+const MAX_FORM_INCLUDES = 60;
 const AUTO_REFRESH_WAIT_SECONDS = 20;
 /** Nodes a walk of several levels may visit before it stops. */
 const WALK_BUDGET = 300;
@@ -60,14 +63,14 @@ export class SapGraphHandlers extends BaseHandler {
       },
       {
         name: 'sapGraphExplore',
-        description: 'Ask the local SAP code graph (load it with sapGraphSync first) - the cheap first step of understanding code: who calls a method, function module, class, report or uses a table type; what it calls in turn, several levels deep; which objects and methods are described in given words (searching names and short texts, Russian or English - how to find logic that already exists before writing it again); and which code uses several things at once (usesAll - existing code built on the same pieces). Answers with the graph and the code of only the places it points at: the asked method or function module itself and the blocks of the first callers that make the reference, not whole sources. Grouped per calling method / function module / program include. Built from the where-used index of SAP, so it sees active code only, not dynamic calls (CALL METHOD (name), CALL FUNCTION lv_fm), and tells what a place does with a database table only when asked with tableAccess (who writes, who reads it). A graph older than SAP_GRAPH_MAX_AGE_MIN minutes (default 60) is brought up to date first.',
+        description: 'Ask the local SAP code graph (load it with sapGraphSync first) - the cheap first step of understanding code: who calls a method, function module, class, report or uses a table type; what it calls in turn, several levels deep; which objects and methods are described in given words (searching names and short texts, Russian or English - how to find logic that already exists before writing it again); and which code uses several things at once (usesAll - existing code built on the same pieces). Answers with the graph and the code of only the places it points at: the asked method or function module itself and the blocks of the first callers that make the reference, not whole sources. Grouped per calling method / function module / program include. Built from the where-used index of SAP, so it sees active code only, not dynamic calls (CALL METHOD (name), CALL FUNCTION lv_fm), and tells who calls a report\'s own FORM only by reading the report\'s includes (asked as REPORT=>FORM: the index keeps PERFORM ... IN PROGRAM only). It tells what a place does with a database table only when asked with tableAccess (who writes, who reads it). A graph older than SAP_GRAPH_MAX_AGE_MIN minutes (default 60) is brought up to date first.',
         inputSchema: {
           type: 'object',
           properties: {
             names: {
               type: 'array',
               items: { type: 'string' },
-              description: 'What to ask about: ZCL_X=>METHOD (or ->), ZIF_X~METHOD, ZCL_X, Z_FUNCTION_MODULE, ZR_REPORT, ZTABLE, a unique bare method name, or a standard name the code calls (BAPI_PO_CREATE1, CL_GUI_ALV_GRID) to find who uses it.'
+              description: 'What to ask about: ZCL_X=>METHOD (or ->), ZIF_X~METHOD, ZCL_X, Z_FUNCTION_MODULE, ZR_REPORT, ZR_REPORT=>FORM_NAME (a subroutine of the report), ZTABLE, a unique bare method name, or a standard name the code calls (BAPI_PO_CREATE1, CL_GUI_ALV_GRID) to find who uses it.'
             },
             search: {
               type: 'string',
@@ -327,13 +330,19 @@ export class SapGraphHandlers extends BaseHandler {
       }
       if (resolved.unknown.length > 0) {
         answer.unknown = resolved.unknown;
-        answer.unknownNote = 'Not in the graph and not referenced by any customer code: a typo, an object outside Z*/Y*, or code the last load has not seen yet.';
+        answer.unknownNote = 'Not in the graph and not referenced by any customer code: a typo, an object outside Z*/Y*, or code the last load has not seen yet. '
+          + 'A subroutine (FORM) is not known by its bare name - ask REPORT=>FORM.';
       }
     }
 
     const results: Record<string, unknown>[] = [];
     const sourceJobs: { node: GraphNode | CallerEntry; target?: string; role: string }[] = [];
+    const formSources: Record<string, unknown>[] = [];
     for (const node of resolved.matched.slice(0, 5)) {
+      if (node.kind === 'form') {
+        results.push(await this.formResult(node, explorer, direction, depth, options, withSource ? maxSources : 0, formSources, cut));
+        continue;
+      }
       const result: Record<string, unknown> = { of: node.label };
       if (direction !== 'callees') {
         if (depth === 1) {
@@ -413,8 +422,9 @@ export class SapGraphHandlers extends BaseHandler {
       };
     }
 
-    if (withSource && sourceJobs.length > 0) {
-      answer.sources = await this.sources(sourceJobs, maxSources + 2);
+    if (withSource && (sourceJobs.length > 0 || formSources.length > 0)) {
+      const sources = [...formSources, ...(sourceJobs.length > 0 ? await this.sources(sourceJobs, maxSources + 2) : [])];
+      if (sources.length > 0) answer.sources = sources;
     }
 
     if (Object.keys(truncated).length > 0) {
@@ -423,6 +433,63 @@ export class SapGraphHandlers extends BaseHandler {
     }
     answer.graph = { lastSyncAt: store.meta('lastSyncAt'), ...(refreshed ? { refreshed } : {}) };
     return answer;
+  }
+
+  /**
+   * A report's subroutine: the index knows only PERFORM ... IN PROGRAM from
+   * other programs, so the report's own includes are read for PERFORM form.
+   */
+  private async formResult(
+    node: GraphNode,
+    explorer: GraphExplorer,
+    direction: string,
+    depth: number,
+    options: { kinds?: string[]; includeDeclarations: boolean; onlyCustom: boolean },
+    maxBlocks: number,
+    sources: Record<string, unknown>[],
+    cut: <T>(list: T[], key: string) => T[]
+  ): Promise<Record<string, unknown>> {
+    const program = node.object;
+    const form = node.member!;
+    const scan = await formCalls(program, form, { store: graphStore(this.file), read: url => this.read(url) }, {
+      maxIncludes: MAX_FORM_INCLUDES, maxBlocks
+    });
+    const result: Record<string, unknown> = { of: node.label, kind: 'form' };
+    result.definedIn = scan.definedIn ? `${scan.definedIn.include}:${scan.definedIn.line}` : undefined;
+    if (!scan.definedIn && scan.notScanned === 0 && scan.failed.length === 0) {
+      result.notFound = `No FORM ${form} in ${program} or its includes - a typo, or a subroutine of another program.`;
+    }
+    if (scan.definedIn?.block) {
+      sources.push({ of: node.label, role: 'asked', url: scan.definedIn.url, blocks: [scan.definedIn.block] });
+    }
+
+    if (direction !== 'callees') {
+      // From other programs: PERFORM form IN PROGRAM report, the one kind the index keeps.
+      const external = explorer.callers(node, options)
+        .filter(caller => !scan.sites.some(site => site.include === caller.include));
+      const scanned = options.kinds && !options.kinds.includes('perform') ? [] : scan.sites;
+      const callers = [
+        ...external.map(compactCaller),
+        ...scanned.map(site => ({
+          name: site.include, kind: 'include', programs: [program], kinds: ['perform'],
+          within: site.within, lines: site.lines, found: 'scan'
+        }))
+      ];
+      result.callerCount = callers.length;
+      result.callers = cut(callers, `callers of ${node.label}`);
+      if (depth > 1) result.depthNote = 'A FORM is answered one level deep: its callers come from reading the code, not from the graph.';
+      for (const site of scanned) {
+        if (site.blocks) sources.push({ of: site.include, role: `caller of ${node.label}`, url: site.url, blocks: site.blocks });
+      }
+    }
+    if (direction !== 'callers') {
+      result.calleesNote = 'What a FORM calls is not in the graph - read its code (attached as the asked source).';
+    }
+    result.scannedIncludes = scan.scanned;
+    if (scan.notScanned > 0) result.notScanned = `${scan.notScanned} include(s) over the limit of ${MAX_FORM_INCLUDES} were not read - search them with findInSource.`;
+    if (scan.failed.length > 0) result.failed = scan.failed;
+    result.note = 'Calls of a FORM from its own program are not in the SAP where-used index; they were found by reading the program and its includes (found: scan). PERFORM (name) and calls from other programs that name it dynamically are not seen.';
+    return dropEmpty(result);
   }
 
   /** The code each source job points at, read once per address. */

@@ -143,6 +143,17 @@ export const graphSources: Record<string, string> = {
     'ENDFORM.',
     'FORM read_prices.',
     '  SELECT * FROM ztab INTO TABLE @DATA(lt_prices).',
+    '  PERFORM read_data. " again',
     'ENDFORM.'
+  ].join('\n'),
+  '/sap/bc/adt/programs/programs/zr_rep/source/main': [
+    'REPORT zr_rep.',
+    '* PERFORM read_data.',
+    'START-OF-SELECTION.',
+    '  PERFORM read_data.',
+    '  PERFORM: read_prices, read_data.',
+    '  PERFORM read_data IN PROGRAM zr_other.',
+    '  PERFORM read_data_old. " PERFORM read_data',
+    '  INCLUDE zr_rep_f01.'
   ].join('\n')
 };

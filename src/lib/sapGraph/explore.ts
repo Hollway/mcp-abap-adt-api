@@ -12,7 +12,7 @@ import type { GraphStore, EdgeRow } from './store';
 
 export type NodeKind =
   | 'class' | 'interface' | 'method' | 'component' | 'function' | 'functionGroup' | 'program' | 'include'
-  | 'table' | 'type' | 'other' | 'external';
+  | 'form' | 'table' | 'type' | 'other' | 'external';
 
 /** One thing the graph can be asked about. */
 export interface GraphNode {
@@ -41,7 +41,7 @@ const OBJECT_KINDS: Record<string, NodeKind> = {
 };
 /** How much a search hit of each kind is worth when the words match equally: code before data. */
 const KIND_WEIGHT: Partial<Record<NodeKind, number>> = {
-  class: 3, interface: 3, method: 3, function: 3, program: 2, include: 2, functionGroup: 2, table: 1, type: 1, component: 0, other: 0
+  class: 3, interface: 3, method: 3, function: 3, program: 2, include: 2, form: 2, functionGroup: 2, table: 1, type: 1, component: 0, other: 0
 };
 const OBJECT_PREFERENCE = ['CLAS', 'INTF', 'PROG', 'FUGR', 'TABL', 'DDLS', 'VIEW', 'TTYP', 'DTEL', 'TRAN', 'MSAG'];
 
@@ -57,6 +57,15 @@ export class GraphExplorer {
     if (objectType === 'FUGR' && member) {
       return {
         label: member, kind: 'function', object, objectType, member, functionName: member,
+        package: this.store.packageOf(object), text: this.text(object, member)
+      };
+    }
+    // REPORT=>NAME is a subroutine of the report, unless the index knows the
+    // name as something else; REPORT=>LCL_X=>METH is a local class's method.
+    if (objectType === 'PROG' && member && !/=>|~/.test(member)
+      && !this.store.edgesTo(object, member).some(edge => edge.kind !== 'perform')) {
+      return {
+        label: `${object}=>${member}`, kind: 'form', object, objectType, member,
         package: this.store.packageOf(object), text: this.text(object, member)
       };
     }
@@ -97,7 +106,9 @@ export class GraphExplorer {
       if (split) {
         const { object, member } = split;
         const known = this.store.objectsNamed([object]);
-        const objectType = known.find(row => row.type === 'CLAS' || row.type === 'INTF')?.type || 'CLAS';
+        // A report's member is one of its subroutines: PROGRAM=>FORM.
+        const objectType = known.find(row => row.type === 'CLAS' || row.type === 'INTF')?.type
+          || (arrow && known.some(row => row.type === 'PROG') ? 'PROG' : 'CLAS');
         const node = this.nodeOf(objectType, object, member);
         if (known.length > 0 || this.store.usageCount(object, member) > 0 || this.store.membersNamed(member, object).length > 0) {
           result.matched.push(node);

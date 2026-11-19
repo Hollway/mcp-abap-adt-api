@@ -130,6 +130,57 @@ function render(lines: string[], start: number, end: number, hits: number[], max
   return { code: out.join('\n'), omitted };
 }
 
+/** A line without its end-of-line comment - a naive cut at the first quote, good enough to find a statement. */
+const codeOf = (line: string): string => (isComment(line) ? '' : line.replace(/".*$/, ''));
+
+/**
+ * The 0-based lines that call a subroutine of a report: PERFORM form, also
+ * in a chain (PERFORM: a, form) and with IN PROGRAM naming the report itself
+ * or a variable. A PERFORM form IN PROGRAM other reaches another report's
+ * subroutine and is left out.
+ */
+export function performLines(lines: string[], form: string, program: string): number[] {
+  const call = new RegExp(`(^|[\\s.:,])PERFORM\\s*(:\\s*(?:[A-Za-z0-9_/]+\\s*,\\s*)*)?${escapeRegex(form)}(?![A-Za-z0-9_/])`, 'i');
+  const elsewhere = /\bIN\s+PROGRAM\s+([A-Za-z0-9_/]+)/i;
+  const hits: number[] = [];
+  lines.forEach((line, index) => {
+    const code = codeOf(line);
+    if (!call.test(code)) return;
+    const target = elsewhere.exec(code);
+    if (target && target[1].toUpperCase() !== program.toUpperCase()) return;
+    hits.push(index);
+  });
+  return hits;
+}
+
+/** Where a subroutine is defined: 0-based FORM and ENDFORM lines. */
+export function formLines(lines: string[], form: string): { from: number; to: number } | undefined {
+  const start = new RegExp(`^\\s*FORM\\s+${escapeRegex(form)}(?![A-Za-z0-9_/])`, 'i');
+  const from = lines.findIndex(line => start.test(line));
+  if (from < 0) return undefined;
+  let to = from + 1;
+  while (to < lines.length && !BLOCK_END.FORM.test(lines[to])) to++;
+  return { from, to: Math.min(to, lines.length - 1) };
+}
+
+/** The FORM ... ENDFORM block of one subroutine. */
+export function formBlock(lines: string[], form: string, maxLines = 150): CodeBlock | undefined {
+  const range = formLines(lines, form);
+  if (!range) return undefined;
+  return {
+    title: `FORM ${form.toLowerCase()}`,
+    from: range.from + 1,
+    to: range.to + 1,
+    hits: [],
+    ...render(lines, range.from, range.to, [], maxLines)
+  };
+}
+
+/** The name of the block (FORM, METHOD, MODULE, FUNCTION) a 0-based line lies in. */
+export function blockTitleAt(lines: string[], index: number): string | undefined {
+  return enclosing(lines, index)?.title;
+}
+
 /** Where one method's implementation lies in a class source: 0-based first and last line. */
 export function methodLines(lines: string[], method: string): { from: number; to: number } | undefined {
   const start = new RegExp(`^\\s*METHOD\\s+${escapeRegex(method)}\\s*\\.`, 'i');
@@ -163,7 +214,11 @@ export function methodBlock(source: string, method: string, maxLines = 150, targ
  */
 export function blocksNaming(source: string, target: string, maxBlocks = 3, maxLines = 80): CodeBlock[] {
   const lines = source.split(/\r?\n/);
-  const hits = linesNaming(lines, target);
+  return blocksAt(lines, linesNaming(lines, target), maxBlocks, maxLines);
+}
+
+/** The blocks around given 0-based lines, each enclosing block once. */
+export function blocksAt(lines: string[], hits: number[], maxBlocks = 3, maxLines = 80): CodeBlock[] {
   const blocks: CodeBlock[] = [];
   const covered = new Set<number>();
   for (const hit of hits) {

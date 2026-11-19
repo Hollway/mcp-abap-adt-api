@@ -161,6 +161,42 @@ describe('sapGraphSync and sapGraphExplore', () => {
     expect(second.tableAccess[0].notScanned).toBe(0);
   });
 
+  it('answers who calls a FORM of a report by reading the report and its includes', async () => {
+    sourceCache.clear();
+    const handlers = new SapGraphHandlers(client().adt);
+    await handlers.syncCore({ wait: 30 });
+    const answer: any = await handlers.exploreCore({ names: ['zr_rep=>read_data'] });
+
+    expect(answer.matched[0]).toMatchObject({ name: 'ZR_REP=>READ_DATA', kind: 'form' });
+    const [result] = answer.results;
+    expect(result).toMatchObject({ of: 'ZR_REP=>READ_DATA', kind: 'form', definedIn: 'ZR_REP_F01:2', scannedIncludes: 2, callerCount: 2 });
+    expect(result.callers).toEqual([
+      { name: 'ZR_REP', kind: 'include', programs: ['ZR_REP'], kinds: ['perform'], within: ['main code'], lines: [4, 5], found: 'scan' },
+      { name: 'ZR_REP_F01', kind: 'include', programs: ['ZR_REP'], kinds: ['perform'], within: ['FORM read_prices'], lines: [7], found: 'scan' }
+    ]);
+    expect(result.note).toMatch(/not in the SAP where-used index/);
+    expect(answer.sources.map((source: any) => `${source.role}|${source.of}|${source.blocks[0].title}`)).toEqual([
+      'asked|ZR_REP=>READ_DATA|FORM read_data',
+      'caller of ZR_REP=>READ_DATA|ZR_REP|lines',
+      'caller of ZR_REP=>READ_DATA|ZR_REP_F01|FORM read_prices'
+    ]);
+  });
+
+  it('keeps a local class method a method, says a missing FORM is missing, and points a bare FORM name to REPORT=>FORM', async () => {
+    const handlers = new SapGraphHandlers(client().adt);
+    await handlers.syncCore({ wait: 30 });
+    const local: any = await handlers.exploreCore({ names: ['ZR_REP=>LCL_APP=>RUN'], withSource: false });
+    expect(local.matched[0].kind).toBe('method');
+
+    const missing: any = await handlers.exploreCore({ names: ['ZR_REP=>NO_SUCH_FORM'], withSource: false });
+    expect(missing.results[0]).toMatchObject({ kind: 'form', callerCount: 0 });
+    expect(missing.results[0].notFound).toMatch(/No FORM NO_SUCH_FORM in ZR_REP/);
+
+    const bare: any = await handlers.exploreCore({ names: ['READ_PRICES'], withSource: false });
+    expect(bare.unknown).toEqual(['READ_PRICES']);
+    expect(bare.unknownNote).toMatch(/REPORT=>FORM/);
+  });
+
   it('refuses a question about nothing and a direction it does not know', async () => {
     const handlers = new SapGraphHandlers(client().adt);
     await expect(handlers.exploreCore({})).rejects.toThrow(/names, search, usesAll or tableAccess/);
